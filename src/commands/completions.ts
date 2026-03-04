@@ -1,0 +1,274 @@
+import type { Command } from "commander";
+
+interface OptionInfo {
+  short?: string;
+  long?: string;
+  description: string;
+}
+
+interface CommandInfo {
+  name: string;
+  aliases: string[];
+  description: string;
+  options: OptionInfo[];
+}
+
+function getCommands(program: Command): CommandInfo[] {
+  return program.commands.map((cmd) => ({
+    name: cmd.name(),
+    aliases: cmd.aliases(),
+    description: cmd.description(),
+    options: cmd.options.map((opt) => ({
+      short: opt.short?.replace(/^-/, "") || undefined,
+      long: opt.long?.replace(/^--/, "") || undefined,
+      description: opt.description,
+    })),
+  }));
+}
+
+function getGlobalOptions(program: Command): OptionInfo[] {
+  return program.options.map((opt) => ({
+    short: opt.short?.replace(/^-/, "") || undefined,
+    long: opt.long?.replace(/^--/, "") || undefined,
+    description: opt.description,
+  }));
+}
+
+function optionFlag(opt: OptionInfo): string {
+  return opt.long ? `--${opt.long}` : `-${opt.short}`;
+}
+
+function generateBash(program: Command): string {
+  const commands = getCommands(program);
+  const globalOpts = getGlobalOptions(program);
+
+  const cmdNames = commands
+    .flatMap((c) => [c.name, ...c.aliases])
+    .join(" ");
+
+  const globalFlags = globalOpts
+    .map((o) => optionFlag(o))
+    .join(" ");
+
+  const caseClauses = commands
+    .map((cmd) => {
+      const names = [cmd.name, ...cmd.aliases];
+      const opts = cmd.options.map((o) => optionFlag(o)).join(" ");
+      return names.map((n) => `        ${n}) opts="${opts}" ;;`).join("\n");
+    })
+    .join("\n");
+
+  // Check for subcommands (e.g. app-password list|add|revoke)
+  const subcommandClauses = commands
+    .filter((cmd) => {
+      // Find commands registered on the program that themselves have subcommands
+      const programCmd = program.commands.find((c) => c.name() === cmd.name);
+      return programCmd && programCmd.commands.length > 0;
+    })
+    .map((cmd) => {
+      const programCmd = program.commands.find((c) => c.name() === cmd.name)!;
+      const subNames = programCmd.commands.map((sub) => sub.name()).join(" ");
+      return `        ${cmd.name}) opts="${subNames}" ;;`;
+    })
+    .join("\n");
+
+  return `#!/bin/bash
+
+_bsky_completions() {
+    local cur prev commands global_opts opts
+    COMPREPLY=()
+    cur="\${COMP_WORDS[COMP_CWORD]}"
+    prev="\${COMP_WORDS[COMP_CWORD-1]}"
+    commands="${cmdNames}"
+    global_opts="${globalFlags} --help --version"
+
+    if [[ \${COMP_CWORD} -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "\${commands} \${global_opts}" -- "\${cur}") )
+        return 0
+    fi
+
+    case "\${COMP_WORDS[1]}" in
+${caseClauses}
+${subcommandClauses}
+        *) opts="" ;;
+    esac
+
+    COMPREPLY=( $(compgen -W "\${opts} --help" -- "\${cur}") )
+    return 0
+}
+
+complete -F _bsky_completions bsky
+`;
+}
+
+function generateZsh(program: Command): string {
+  const commands = getCommands(program);
+  const globalOpts = getGlobalOptions(program);
+
+  const cmdList = commands
+    .map((c) => {
+      const desc = c.description.replace(/'/g, "'\\''");
+      return `        '${c.name}:${desc}'`;
+    })
+    .join("\n");
+
+  const globalOptsList = globalOpts
+    .map((o) => {
+      const desc = o.description.replace(/'/g, "'\\''");
+      return `        '${optionFlag(o)}[${desc}]'`;
+    })
+    .join("\n");
+
+  const subcmdFunctions = commands
+    .map((cmd) => {
+      const opts = cmd.options
+        .map((o) => {
+          const desc = o.description.replace(/'/g, "'\\''");
+          return `            '${optionFlag(o)}[${desc}]'`;
+        })
+        .join("\n");
+
+      // Check for nested subcommands
+      const programCmd = program.commands.find((c) => c.name() === cmd.name);
+      const subCommands = programCmd?.commands ?? [];
+
+      if (subCommands.length > 0) {
+        const subList = subCommands
+          .map((sub) => {
+            const desc = sub.description().replace(/'/g, "'\\''");
+            return `            '${sub.name()}:${desc}'`;
+          })
+          .join("\n");
+        return `    ${cmd.name})
+        local -a subcommands
+        subcommands=(
+${subList}
+        )
+        _describe 'subcommand' subcommands
+        ;;`;
+      }
+
+      if (!opts) return `    ${cmd.name}) ;;`;
+      return `    ${cmd.name})
+        _arguments \\
+${opts}
+        ;;`;
+    })
+    .join("\n");
+
+  return `#compdef bsky
+
+_bsky() {
+    local -a commands
+    commands=(
+${cmdList}
+    )
+
+    _arguments \\
+${globalOptsList} \\
+        '1:command:->command' \\
+        '*::arg:->args'
+
+    case \$state in
+    command)
+        _describe 'command' commands
+        ;;
+    args)
+        case \$words[1] in
+${subcmdFunctions}
+        esac
+        ;;
+    esac
+}
+
+_bsky "$@"
+`;
+}
+
+function generateFish(program: Command): string {
+  const commands = getCommands(program);
+  const globalOpts = getGlobalOptions(program);
+
+  const lines: string[] = [
+    "# Fish completions for bsky",
+    "# Generated by: bsky completions fish",
+    "",
+    "# Disable file completions by default",
+    "complete -c bsky -f",
+    "",
+  ];
+
+  // Global options
+  for (const opt of globalOpts) {
+    const desc = opt.description.replace(/'/g, "\\'");
+    const parts = [`complete -c bsky -n '__fish_use_subcommand'`];
+    if (opt.long) parts.push(`-l ${opt.long}`);
+    if (opt.short) parts.push(`-s ${opt.short}`);
+    parts.push(`-d '${desc}'`);
+    lines.push(parts.join(" "));
+  }
+
+  lines.push("");
+
+  // Subcommands
+  for (const cmd of commands) {
+    const desc = cmd.description.replace(/'/g, "\\'");
+    lines.push(
+      `complete -c bsky -n '__fish_use_subcommand' -a ${cmd.name} -d '${desc}'`,
+    );
+    for (const alias of cmd.aliases) {
+      lines.push(
+        `complete -c bsky -n '__fish_use_subcommand' -a ${alias} -d '${desc}'`,
+      );
+    }
+
+    // Command-specific options
+    for (const opt of cmd.options) {
+      const optDesc = opt.description.replace(/'/g, "\\'");
+      const parts = [`complete -c bsky -n '__fish_seen_subcommand_from ${cmd.name}'`];
+      if (opt.long) parts.push(`-l ${opt.long}`);
+      if (opt.short) parts.push(`-s ${opt.short}`);
+      parts.push(`-d '${optDesc}'`);
+      lines.push(parts.join(" "));
+    }
+
+    // Nested subcommands
+    const programCmd = program.commands.find((c) => c.name() === cmd.name);
+    if (programCmd && programCmd.commands.length > 0) {
+      for (const sub of programCmd.commands) {
+        const subDesc = sub.description().replace(/'/g, "\\'");
+        lines.push(
+          `complete -c bsky -n '__fish_seen_subcommand_from ${cmd.name}' -a ${sub.name()} -d '${subDesc}'`,
+        );
+      }
+    }
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+export function registerCompletions(program: Command): void {
+  program
+    .command("completions")
+    .description("Generate shell completion script")
+    .argument("<shell>", "Shell type: bash, zsh, or fish")
+    .action((shell: string) => {
+      switch (shell) {
+        case "bash":
+          process.stdout.write(generateBash(program));
+          break;
+        case "zsh":
+          process.stdout.write(generateZsh(program));
+          break;
+        case "fish":
+          process.stdout.write(generateFish(program));
+          break;
+        default:
+          console.error(
+            `Unknown shell: ${shell}. Supported: bash, zsh, fish`,
+          );
+          process.exit(1);
+      }
+    });
+}

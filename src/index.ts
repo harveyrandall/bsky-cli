@@ -28,6 +28,7 @@ import { registerNotifs } from "./commands/notification.js";
 import { registerReport, registerModList } from "./commands/moderation.js";
 import { registerAppPassword } from "./commands/password.js";
 import { registerInviteCodes } from "./commands/invite.js";
+import { registerCompletions } from "./commands/completions.js";
 import type { AtpAgent } from "@atproto/api";
 import type { Config } from "./lib/types.js";
 
@@ -89,6 +90,7 @@ registerReport(program);
 registerModList(program);
 registerAppPassword(program);
 registerInviteCodes(program);
+registerCompletions(program);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err.message ?? err);
