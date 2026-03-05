@@ -26,6 +26,7 @@ import {
 } from "@/commands/profile";
 import { registerNotifs } from "@/commands/notification";
 import { registerReport, registerModList } from "@/commands/moderation";
+import { registerBookmarks } from "@/commands/bookmark";
 import { registerAppPassword } from "@/commands/password";
 import { registerInviteCodes } from "@/commands/invite";
 import { registerCompletions } from "@/commands/completions";
@@ -92,6 +93,7 @@ registerSession(program);
 registerNotifs(program);
 registerReport(program);
 registerModList(program);
+registerBookmarks(program);
 registerAppPassword(program);
 registerInviteCodes(program);
 registerCompletions(program);
