@@ -182,7 +182,7 @@ describe("stream command", () => {
   // Fire-and-forget parseAsync (it awaits forever), wait for WS to connect
   async function startStream(
     args: string[] = ["stream"],
-  ): Promise<MockWebSocket> {
+  ): Promise<InstanceType<typeof MockWebSocket>> {
     const program = new Command();
     program.option("--json", "Output as JSON");
     program.option("-p, --profile <name>", "Profile name");
