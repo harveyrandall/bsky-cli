@@ -54,6 +54,20 @@ export function formatTime(dateStr: string): string {
   return date.toISOString();
 }
 
+export function printStreamPost(
+  did: string,
+  handle: string | null,
+  text: string,
+  rkey: string,
+  collection: string,
+): void {
+  const author = handle ?? did;
+  process.stdout.write(chalk.redBright(author));
+  console.log(`: ${text}`);
+  console.log(`  at://${did}/${collection}/${rkey}`);
+  console.log();
+}
+
 export function outputJson(data: unknown): void {
   console.log(JSON.stringify(data));
 }
