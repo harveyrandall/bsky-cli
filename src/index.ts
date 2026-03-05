@@ -18,7 +18,7 @@ import {
   registerBlocks,
   registerMute,
 } from "@/commands/social";
-import { registerSearch, registerSearchActors } from "@/commands/search";
+import { registerSearch, registerSearchUsers } from "@/commands/search";
 import {
   registerProfile,
   registerProfileUpdate,
@@ -81,7 +81,7 @@ registerUnblock(program);
 registerBlocks(program);
 registerMute(program);
 registerSearch(program);
-registerSearchActors(program);
+registerSearchUsers(program);
 registerProfile(program);
 registerProfileUpdate(program);
 registerSession(program);

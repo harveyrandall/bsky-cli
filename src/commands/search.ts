@@ -54,9 +54,9 @@ export function registerSearch(program: Command): void {
     });
 }
 
-export function registerSearchActors(program: Command): void {
+export function registerSearchUsers(program: Command): void {
   program
-    .command("search-actors")
+    .command("search-users")
     .description("Search for users")
     .argument("<terms...>", "Search terms")
     .option("-n <count>", "Number of results", "100")
