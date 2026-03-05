@@ -1,9 +1,11 @@
 import type { Command } from "commander";
 import type { AppBskyFeedDefs, AppBskyFeedPost } from "@atproto/api";
 import { getClient, isJson } from "@/index";
-import { printPost, outputJson } from "@/lib/format";
-import { loadConfig } from "@/config";
+import { printPost, printStreamPost, outputJson } from "@/lib/format";
+import type { JetstreamCommitEvent, JetstreamEvent } from "@/lib/types";
 import WebSocket from "ws";
+
+const DEFAULT_JETSTREAM = "wss://jetstream1.us-east.bsky.network/subscribe";
 
 export function registerTimeline(program: Command): void {
   program
@@ -69,67 +71,103 @@ export function registerTimeline(program: Command): void {
 export function registerStream(program: Command): void {
   program
     .command("stream")
-    .description("Show timeline as stream")
-    .option("--cursor <cursor>", "Cursor position")
-    .option("-H, --handle <handle>", "User handle filter")
-    .option("--pattern <regex>", "Filter pattern")
-    .option("--reply <text>", "Auto-reply text")
+    .description("Stream live posts from the network")
+    .option("--cursor <cursor>", "Resume cursor (Unix microseconds)")
+    .option("-H, --handle <handle>", "Filter to a specific user")
+    .option("--pattern <regex>", "Filter post text by regex")
+    .option("--jetstream <url>", "Override Jetstream endpoint")
     .action(
       async (opts: {
         cursor?: string;
         handle?: string;
         pattern?: string;
-        reply?: string;
+        jetstream?: string;
       }) => {
-        const globalOpts = program.opts();
-        const config = await loadConfig(globalOpts.profile);
         const json = isJson(program);
 
-        let host = config.bgs || config.host;
-        const wsUrl = new URL(host);
-        wsUrl.protocol = "wss:";
-        wsUrl.pathname = "/xrpc/com.atproto.sync.subscribeRepos";
+        // Build Jetstream URL
+        const wsUrl = new URL(opts.jetstream ?? DEFAULT_JETSTREAM);
+        wsUrl.searchParams.set("wantedCollections", "app.bsky.feed.post");
+
+        // Resolve --handle to DID for server-side filtering
+        let filterHandle: string | null = null;
+        if (opts.handle) {
+          const agent = await getClient(program);
+          if (opts.handle === "self") {
+            wsUrl.searchParams.set("wantedDids", agent.session!.did);
+            filterHandle = agent.session!.handle;
+          } else if (opts.handle.startsWith("did:")) {
+            wsUrl.searchParams.set("wantedDids", opts.handle);
+          } else {
+            const profile = await agent.getProfile({ actor: opts.handle });
+            wsUrl.searchParams.set("wantedDids", profile.data.did);
+            filterHandle = opts.handle;
+          }
+        }
+
         if (opts.cursor) {
           wsUrl.searchParams.set("cursor", opts.cursor);
         }
 
         const re = opts.pattern ? new RegExp(opts.pattern) : null;
+        let lastCursor = "";
 
         const ws = new WebSocket(wsUrl.toString());
 
         process.on("SIGINT", () => {
+          if (lastCursor) {
+            console.error(`\nCursor: ${lastCursor}`);
+          }
           ws.close();
           process.exit(0);
         });
 
-        ws.on("message", async (data: Buffer) => {
+        ws.on("message", (data: Buffer) => {
           try {
-            // The firehose sends CBOR-encoded frames
-            // For a full implementation, we'd need @atproto/common for CBOR decoding
-            // For now, we attempt to extract post text from the binary data
-            const text = data.toString("utf-8");
+            const event = JSON.parse(data.toString()) as JetstreamEvent;
+            lastCursor = String(event.time_us);
 
-            if (json) {
-              // Output raw frame as base64 for JSON mode
-              outputJson({
-                type: "frame",
-                data: data.toString("base64"),
-              });
-            }
+            // Only process commit events
+            if (event.kind !== "commit") return;
 
+            const commit = (event as JetstreamCommitEvent).commit;
+
+            // Only process new posts
+            if (commit.operation !== "create") return;
+            if (commit.collection !== "app.bsky.feed.post") return;
+
+            const text = commit.record?.text;
+            if (!text) return;
+
+            // Apply regex filter
             if (re && !re.test(text)) return;
 
-            // If we need full post rendering, we'd decode CBOR here
-            // This is a simplified version - full implementation requires
-            // cbor-x or @ipld/dag-cbor for proper CBOR/CAR decoding
+            if (json) {
+              outputJson(event);
+            } else {
+              printStreamPost(
+                event.did,
+                filterHandle,
+                text,
+                commit.rkey,
+                commit.collection,
+              );
+            }
           } catch {
-            // Skip malformed frames
+            // Skip malformed messages
           }
         });
 
-        ws.on("error", (err) => {
+        ws.on("error", (err: Error) => {
           console.error("WebSocket error:", err.message);
           process.exit(1);
+        });
+
+        ws.on("close", () => {
+          if (lastCursor) {
+            console.error(`Cursor: ${lastCursor}`);
+          }
+          process.exit(0);
         });
 
         // Keep process alive
