@@ -10,6 +10,9 @@
     "dev": "tsx src/index.ts",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "link:global": "yarn build && npm link",
     "unlink:global": "npm unlink -g bsky-cli"
   },
@@ -30,6 +33,7 @@
     "@types/ws": "^8",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   }
 }
