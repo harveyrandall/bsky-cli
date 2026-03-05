@@ -9,7 +9,9 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsup",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "link:global": "yarn build && npm link",
+    "unlink:global": "npm unlink -g bsky-cli"
   },
   "engines": {
     "node": ">=22"
