@@ -95,6 +95,14 @@ bsky repost <uri...>
 bsky reposts <uri>
 ```
 
+### Bookmarks
+
+```
+bsky bookmarks create <uri...>
+bsky bookmarks delete <uri...>
+bsky bookmarks get [-n count]
+```
+
 ### Social
 
 ```

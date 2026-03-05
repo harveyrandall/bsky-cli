@@ -26,6 +26,7 @@ import {
 } from "@/commands/profile";
 import { registerNotifs } from "@/commands/notification";
 import { registerReport, registerModList } from "@/commands/moderation";
+import { registerBookmarks } from "@/commands/bookmark";
 import { registerAppPassword } from "@/commands/password";
 import { registerInviteCodes } from "@/commands/invite";
 import { registerCompletions } from "@/commands/completions";
@@ -37,7 +38,7 @@ const program = new Command();
 program
   .name("bsky")
   .description("A CLI client for Bluesky")
-  .version("0.2.0")
+  .version("0.3.0")
   .option("--json", "Output as JSON")
   .option("-p, --profile <name>", "Profile name")
   .option("-v, --verbose", "Verbose output");
@@ -92,6 +93,7 @@ registerSession(program);
 registerNotifs(program);
 registerReport(program);
 registerModList(program);
+registerBookmarks(program);
 registerAppPassword(program);
 registerInviteCodes(program);
 registerCompletions(program);
