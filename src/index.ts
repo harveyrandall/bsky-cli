@@ -1,13 +1,13 @@
 import { Command } from "commander";
-import { loadConfig } from "./config.js";
-import { createClient } from "./client.js";
-import { registerLogin } from "./commands/login.js";
-import { registerTimeline, registerStream } from "./commands/timeline.js";
-import { registerThread } from "./commands/thread.js";
-import { registerPost, registerReply, registerQuote } from "./commands/post.js";
-import { registerDelete } from "./commands/delete.js";
-import { registerLike, registerLikes } from "./commands/like.js";
-import { registerRepost, registerReposts } from "./commands/repost.js";
+import { loadConfig } from "@/config";
+import { createClient } from "@/client";
+import { registerLogin } from "@/commands/login";
+import { registerTimeline, registerStream } from "@/commands/timeline";
+import { registerThread } from "@/commands/thread";
+import { registerPost, registerReply, registerQuote } from "@/commands/post";
+import { registerDelete } from "@/commands/delete";
+import { registerLike, registerLikes } from "@/commands/like";
+import { registerRepost, registerReposts } from "@/commands/repost";
 import {
   registerFollow,
   registerUnfollow,
@@ -17,20 +17,20 @@ import {
   registerUnblock,
   registerBlocks,
   registerMute,
-} from "./commands/social.js";
-import { registerSearch, registerSearchActors } from "./commands/search.js";
+} from "@/commands/social";
+import { registerSearch, registerSearchActors } from "@/commands/search";
 import {
   registerProfile,
   registerProfileUpdate,
   registerSession,
-} from "./commands/profile.js";
-import { registerNotifs } from "./commands/notification.js";
-import { registerReport, registerModList } from "./commands/moderation.js";
-import { registerAppPassword } from "./commands/password.js";
-import { registerInviteCodes } from "./commands/invite.js";
-import { registerCompletions } from "./commands/completions.js";
+} from "@/commands/profile";
+import { registerNotifs } from "@/commands/notification";
+import { registerReport, registerModList } from "@/commands/moderation";
+import { registerAppPassword } from "@/commands/password";
+import { registerInviteCodes } from "@/commands/invite";
+import { registerCompletions } from "@/commands/completions";
 import type { AtpAgent } from "@atproto/api";
-import type { Config } from "./lib/types.js";
+import type { Config } from "@/lib/types";
 
 const program = new Command();
 

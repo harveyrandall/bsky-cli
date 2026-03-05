@@ -6,8 +6,8 @@ import type {
   AppBskyFeedLike,
   AppBskyGraphFollow,
 } from "@atproto/api";
-import { getClient, isJson } from "../index.js";
-import { outputJson } from "../lib/format.js";
+import { getClient, isJson } from "@/index";
+import { outputJson } from "@/lib/format";
 
 export function registerNotifs(program: Command): void {
   program

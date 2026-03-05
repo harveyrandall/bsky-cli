@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { readdirSync } from "node:fs";
-import type { Config } from "./lib/types.js";
+import type { Config } from "@/lib/types";
 
 function configDir(): string {
   return join(homedir(), ".config");

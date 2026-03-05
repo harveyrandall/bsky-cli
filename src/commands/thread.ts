@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import type { AppBskyFeedDefs } from "@atproto/api";
-import { getClient, isJson } from "../index.js";
-import { printPost, outputJson } from "../lib/format.js";
+import { getClient, isJson } from "@/index";
+import { printPost, outputJson } from "@/lib/format";
 
 function normalizeUri(uri: string): string {
   if (!uri.startsWith("at://did:plc:")) {

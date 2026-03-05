@@ -1,8 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
-import { authPath } from "./config.js";
-import type { AuthInfo, Config } from "./lib/types.js";
+import { authPath } from "@/config";
+import type { AuthInfo, Config } from "@/lib/types";
 
 export async function readAuth(
   handle: string,

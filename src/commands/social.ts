@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { getClient, isJson } from "../index.js";
-import { printActor, outputJson } from "../lib/format.js";
+import { getClient, isJson } from "@/index";
+import { printActor, outputJson } from "@/lib/format";
 
 async function resolveDid(
   agent: Awaited<ReturnType<typeof getClient>>,

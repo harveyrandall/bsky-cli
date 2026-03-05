@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { getClient } from "../index.js";
+import { getClient } from "@/index";
 
 async function resolveDid(
   agent: Awaited<ReturnType<typeof getClient>>,

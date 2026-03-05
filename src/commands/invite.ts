@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import { getClient, isJson } from "../index.js";
-import { outputJson } from "../lib/format.js";
+import { getClient, isJson } from "@/index";
+import { outputJson } from "@/lib/format";
 
 export function registerInviteCodes(program: Command): void {
   program

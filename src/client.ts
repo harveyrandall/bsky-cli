@@ -1,6 +1,6 @@
 import { AtpAgent } from "@atproto/api";
-import { readAuth, writeAuth, prompt2FA } from "./auth.js";
-import type { Config } from "./lib/types.js";
+import { readAuth, writeAuth, prompt2FA } from "@/auth";
+import type { Config } from "@/lib/types";
 
 export async function createClient(
   config: Config,

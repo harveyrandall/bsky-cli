@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { Command } from "commander";
-import { getClient, isJson } from "../index.js";
-import { outputJson } from "../lib/format.js";
+import { getClient, isJson } from "@/index";
+import { outputJson } from "@/lib/format";
 
 function detectMimeType(data: Uint8Array): string {
   if (data[0] === 0xff && data[1] === 0xd8) return "image/jpeg";

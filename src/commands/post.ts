@@ -12,8 +12,8 @@ import type {
   ComAtprotoRepoStrongRef,
 } from "@atproto/api";
 import { load as cheerioLoad } from "cheerio";
-import { getClient, isJson } from "../index.js";
-import { extractLinks, extractMentions, extractTags } from "../lib/extract.js";
+import { getClient, isJson } from "@/index";
+import { extractLinks, extractMentions, extractTags } from "@/lib/extract";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];

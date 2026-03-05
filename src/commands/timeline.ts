@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 import type { AppBskyFeedDefs, AppBskyFeedPost } from "@atproto/api";
-import { getClient, isJson } from "../index.js";
-import { printPost, outputJson } from "../lib/format.js";
-import { loadConfig } from "../config.js";
+import { getClient, isJson } from "@/index";
+import { printPost, outputJson } from "@/lib/format";
+import { loadConfig } from "@/config";
 import WebSocket from "ws";
 
 export function registerTimeline(program: Command): void {

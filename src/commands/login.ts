@@ -1,6 +1,6 @@
 import type { Command } from "commander";
-import { saveConfig } from "../config.js";
-import type { Config } from "../lib/types.js";
+import { saveConfig } from "@/config";
+import type { Config } from "@/lib/types";
 
 export function registerLogin(program: Command): void {
   program
