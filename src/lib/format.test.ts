@@ -43,7 +43,7 @@ describe("printPost", () => {
       replyCount: 1,
     };
     printPost(post as any);
-    const allOutput = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    const allOutput = logSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
     expect(allOutput).toContain("Hello world");
   });
 });

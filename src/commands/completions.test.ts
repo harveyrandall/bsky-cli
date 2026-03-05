@@ -26,7 +26,7 @@ describe("completions", () => {
     const program = makeProgramWithCommands();
     await program.parseAsync(["completions", "bash"], { from: "user" });
 
-    const output = stdoutWriteSpy.mock.calls.map((c) => c[0]).join("");
+    const output = stdoutWriteSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("_bsky_completions");
     expect(output).toContain("complete -F");
     expect(output).toContain("test-cmd");
@@ -38,7 +38,7 @@ describe("completions", () => {
     const program = makeProgramWithCommands();
     await program.parseAsync(["completions", "zsh"], { from: "user" });
 
-    const output = stdoutWriteSpy.mock.calls.map((c) => c[0]).join("");
+    const output = stdoutWriteSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("#compdef bsky");
     expect(output).toContain("_bsky");
     expect(output).toContain("test-cmd");
@@ -50,7 +50,7 @@ describe("completions", () => {
     const program = makeProgramWithCommands();
     await program.parseAsync(["completions", "fish"], { from: "user" });
 
-    const output = stdoutWriteSpy.mock.calls.map((c) => c[0]).join("");
+    const output = stdoutWriteSpy.mock.calls.map((c: unknown[]) => c[0]).join("");
     expect(output).toContain("complete -c bsky");
     expect(output).toContain("test-cmd");
 
