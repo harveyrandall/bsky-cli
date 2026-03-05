@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
+import { createWriteStream } from "node:fs";
 import { stdin, stdout, stderr } from "node:process";
 import { authPath } from "@/config";
 import type { AuthInfo, Config } from "@/lib/types";
@@ -26,6 +27,25 @@ export async function writeAuth(
   await writeFile(fp, JSON.stringify(auth, null, "  ") + "\n", {
     mode: 0o600,
   });
+}
+
+export async function promptPassword(): Promise<string> {
+  if (stdin.isTTY) {
+    // Interactive: hide input by sending output to /dev/null
+    stderr.write("Password: ");
+    const muted = createWriteStream("/dev/null");
+    const rl = createInterface({ input: stdin, output: muted });
+    const password = await rl.question("");
+    rl.close();
+    stderr.write("\n");
+    return password.trim();
+  }
+
+  // Piped: read a single line from stdin
+  const rl = createInterface({ input: stdin });
+  const password = await rl.question("");
+  rl.close();
+  return password.trim();
 }
 
 export async function prompt2FA(): Promise<string> {

@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { saveConfig } from "@/config";
+import { promptPassword } from "@/auth";
 import type { Config } from "@/lib/types";
 
 export function registerLogin(program: Command): void {
@@ -7,21 +8,23 @@ export function registerLogin(program: Command): void {
     .command("login")
     .description("Login to Bluesky")
     .argument("<handle>", "Your Bluesky handle")
-    .argument("<password>", "Your app password")
+    .argument("[password]", "Your app password (prompts if omitted)")
     .option("--host <url>", "PDS host URL", "https://bsky.social")
     .option("--bgs <url>", "BGS host URL", "https://bsky.network")
     .action(
       async (
         handle: string,
-        password: string,
+        password: string | undefined,
         opts: { host: string; bgs: string },
       ) => {
+        const resolvedPassword =
+          password ?? process.env.BSKY_PASSWORD ?? (await promptPassword());
         const profile = program.opts().profile;
         const config: Config = {
           host: opts.host,
           bgs: opts.bgs,
           handle,
-          password,
+          password: resolvedPassword,
         };
         await saveConfig(config, profile);
       },

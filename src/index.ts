@@ -37,22 +37,26 @@ const program = new Command();
 program
   .name("bsky")
   .description("A CLI client for Bluesky")
-  .version("0.1.0")
+  .version("0.2.0")
   .option("--json", "Output as JSON")
   .option("-p, --profile <name>", "Profile name")
   .option("-v, --verbose", "Verbose output");
 
+function resolveProfile(program: Command): string | undefined {
+  return program.opts().profile ?? process.env.BSKY_PROFILE;
+}
+
 // Helper to get authenticated client within commands
 export async function getClient(program: Command): Promise<AtpAgent> {
-  const opts = program.opts();
-  const config = await loadConfig(opts.profile);
-  const prefix = opts.profile ? `${opts.profile}-` : "";
+  const profile = resolveProfile(program);
+  const config = await loadConfig(profile);
+  const prefix = profile ? `${profile}-` : "";
   return createClient(config, prefix);
 }
 
 export async function getConfig(program: Command): Promise<Config> {
-  const opts = program.opts();
-  return loadConfig(opts.profile);
+  const profile = resolveProfile(program);
+  return loadConfig(profile);
 }
 
 export function isJson(program: Command): boolean {
