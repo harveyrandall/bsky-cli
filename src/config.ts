@@ -33,11 +33,31 @@ export async function loadConfig(profile?: string): Promise<Config> {
   const fp = configPath(profile);
   await mkdir(dirname(fp), { recursive: true });
 
-  const data = await readFile(fp, "utf-8");
-  const cfg: Config = JSON.parse(data);
+  let cfg: Config = {
+    host: "https://bsky.social",
+    bgs: "https://bsky.network",
+    handle: "",
+    password: "",
+  };
 
-  if (!cfg.host) {
-    cfg.host = "https://bsky.social";
+  try {
+    const data = await readFile(fp, "utf-8");
+    const fileCfg: Partial<Config> = JSON.parse(data);
+    cfg = { ...cfg, ...fileCfg };
+  } catch {
+    // No config file — env vars or login required
+  }
+
+  // Env vars override config file values
+  if (process.env.BSKY_HANDLE) cfg.handle = process.env.BSKY_HANDLE;
+  if (process.env.BSKY_PASSWORD) cfg.password = process.env.BSKY_PASSWORD;
+  if (process.env.BSKY_HOST) cfg.host = process.env.BSKY_HOST;
+  if (process.env.BSKY_BGS) cfg.bgs = process.env.BSKY_BGS;
+
+  if (!cfg.handle || !cfg.password) {
+    throw new Error(
+      "No credentials found. Run 'bsky login' or set BSKY_HANDLE and BSKY_PASSWORD.",
+    );
   }
 
   return cfg;
