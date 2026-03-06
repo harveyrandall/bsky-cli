@@ -1,5 +1,5 @@
 {
-  "name": "bsky-cli",
+  "name": "@harveyrandall/bsky-cli",
   "version": "1.0.0",
   "description": "A CLI client for Bluesky",
   "type": "module",
@@ -14,7 +14,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "link:global": "yarn build && npm link",
-    "unlink:global": "npm unlink -g bsky-cli",
+    "unlink:global": "npm unlink -g @harveyrandall/bsky-cli",
     "prepublishOnly": "yarn typecheck && yarn test:run && yarn build"
   },
   "engines": {

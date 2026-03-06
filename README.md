@@ -2,9 +2,9 @@
 
 <!-- badges -->
 [![CI](https://github.com/harveyrandall/bsky-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/harveyrandall/bsky-cli/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/bsky-cli)](https://www.npmjs.com/package/bsky-cli)
+[![npm version](https://img.shields.io/npm/v/@harveyrandall/bsky-cli)](https://www.npmjs.com/package/@harveyrandall/bsky-cli)
 [![license](https://img.shields.io/github/license/harveyrandall/bsky-cli)](LICENSE.md)
-[![downloads](https://img.shields.io/npm/dm/bsky-cli)](https://www.npmjs.com/package/bsky-cli)
+[![downloads](https://img.shields.io/npm/dm/@harveyrandall/bsky-cli)](https://www.npmjs.com/package/@harveyrandall/bsky-cli)
 
 A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 
@@ -15,13 +15,13 @@ A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 Requires Node.js >= 22.
 
 ```bash
-npm install -g bsky-cli
+npm install -g @harveyrandall/bsky-cli
 # or
-yarn global add bsky-cli
+yarn global add @harveyrandall/bsky-cli
 # or
-pnpm add -g bsky-cli
+pnpm add -g @harveyrandall/bsky-cli
 # or
-bun add -g bsky-cli
+bun add -g @harveyrandall/bsky-cli
 ```
 
 ### Homebrew (macOS / Linux)

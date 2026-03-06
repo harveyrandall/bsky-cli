@@ -17,7 +17,7 @@ A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 === "npm"
 
     ```bash
-    npm install -g bsky-cli
+    npm install -g @harveyrandall/bsky-cli
     ```
 
 === "Homebrew"

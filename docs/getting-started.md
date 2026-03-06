@@ -10,25 +10,25 @@
 === "npm"
 
     ```bash
-    npm install -g bsky-cli
+    npm install -g @harveyrandall/bsky-cli
     ```
 
 === "yarn"
 
     ```bash
-    yarn global add bsky-cli
+    yarn global add @harveyrandall/bsky-cli
     ```
 
 === "pnpm"
 
     ```bash
-    pnpm add -g bsky-cli
+    pnpm add -g @harveyrandall/bsky-cli
     ```
 
 === "bun"
 
     ```bash
-    bun add -g bsky-cli
+    bun add -g @harveyrandall/bsky-cli
     ```
 
 === "Homebrew"
