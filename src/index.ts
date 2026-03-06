@@ -38,7 +38,7 @@ const program = new Command();
 program
   .name("bsky")
   .description("A CLI client for Bluesky")
-  .version("0.5.1")
+  .version("1.0.0")
   .option("--json", "Output as JSON")
   .option("-p, --profile <name>", "Profile name")
   .option("-v, --verbose", "Verbose output");
