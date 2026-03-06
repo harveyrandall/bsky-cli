@@ -106,7 +106,7 @@ export function registerStream(program: Command): void {
         const VALID_FLAGS = new Set(["g", "i", "m", "s", "u", "v", "d", "y"]);
 
         if (!opts.pattern && opts.patternFlags !== "gi") {
-          program.error("--pattern-flags requires --pattern");
+          program.error(`${chalk.bgRed.white("Fatal error:")} --pattern-flags requires --pattern`);
         }
 
         if (opts.pattern) {
@@ -120,29 +120,23 @@ export function registerStream(program: Command): void {
           const uniqueFlags = new Set(flagChars);
           if (uniqueFlags.size !== flagChars.length) {
             const dupes = flagChars.filter((f, i) => flagChars.indexOf(f) !== i);
-            console.error(
-              chalk.yellow(
-                `Warning: duplicate regex flag(s) removed: ${[...new Set(dupes)].join(", ")}`,
-              ),
+            console.error(`
+              ${chalk.bgYellow.black("Warning:")} duplicate regex flag(s) removed: ${[...new Set(dupes)].join(", ")}`,
             );
             flagChars = [...uniqueFlags];
             opts.patternFlags = flagChars.join("");
           }
 
           if (flagChars.includes("u") && flagChars.includes("v")) {
-            program.error("regex flags u and v cannot be used together");
+            program.error(`${chalk.bgRed.white("Fatal error:")}regex flags u and v cannot be used together`);
           }
 
           if (flagChars.includes("y") && flagChars.includes("g")) {
-            console.error(
-              chalk.yellow("Warning: sticky flag (y) makes global flag (g) meaningless"),
-            );
+            console.error(`${chalk.bgYellow.black("Warning:")} sticky flag (y) makes global flag (g) meaningless`)
           }
 
           if (flagChars.includes("u") && flagChars.includes("d")) {
-            console.error(
-              chalk.yellow("Warning: unicode (u) with hasIndices (d) is valid but rarely needed"),
-            );
+            console.error(`${chalk.bgYellow.black("Warning:")} unicode (u) with hasIndices (d) is valid but rarely needed`)
           }
         }
 
