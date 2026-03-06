@@ -369,8 +369,8 @@ describe("stream command", () => {
   });
 
   it("warns on duplicate flags, deduplicates, and continues", async () => {
-    const errorSpy = vi
-      .spyOn(console, "error")
+    const warnSpy = vi
+      .spyOn(console, "warn")
       .mockImplementation(() => {});
 
     const ws = await startStream([
@@ -381,7 +381,7 @@ describe("stream command", () => {
       "gig",
     ]);
 
-    expect(errorSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("duplicate regex flag(s) removed: g"),
     );
 
@@ -392,7 +392,7 @@ describe("stream command", () => {
     );
     expect(printStreamPost).toHaveBeenCalledTimes(1);
 
-    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("errors when u and v flags are combined", async () => {
@@ -408,8 +408,8 @@ describe("stream command", () => {
   });
 
   it("warns when y and g flags are combined but continues", async () => {
-    const errorSpy = vi
-      .spyOn(console, "error")
+    const warnSpy = vi
+      .spyOn(console, "warn")
       .mockImplementation(() => {});
 
     const ws = await startStream([
@@ -420,7 +420,7 @@ describe("stream command", () => {
       "gy",
     ]);
 
-    expect(errorSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("sticky flag (y) makes global flag (g) meaningless"),
     );
 
@@ -431,12 +431,12 @@ describe("stream command", () => {
     );
     expect(printStreamPost).toHaveBeenCalledTimes(1);
 
-    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("warns when u and d flags are combined but continues", async () => {
-    const errorSpy = vi
-      .spyOn(console, "error")
+    const warnSpy = vi
+      .spyOn(console, "warn")
       .mockImplementation(() => {});
 
     const ws = await startStream([
@@ -447,14 +447,14 @@ describe("stream command", () => {
       "ud",
     ]);
 
-    expect(errorSpy).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("unicode (u) with hasIndices (d) is valid but rarely needed"),
     );
 
     // Stream should still work
     expect(ws).toBeTruthy();
 
-    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("errors on invalid regex pattern syntax", async () => {
