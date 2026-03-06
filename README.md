@@ -221,6 +221,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 - [ ] Moderation lists
 - [ ] Post labels
 - [ ] Auto alt-text for images and videos
+- [ ] OAuth login support
 - [ ] Docker BuildKit for standalone binary builds
 
 ## License
