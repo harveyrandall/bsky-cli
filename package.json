@@ -14,13 +14,41 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "link:global": "yarn build && npm link",
-    "unlink:global": "npm unlink -g bsky-cli"
+    "unlink:global": "npm unlink -g bsky-cli",
+    "prepublishOnly": "yarn typecheck && yarn test:run && yarn build"
   },
   "engines": {
     "node": ">=22"
   },
   "packageManager": "yarn@4.12.0",
   "license": "MIT",
+  "homepage": "https://github.com/harveyrandall/bsky-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harveyrandall/bsky-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/harveyrandall/bsky-cli/issues"
+  },
+  "keywords": [
+    "bluesky",
+    "bsky",
+    "atproto",
+    "cli",
+    "social",
+    "command-line"
+  ],
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE.md",
+    "CHANGELOG.md"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    }
+  },
   "dependencies": {
     "@atproto/api": "^0.19.1",
     "chalk": "^5.6.2",
