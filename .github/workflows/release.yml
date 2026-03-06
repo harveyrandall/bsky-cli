@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Run tests
+        run: yarn test:run
+
+  build-binaries:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            artifact: bsky-macos-arm64
+            archive: tar.gz
+          - os: macos-latest
+            target: bun-darwin-x64
+            artifact: bsky-macos-x64
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            artifact: bsky-linux-x64
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: bun-linux-arm64
+            artifact: bsky-linux-arm64
+            archive: tar.gz
+          - os: windows-latest
+            target: bun-windows-x64
+            artifact: bsky-windows-x64
+            archive: zip
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build dist/index.js with tsup (resolves @/ path aliases)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: corepack enable
+
+      - run: yarn install --immutable
+
+      - run: yarn build
+
+      # Compile standalone binary from the tsup output
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Compile binary
+        run: bun build --compile --target ${{ matrix.target }} dist/index.js --outfile bsky
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: tar -czf ${{ matrix.artifact }}.tar.gz bsky
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        run: Compress-Archive -Path bsky.exe -DestinationPath ${{ matrix.artifact }}.zip
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.${{ matrix.archive }}
+
+  changelog:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: cliff-release
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: release-notes.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Generate full changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: |
+            CHANGELOG.md
+            release-notes.md
+
+  release:
+    needs: [build-binaries, changelog]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release
+          find artifacts -name '*.tar.gz' -o -name '*.zip' | xargs -I{} mv {} release/
+          cp artifacts/changelog/release-notes.md release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release/release-notes.md
+          files: |
+            release/*.tar.gz
+            release/*.zip
+          generate_release_notes: false
+
+  npm-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Build
+        run: yarn build
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
