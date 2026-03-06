@@ -21,7 +21,7 @@ jobs:
       - run: corepack enable
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: yarn install
 
       - name: Typecheck
         run: yarn typecheck
@@ -67,7 +67,7 @@ jobs:
 
       - run: corepack enable
 
-      - run: yarn install --immutable
+      - run: yarn install
 
       - run: yarn build
 
@@ -230,7 +230,7 @@ jobs:
       - run: corepack enable
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: yarn install
 
       - name: Build
         run: yarn build

@@ -15,7 +15,8 @@
     "test:coverage": "vitest run --coverage",
     "link:global": "yarn build && npm link",
     "unlink:global": "npm unlink -g @harveyrandall/bsky-cli",
-    "prepublishOnly": "yarn typecheck && yarn test:run && yarn build"
+    "prepublishOnly": "yarn typecheck && yarn test:run && yarn build",
+    "publish:npm": "npm publish --access public"
   },
   "engines": {
     "node": ">=22"
