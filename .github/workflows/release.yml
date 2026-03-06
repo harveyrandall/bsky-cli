@@ -156,6 +156,7 @@ jobs:
   update-homebrew:
     needs: release
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Download checksums
         run: |
@@ -213,6 +214,7 @@ jobs:
   npm-publish:
     needs: test
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
