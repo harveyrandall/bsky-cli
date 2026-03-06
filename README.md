@@ -1,14 +1,47 @@
 # bsky-cli
 
+<!-- badges -->
+[![CI](https://github.com/harveyrandall/bsky-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/harveyrandall/bsky-cli/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/bsky-cli)](https://www.npmjs.com/package/bsky-cli)
+[![license](https://img.shields.io/github/license/harveyrandall/bsky-cli)](LICENSE.md)
+[![downloads](https://img.shields.io/npm/dm/bsky-cli)](https://www.npmjs.com/package/bsky-cli)
+
 A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 
 ## Install
 
+### npm / yarn / pnpm / bun
+
 Requires Node.js >= 22.
 
 ```bash
-git clone https://github.com/yourusername/bsky-cli.git
+npm install -g bsky-cli
+# or
+yarn global add bsky-cli
+# or
+pnpm add -g bsky-cli
+# or
+bun add -g bsky-cli
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install harveyrandall/bsky-cli
+```
+
+### Download a binary
+
+Standalone binaries for macOS, Linux, and Windows are attached to every
+[GitHub Release](https://github.com/harveyrandall/bsky-cli/releases).
+
+<details>
+<summary>Build from source</summary>
+
+```bash
+git clone https://github.com/harveyrandall/bsky-cli.git
 cd bsky-cli
+corepack enable
 yarn install
 yarn build
 yarn link:global   # registers `bsky` globally
@@ -19,6 +52,8 @@ To uninstall:
 ```bash
 yarn unlink:global
 ```
+
+</details>
 
 ## Authentication
 
@@ -73,7 +108,7 @@ bsky -p ? tl              # list all profiles
 
 ```
 bsky timeline|tl [-H handle] [-n count]
-bsky stream [--cursor] [-H handle] [--pattern regex] [--reply text]
+bsky stream [--cursor] [-H handle] [--pattern regex] [--pattern-flags flags]
 bsky thread <uri> [-n depth]
 ```
 
@@ -170,10 +205,24 @@ bsky completions fish > ~/.config/fish/completions/bsky.fish
 yarn dev             # run via tsx (no build needed)
 yarn build           # build to dist/
 yarn typecheck       # tsc --noEmit
+yarn test:run        # run tests once
+yarn test:coverage   # run tests with coverage
 yarn link:global     # build + register globally
 yarn unlink:global   # remove global symlink
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
+
+## Roadmap
+
+- [ ] Direct messages
+- [ ] List creation and management
+- [ ] Starter packs
+- [ ] Moderation lists
+- [ ] Post labels
+- [ ] Auto alt-text for images and videos
+- [ ] Docker BuildKit for standalone binary builds
+
 ## License
 
-MIT
+[MIT](LICENSE.md)
