@@ -288,6 +288,185 @@ describe("stream command", () => {
     expect(MockWebSocket.lastUrl).toContain("cursor=1234567890000000");
   });
 
+  // --- pattern-flags tests ---
+
+  // Helper for tests expecting program.error() to fire.
+  // Uses exitOverride() so Commander throws instead of calling process.exit.
+  // Validation errors happen before the infinite await, so the promise rejects immediately.
+  async function startStreamExpectingError(
+    args: string[],
+  ): Promise<{ exitCode: number; message: string }> {
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    program.option("-p, --profile <name>", "Profile name");
+    program.exitOverride();
+    registerStream(program);
+    try {
+      await program.parseAsync(["node", "test", ...args]);
+      throw new Error("Expected error but stream started");
+    } catch (err: any) {
+      stderrSpy.mockRestore();
+      return { exitCode: err.exitCode ?? 1, message: err.message ?? String(err) };
+    }
+  }
+
+  it("default gi flags enable case-insensitive matching", async () => {
+    const ws = await startStream(["stream", "--pattern", "hello"]);
+
+    ws.emit(
+      "message",
+      Buffer.from(makeJetstreamPost("did:plc:abc", "p1", "HELLO WORLD")),
+    );
+    expect(printStreamPost).toHaveBeenCalledTimes(1);
+  });
+
+  it("custom --pattern-flags override the default", async () => {
+    const ws = await startStream([
+      "stream",
+      "--pattern",
+      "hello",
+      "--pattern-flags",
+      "m",
+    ]);
+
+    // Without 'i' flag, should be case-sensitive
+    ws.emit(
+      "message",
+      Buffer.from(makeJetstreamPost("did:plc:abc", "p1", "HELLO")),
+    );
+    expect(printStreamPost).not.toHaveBeenCalled();
+
+    ws.emit(
+      "message",
+      Buffer.from(makeJetstreamPost("did:plc:abc", "p2", "hello")),
+    );
+    expect(printStreamPost).toHaveBeenCalledTimes(1);
+  });
+
+  it("errors when --pattern-flags is used without --pattern", async () => {
+    const { exitCode, message } = await startStreamExpectingError([
+      "stream",
+      "--pattern-flags",
+      "i",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(message).toContain("--pattern-flags requires --pattern");
+  });
+
+  it("errors on unknown regex flags", async () => {
+    const { exitCode, message } = await startStreamExpectingError([
+      "stream",
+      "--pattern",
+      "test",
+      "--pattern-flags",
+      "gx",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(message).toContain("unknown regex flag(s): x");
+  });
+
+  it("warns on duplicate flags, deduplicates, and continues", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const ws = await startStream([
+      "stream",
+      "--pattern",
+      "test",
+      "--pattern-flags",
+      "gig",
+    ]);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("duplicate regex flag(s) removed: g"),
+    );
+
+    // Stream should still work with deduplicated flags
+    ws.emit(
+      "message",
+      Buffer.from(makeJetstreamPost("did:plc:abc", "p1", "test post")),
+    );
+    expect(printStreamPost).toHaveBeenCalledTimes(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it("errors when u and v flags are combined", async () => {
+    const { exitCode, message } = await startStreamExpectingError([
+      "stream",
+      "--pattern",
+      "test",
+      "--pattern-flags",
+      "uv",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(message).toContain("regex flags u and v cannot be used together");
+  });
+
+  it("warns when y and g flags are combined but continues", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const ws = await startStream([
+      "stream",
+      "--pattern",
+      "test",
+      "--pattern-flags",
+      "gy",
+    ]);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("sticky flag (y) makes global flag (g) meaningless"),
+    );
+
+    // Stream should still work
+    ws.emit(
+      "message",
+      Buffer.from(makeJetstreamPost("did:plc:abc", "p1", "test post")),
+    );
+    expect(printStreamPost).toHaveBeenCalledTimes(1);
+
+    errorSpy.mockRestore();
+  });
+
+  it("warns when u and d flags are combined but continues", async () => {
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    const ws = await startStream([
+      "stream",
+      "--pattern",
+      "test",
+      "--pattern-flags",
+      "ud",
+    ]);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("unicode (u) with hasIndices (d) is valid but rarely needed"),
+    );
+
+    // Stream should still work
+    expect(ws).toBeTruthy();
+
+    errorSpy.mockRestore();
+  });
+
+  it("errors on invalid regex pattern syntax", async () => {
+    const { exitCode, message } = await startStreamExpectingError([
+      "stream",
+      "--pattern",
+      "[",
+    ]);
+    expect(exitCode).toBe(1);
+    expect(message).toContain("invalid regex pattern");
+  });
+
   it("resolves --handle to DID and sets wantedDids", async () => {
     mockAgent.getProfile.mockResolvedValue({
       data: { did: "did:plc:alice123" },

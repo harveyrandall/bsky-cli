@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import type { AppBskyFeedDefs, AppBskyFeedPost } from "@atproto/api";
+import chalk from "chalk";
 import { getClient, isJson } from "@/index";
 import { printPost, printStreamPost, outputJson } from "@/lib/format";
 import type { JetstreamCommitEvent, JetstreamEvent } from "@/lib/types";
@@ -75,15 +76,61 @@ export function registerStream(program: Command): void {
     .option("--cursor <cursor>", "Resume cursor (Unix microseconds)")
     .option("-H, --handle <handle>", "Filter to a specific user")
     .option("--pattern <regex>", "Filter post text by regex")
+    .option("--pattern-flags <flags>", "Regex flags for --pattern", "gi")
     .option("--jetstream <url>", "Override Jetstream endpoint")
     .action(
       async (opts: {
         cursor?: string;
         handle?: string;
         pattern?: string;
+        patternFlags: string;
         jetstream?: string;
       }) => {
         const json = isJson(program);
+
+        // Validate --pattern-flags
+        const VALID_FLAGS = new Set(["g", "i", "m", "s", "u", "v", "d", "y"]);
+
+        if (!opts.pattern && opts.patternFlags !== "gi") {
+          program.error("--pattern-flags requires --pattern");
+        }
+
+        if (opts.pattern) {
+          let flagChars = opts.patternFlags.split("");
+
+          const unknown = flagChars.filter((f) => !VALID_FLAGS.has(f));
+          if (unknown.length > 0) {
+            program.error(`unknown regex flag(s): ${unknown.join(", ")}`);
+          }
+
+          const uniqueFlags = new Set(flagChars);
+          if (uniqueFlags.size !== flagChars.length) {
+            const dupes = flagChars.filter((f, i) => flagChars.indexOf(f) !== i);
+            console.error(
+              chalk.yellow(
+                `Warning: duplicate regex flag(s) removed: ${[...new Set(dupes)].join(", ")}`,
+              ),
+            );
+            flagChars = [...uniqueFlags];
+            opts.patternFlags = flagChars.join("");
+          }
+
+          if (flagChars.includes("u") && flagChars.includes("v")) {
+            program.error("regex flags u and v cannot be used together");
+          }
+
+          if (flagChars.includes("y") && flagChars.includes("g")) {
+            console.error(
+              chalk.yellow("Warning: sticky flag (y) makes global flag (g) meaningless"),
+            );
+          }
+
+          if (flagChars.includes("u") && flagChars.includes("d")) {
+            console.error(
+              chalk.yellow("Warning: unicode (u) with hasIndices (d) is valid but rarely needed"),
+            );
+          }
+        }
 
         // Build Jetstream URL
         const wsUrl = new URL(opts.jetstream ?? DEFAULT_JETSTREAM);
@@ -109,7 +156,14 @@ export function registerStream(program: Command): void {
           wsUrl.searchParams.set("cursor", opts.cursor);
         }
 
-        const re = opts.pattern ? new RegExp(opts.pattern) : null;
+        let re: RegExp | null = null;
+        if (opts.pattern) {
+          try {
+            re = new RegExp(opts.pattern, opts.patternFlags);
+          } catch (err) {
+            program.error(`invalid regex pattern: ${(err as Error).message}`);
+          }
+        }
         let lastCursor = "";
 
         const ws = new WebSocket(wsUrl.toString());
