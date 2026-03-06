@@ -153,6 +153,63 @@ jobs:
             release/checksums.txt
           generate_release_notes: false
 
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download checksums
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          curl -fsSL "https://github.com/harveyrandall/bsky-cli/releases/download/${TAG}/checksums.txt" -o checksums.txt
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+
+      - name: Parse checksums
+        id: shas
+        run: |
+          echo "macos_arm64=$(grep 'bsky-macos-arm64.tar.gz' checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "macos_x64=$(grep 'bsky-macos-x64.tar.gz' checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "linux_arm64=$(grep 'bsky-linux-arm64.tar.gz' checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "linux_x64=$(grep 'bsky-linux-x64.tar.gz' checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: harveyrandall/homebrew-bsky-cli
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Update formula
+        env:
+          VERSION: ${{ env.VERSION }}
+          SHA_MACOS_ARM64: ${{ steps.shas.outputs.macos_arm64 }}
+          SHA_MACOS_X64: ${{ steps.shas.outputs.macos_x64 }}
+          SHA_LINUX_ARM64: ${{ steps.shas.outputs.linux_arm64 }}
+          SHA_LINUX_X64: ${{ steps.shas.outputs.linux_x64 }}
+        run: |
+          cd Formula
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" bsky-cli.rb
+          # Update SHA256 hashes in order of appearance
+          awk -v s1="$SHA_MACOS_ARM64" -v s2="$SHA_MACOS_X64" \
+              -v s3="$SHA_LINUX_ARM64" -v s4="$SHA_LINUX_X64" '
+            BEGIN { n=0 }
+            /sha256/ { n++
+              if (n==1) { sub(/sha256 ".*"/, "sha256 \"" s1 "\"") }
+              if (n==2) { sub(/sha256 ".*"/, "sha256 \"" s2 "\"") }
+              if (n==3) { sub(/sha256 ".*"/, "sha256 \"" s3 "\"") }
+              if (n==4) { sub(/sha256 ".*"/, "sha256 \"" s4 "\"") }
+            }
+            { print }
+          ' bsky-cli.rb > bsky-cli.rb.tmp && mv bsky-cli.rb.tmp bsky-cli.rb
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/bsky-cli.rb
+          git commit -m "chore: bump bsky-cli to ${VERSION}"
+          git push
+
   npm-publish:
     needs: test
     runs-on: ubuntu-latest
