@@ -74,6 +74,10 @@ jobs:
       # Compile standalone binary from the tsup output
       - uses: oven-sh/setup-bun@v2
 
+      # Bun needs a standard node_modules/ to resolve imports during cross-compilation
+      # (Yarn 4 PnP is invisible to Bun)
+      - run: bun install
+
       - name: Compile binary
         run: bun build --compile --target ${{ matrix.target }} dist/index.js --outfile bsky
 
