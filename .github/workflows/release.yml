@@ -139,6 +139,10 @@ jobs:
           find artifacts -name '*.tar.gz' -o -name '*.zip' | xargs -I{} mv {} release/
           cp artifacts/changelog/release-notes.md release/
 
+      - name: Generate SHA256 checksums
+        working-directory: release
+        run: sha256sum *.tar.gz *.zip > checksums.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -146,6 +150,7 @@ jobs:
           files: |
             release/*.tar.gz
             release/*.zip
+            release/checksums.txt
           generate_release_notes: false
 
   npm-publish:
