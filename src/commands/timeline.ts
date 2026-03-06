@@ -120,7 +120,7 @@ export function registerStream(program: Command): void {
           const uniqueFlags = new Set(flagChars);
           if (uniqueFlags.size !== flagChars.length) {
             const dupes = flagChars.filter((f, i) => flagChars.indexOf(f) !== i);
-            console.error(`
+            console.warn(`
               ${chalk.bgYellow.black("Warning:")} duplicate regex flag(s) removed: ${[...new Set(dupes)].join(", ")}`,
             );
             flagChars = [...uniqueFlags];
@@ -132,11 +132,11 @@ export function registerStream(program: Command): void {
           }
 
           if (flagChars.includes("y") && flagChars.includes("g")) {
-            console.error(`${chalk.bgYellow.black("Warning:")} sticky flag (y) makes global flag (g) meaningless`)
+            console.warn(`${chalk.bgYellow.black("Warning:")} sticky flag (y) makes global flag (g) meaningless`)
           }
 
           if (flagChars.includes("u") && flagChars.includes("d")) {
-            console.error(`${chalk.bgYellow.black("Warning:")} unicode (u) with hasIndices (d) is valid but rarely needed`)
+            console.warn(`${chalk.bgYellow.black("Warning:")} unicode (u) with hasIndices (d) is valid but rarely needed`)
           }
         }
 
