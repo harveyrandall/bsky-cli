@@ -3,7 +3,7 @@
 
 __metadata:
   version: 8
-  cacheKey: 10
+  cacheKey: 10c0
 
 "@atproto/api@npm:^0.19.1":
   version: 0.19.1
