@@ -34,7 +34,7 @@
 === "Homebrew"
 
     ```bash
-    brew install harveyrandall/bsky-cli
+    brew install harveyrandall/bsky-cli/bsky-cli
     ```
 
 === "curl"
