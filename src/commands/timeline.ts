@@ -1,10 +1,24 @@
-import type { Command } from "commander";
-import type { AppBskyFeedDefs, AppBskyFeedPost } from "@atproto/api";
 import chalk from "chalk";
-import { getClient, isJson } from "@/index";
-import { printPost, printStreamPost, outputJson } from "@/lib/format";
-import type { JetstreamCommitEvent, JetstreamEvent } from "@/lib/types";
+import type { Command } from "commander";
 import WebSocket from "ws";
+
+import {
+  getClient,
+  isJson,
+} from "@/index";
+import {
+  outputJson,
+  printPost,
+  printStreamPost,
+} from "@/lib/format";
+import type {
+  JetstreamCommitEvent,
+  JetstreamEvent,
+} from "@/lib/types";
+import type {
+  AppBskyFeedDefs,
+  AppBskyFeedPost,
+} from "@atproto/api";
 
 const DEFAULT_JETSTREAM = "wss://jetstream1.us-east.bsky.network/subscribe";
 
