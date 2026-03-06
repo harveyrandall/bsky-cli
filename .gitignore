@@ -20,5 +20,11 @@ node_modules
 dist/
 *.tsbuildinfo
 
+# Editor / IDE
+.vscode/
+
+# Documentation (generated)
+docs/
+
 # LLMs
 .claude/*
