@@ -23,8 +23,13 @@ dist/
 # Editor / IDE
 .vscode/
 
-# Documentation (generated)
-docs/
+# Environment / secrets
+.env
+.env.*
+.npmrc
+
+# Test coverage
+coverage/
 
 # LLMs
 .claude/*
