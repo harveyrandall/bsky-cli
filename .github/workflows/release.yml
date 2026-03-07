@@ -181,7 +181,7 @@ jobs:
       - name: Checkout tap repo
         uses: actions/checkout@v4
         with:
-          repository: harveyrandall/homebrew-bsky-cli
+          repository: harveyrandall/homebrew-tools
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Update formula
