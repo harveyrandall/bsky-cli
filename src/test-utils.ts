@@ -61,6 +61,22 @@ export function createMockAgent() {
         },
       },
     },
+    chat: {
+      bsky: {
+        convo: {
+          listConvos: vi.fn(),
+          getConvo: vi.fn(),
+          getConvoForMembers: vi.fn(),
+          getMessages: vi.fn(),
+          sendMessage: vi.fn(),
+          deleteMessageForSelf: vi.fn(),
+          acceptConvo: vi.fn(),
+          updateRead: vi.fn(),
+          muteConvo: vi.fn(),
+          unmuteConvo: vi.fn(),
+        },
+      },
+    },
   };
   return agent;
 }

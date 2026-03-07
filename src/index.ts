@@ -30,6 +30,7 @@ import { registerBookmarks } from "@/commands/bookmark";
 import { registerAppPassword } from "@/commands/password";
 import { registerInviteCodes } from "@/commands/invite";
 import { registerCompletions } from "@/commands/completions";
+import { registerDm } from "@/commands/dm";
 import type { AtpAgent } from "@atproto/api";
 import type { Config } from "@/lib/types";
 
@@ -97,6 +98,7 @@ registerBookmarks(program);
 registerAppPassword(program);
 registerInviteCodes(program);
 registerCompletions(program);
+registerDm(program);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err.message ?? err);
