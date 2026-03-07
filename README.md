@@ -27,7 +27,7 @@ bun add -g @harveyrandall/bsky-cli
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install harveyrandall/bsky-cli/bsky-cli
+brew install harveyrandall/tools/bsky-cli
 ```
 
 ### Download a binary
@@ -171,6 +171,19 @@ bsky report <handle> [--comment text]
 bsky mod-list <handles...> [--name] [--desc]
 ```
 
+### Direct Messages
+
+```
+bsky dm list [--unread] [--requests] [-n count]
+bsky dm read <handle> [-n count]
+bsky dm send <handle> <text...>
+bsky dm delete <handle> <messageId>
+bsky dm accept <handle>
+bsky dm mark-read <handle>
+bsky dm mute <handle>
+bsky dm unmute <handle>
+```
+
 ### Utilities
 
 ```
@@ -215,7 +228,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
 ## Roadmap
 
-- [ ] Direct messages
+- [x] Direct messages
 - [ ] List creation and management
 - [ ] Starter packs
 - [ ] Moderation lists

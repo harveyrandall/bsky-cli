@@ -282,6 +282,82 @@ Create a moderation list.
 bsky mod-list user1.bsky.social user2.bsky.social --name "My Block List" --desc "Spammers"
 ```
 
+## Direct Messages
+
+### `bsky dm list`
+
+List your DM conversations.
+
+```bash
+bsky dm list                  # all conversations
+bsky dm list --unread         # only unread
+bsky dm list --requests       # conversation requests
+bsky dm list -n 10            # limit to 10
+bsky dm list --json           # JSON output
+```
+
+| Flag | Description |
+|------|-------------|
+| `--unread` | Show only unread conversations |
+| `--requests` | Show conversation requests |
+| `-n <count>` | Number of conversations (default: 50) |
+
+### `bsky dm read`
+
+Read messages in a conversation.
+
+```bash
+bsky dm read alice.bsky.social
+bsky dm read alice.bsky.social -n 50
+bsky dm read did:plc:abc123           # use DID directly
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n <count>` | Number of messages (default: 30) |
+
+### `bsky dm send`
+
+Send a direct message.
+
+```bash
+bsky dm send alice.bsky.social "Hey, how's it going?"
+bsky dm send alice.bsky.social Hello from the CLI!
+```
+
+### `bsky dm delete`
+
+Delete a message for yourself.
+
+```bash
+bsky dm delete alice.bsky.social msg-id-xyz789
+```
+
+### `bsky dm accept`
+
+Accept a conversation request.
+
+```bash
+bsky dm accept alice.bsky.social
+```
+
+### `bsky dm mark-read`
+
+Mark a conversation as read.
+
+```bash
+bsky dm mark-read alice.bsky.social
+```
+
+### `bsky dm mute` / `bsky dm unmute`
+
+Mute or unmute a conversation.
+
+```bash
+bsky dm mute alice.bsky.social
+bsky dm unmute alice.bsky.social
+```
+
 ## Global Flags
 
 These flags work with all commands:
