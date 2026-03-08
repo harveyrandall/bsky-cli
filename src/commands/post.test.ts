@@ -10,6 +10,11 @@ vi.mock("@/index", () => ({
   isJson: vi.fn(() => false),
 }));
 
+const mockSaveDraft = vi.fn().mockResolvedValue({ id: "1741392000000-a7f3" });
+vi.mock("@/drafts", () => ({
+  saveDraft: (...args: unknown[]) => mockSaveDraft(...args),
+}));
+
 // Mock node:fs/promises for file read operations
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
@@ -349,6 +354,194 @@ describe("quote command", () => {
     expect(consoleSpy).toHaveBeenCalledWith(
       "at://did:plc:test123/app.bsky.feed.post/quote999",
     );
+
+    consoleSpy.mockRestore();
+  });
+});
+
+describe("post --draft", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockResolvedValue({ ok: false });
+  });
+
+  it("saves draft instead of publishing when --draft is used", async () => {
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    program.option("-p, --profile <name>");
+    registerPost(program);
+
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await program.parseAsync(["node", "test", "post", "Draft post", "--draft"]);
+
+    expect(mockSaveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "post",
+        text: "Draft post",
+        reason: "manual",
+      }),
+      undefined,
+    );
+    expect(mockAgent.post).not.toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith("Draft saved: 1741392000000-a7f3");
+
+    consoleSpy.mockRestore();
+  });
+
+  it("auto-saves as draft on grapheme length error", async () => {
+    mockAgent.post.mockRejectedValue(
+      new Error("record/text must not be longer than 300 graphemes"),
+    );
+
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    program.option("-p, --profile <name>");
+    registerPost(program);
+
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+
+    await expect(
+      program.parseAsync(["node", "test", "post", "A very long post"]),
+    ).rejects.toThrow("exit 1");
+
+    expect(mockSaveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "length" }),
+      undefined,
+    );
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Post exceeds character limit"),
+    );
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it("auto-saves as draft on network error", async () => {
+    const networkErr = new TypeError("fetch failed");
+    networkErr.cause = new Error("ECONNREFUSED");
+    mockAgent.post.mockRejectedValue(networkErr);
+
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    program.option("-p, --profile <name>");
+    registerPost(program);
+
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+
+    await expect(
+      program.parseAsync(["node", "test", "post", "Offline post"]),
+    ).rejects.toThrow("exit 1");
+
+    expect(mockSaveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "network" }),
+      undefined,
+    );
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Network error"),
+    );
+
+    consoleSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it("re-throws non-draft errors", async () => {
+    mockAgent.post.mockRejectedValue(new Error("InternalServerError"));
+
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    program.option("-p, --profile <name>");
+    registerPost(program);
+
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      program.parseAsync(["node", "test", "post", "Test"]),
+    ).rejects.toThrow("InternalServerError");
+
+    expect(mockSaveDraft).not.toHaveBeenCalled();
+  });
+
+  it("reply --draft stores replyUri without calling API", async () => {
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    program.option("-p, --profile <name>");
+    registerReply(program);
+
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "reply",
+      "at://did:plc:abc/app.bsky.feed.post/123",
+      "Draft reply",
+      "--draft",
+    ]);
+
+    expect(mockSaveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "reply",
+        text: "Draft reply",
+        replyUri: "at://did:plc:abc/app.bsky.feed.post/123",
+        reason: "manual",
+      }),
+      undefined,
+    );
+    expect(mockAgent.post).not.toHaveBeenCalled();
+    expect(mockAgent.com.atproto.repo.getRecord).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+  });
+
+  it("quote --draft stores quoteUri without calling API", async () => {
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    program.option("-p, --profile <name>");
+    registerQuote(program);
+
+    const consoleSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "quote",
+      "at://did:plc:abc/app.bsky.feed.post/123",
+      "Draft quote",
+      "--draft",
+    ]);
+
+    expect(mockSaveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "quote",
+        text: "Draft quote",
+        quoteUri: "at://did:plc:abc/app.bsky.feed.post/123",
+        reason: "manual",
+      }),
+      undefined,
+    );
+    expect(mockAgent.post).not.toHaveBeenCalled();
+    expect(mockAgent.com.atproto.repo.getRecord).not.toHaveBeenCalled();
 
     consoleSpy.mockRestore();
   });

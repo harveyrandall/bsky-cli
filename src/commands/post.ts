@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
-import { stdin } from "node:process";
+import { basename, resolve } from "node:path";
+import { stdin, stderr } from "node:process";
+import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
 import type {
   AppBskyFeedPost,
@@ -14,6 +15,8 @@ import type {
 import { load as cheerioLoad } from "cheerio";
 import { getClient, isJson } from "@/index";
 import { extractLinks, extractMentions, extractTags } from "@/lib/extract";
+import { saveDraft } from "@/drafts";
+import type { Draft } from "@/lib/types";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -136,7 +139,7 @@ async function fetchLinkCard(
   }
 }
 
-async function createPost(
+export async function createPost(
   agent: Awaited<ReturnType<typeof getClient>>,
   text: string,
   opts: {
@@ -216,12 +219,102 @@ async function createPost(
   return resp.uri;
 }
 
+function isNetworkError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : "";
+  const cause = err instanceof Error ? err.cause : undefined;
+  const causeMsg = cause instanceof Error ? cause.message : "";
+
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("ECONNREFUSED") ||
+    msg.includes("ENOTFOUND") ||
+    msg.includes("ETIMEDOUT") ||
+    causeMsg.includes("fetch failed") ||
+    causeMsg.includes("ECONNREFUSED") ||
+    causeMsg.includes("ENOTFOUND")
+  );
+}
+
+function isLengthError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : "";
+  return msg.includes("must not be longer than") || msg.includes("InvalidRecord");
+}
+
+async function executeOrDraft(
+  program: Command,
+  draftData: Omit<Draft, "id" | "createdAt" | "reason">,
+  opts: { draft?: boolean },
+  execute: () => Promise<string>,
+): Promise<void> {
+  const profile = program.opts().profile;
+
+  if (opts.draft) {
+    const draft = await saveDraft({ ...draftData, reason: "manual" }, profile);
+    console.error(`Draft saved: ${draft.id}`);
+    return;
+  }
+
+  // SIGINT trap — interactive only
+  let sigintHandler: (() => void) | undefined;
+
+  if (stdin.isTTY) {
+    sigintHandler = () => {
+      // Second Ctrl+C during prompt exits immediately
+      process.once("SIGINT", () => process.exit(130));
+
+      (async () => {
+        const rl = createInterface({ input: stdin, output: stderr });
+        try {
+          const answer = await rl.question("\nSave as draft? [Y/n] ");
+          rl.close();
+          if (answer.trim().toLowerCase() !== "n") {
+            const draft = await saveDraft(
+              { ...draftData, reason: "manual" },
+              profile,
+            );
+            console.error(`Draft saved: ${draft.id}`);
+          }
+        } catch {
+          // readline closed by second SIGINT
+        }
+        process.exit(0);
+      })();
+    };
+    process.on("SIGINT", sigintHandler);
+  }
+
+  try {
+    const uri = await execute();
+    console.log(uri);
+  } catch (err: unknown) {
+    if (isLengthError(err)) {
+      const draft = await saveDraft({ ...draftData, reason: "length" }, profile);
+      console.error(`Post exceeds character limit. Saved as draft: ${draft.id}`);
+      process.exit(1);
+    }
+
+    if (isNetworkError(err)) {
+      const draft = await saveDraft({ ...draftData, reason: "network" }, profile);
+      console.error(`Network error. Post saved as draft: ${draft.id}`);
+      console.error("It will be sent automatically next time you're online.");
+      process.exit(1);
+    }
+
+    throw err;
+  } finally {
+    if (sigintHandler) {
+      process.removeListener("SIGINT", sigintHandler);
+    }
+  }
+}
+
 export function registerPost(program: Command): void {
   program
     .command("post")
     .description("Create a new post")
     .argument("[text...]", "Post text")
     .option("--stdin", "Read text from stdin")
+    .option("--draft", "Save as draft instead of publishing")
     .option("-i, --image <files...>", "Image files to attach")
     .option("--image-alt <alts...>", "Alt text for images")
     .option("--video <file>", "Video file to attach")
@@ -231,6 +324,7 @@ export function registerPost(program: Command): void {
         textParts: string[],
         opts: {
           stdin?: boolean;
+          draft?: boolean;
           image?: string[];
           imageAlt?: string[];
           video?: string;
@@ -246,14 +340,25 @@ export function registerPost(program: Command): void {
           process.exit(1);
         }
 
-        const agent = await getClient(program);
-        const uri = await createPost(agent, text, {
-          images: opts.image,
+        const draftData: Omit<Draft, "id" | "createdAt" | "reason"> = {
+          type: "post",
+          text,
+          images: opts.image?.map((p) => resolve(p)),
           imageAlts: opts.imageAlt,
-          video: opts.video,
+          video: opts.video ? resolve(opts.video) : undefined,
           videoAlt: opts.videoAlt,
+        };
+
+        const agent = opts.draft ? undefined : await getClient(program);
+
+        await executeOrDraft(program, draftData, opts, async () => {
+          return createPost(agent!, text, {
+            images: opts.image,
+            imageAlts: opts.imageAlt,
+            video: opts.video,
+            videoAlt: opts.videoAlt,
+          });
         });
-        console.log(uri);
       },
     );
 }
@@ -264,8 +369,21 @@ export function registerReply(program: Command): void {
     .description("Reply to a post")
     .argument("<uri>", "URI of the post to reply to")
     .argument("<text...>", "Reply text")
-    .action(async (uri: string, textParts: string[]) => {
+    .option("--draft", "Save as draft instead of publishing")
+    .action(async (uri: string, textParts: string[], opts: { draft?: boolean }) => {
       const text = textParts.join(" ");
+
+      const draftData: Omit<Draft, "id" | "createdAt" | "reason"> = {
+        type: "reply",
+        text,
+        replyUri: uri,
+      };
+
+      if (opts.draft) {
+        await executeOrDraft(program, draftData, opts, async () => "");
+        return;
+      }
+
       const agent = await getClient(program);
 
       // Fetch parent post
@@ -292,11 +410,12 @@ export function registerReply(program: Command): void {
         parentPost.reply?.root ??
         parent;
 
-      const postUri = await createPost(agent, text, {
-        reply: parent,
-        replyRoot: root as ComAtprotoRepoStrongRef.Main,
+      await executeOrDraft(program, draftData, opts, async () => {
+        return createPost(agent, text, {
+          reply: parent,
+          replyRoot: root as ComAtprotoRepoStrongRef.Main,
+        });
       });
-      console.log(postUri);
     });
 }
 
@@ -306,8 +425,21 @@ export function registerQuote(program: Command): void {
     .description("Quote a post")
     .argument("<uri>", "URI of the post to quote")
     .argument("<text...>", "Quote text")
-    .action(async (uri: string, textParts: string[]) => {
+    .option("--draft", "Save as draft instead of publishing")
+    .action(async (uri: string, textParts: string[], opts: { draft?: boolean }) => {
       const text = textParts.join(" ");
+
+      const draftData: Omit<Draft, "id" | "createdAt" | "reason"> = {
+        type: "quote",
+        text,
+        quoteUri: uri,
+      };
+
+      if (opts.draft) {
+        await executeOrDraft(program, draftData, opts, async () => "");
+        return;
+      }
+
       const agent = await getClient(program);
 
       const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
@@ -322,12 +454,13 @@ export function registerQuote(program: Command): void {
         rkey,
       });
 
-      const postUri = await createPost(agent, text, {
-        quote: {
-          uri: record.data.uri,
-          cid: record.data.cid!,
-        },
+      await executeOrDraft(program, draftData, opts, async () => {
+        return createPost(agent, text, {
+          quote: {
+            uri: record.data.uri,
+            cid: record.data.cid!,
+          },
+        });
       });
-      console.log(postUri);
     });
 }
