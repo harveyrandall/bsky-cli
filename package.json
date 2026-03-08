@@ -1,6 +1,6 @@
 {
   "name": "@harveyrandall/bsky-cli",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A CLI client for Bluesky",
   "type": "module",
   "bin": {
@@ -16,7 +16,8 @@
     "link:global": "yarn build && npm link",
     "unlink:global": "npm unlink -g @harveyrandall/bsky-cli",
     "prepublishOnly": "yarn typecheck && yarn test:run && yarn build",
-    "publish:npm": "npm publish --access public"
+    "publish:npm": "npm publish --access public",
+    "release:push": "git push --follow-tags"
   },
   "engines": {
     "node": ">=22"
