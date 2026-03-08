@@ -30,6 +30,7 @@ import { registerBookmarks } from "@/commands/bookmark";
 import { registerAppPassword } from "@/commands/password";
 import { registerInviteCodes } from "@/commands/invite";
 import { registerCompletions } from "@/commands/completions";
+import { registerDrafts, syncNetworkDrafts } from "@/commands/draft";
 import type { AtpAgent } from "@atproto/api";
 import type { Config } from "@/lib/types";
 
@@ -48,11 +49,21 @@ function resolveProfile(program: Command): string | undefined {
 }
 
 // Helper to get authenticated client within commands
+let syncDone = false;
+
 export async function getClient(program: Command): Promise<AtpAgent> {
   const profile = resolveProfile(program);
   const config = await loadConfig(profile);
   const prefix = profile ? `${profile}-` : "";
-  return createClient(config, prefix);
+  const agent = await createClient(config, prefix);
+
+  // One-time sync check: successful auth proves connectivity
+  if (!syncDone) {
+    syncDone = true;
+    await syncNetworkDrafts(agent, profile);
+  }
+
+  return agent;
 }
 
 export async function getConfig(program: Command): Promise<Config> {
@@ -97,6 +108,7 @@ registerBookmarks(program);
 registerAppPassword(program);
 registerInviteCodes(program);
 registerCompletions(program);
+registerDrafts(program);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err.message ?? err);
