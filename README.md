@@ -215,7 +215,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
 ## Roadmap
 
-- [ ] Direct messages
+- [x] Direct messages
 - [ ] List creation and management
 - [ ] Starter packs
 - [ ] Moderation lists
