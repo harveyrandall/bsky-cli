@@ -12,6 +12,20 @@ export interface AuthInfo {
   refreshJwt: string;
 }
 
+export interface Draft {
+  id: string;
+  createdAt: string;
+  reason: "manual" | "length" | "network";
+  type: "post" | "reply" | "quote";
+  text: string;
+  images?: string[];
+  imageAlts?: string[];
+  video?: string;
+  videoAlt?: string;
+  replyUri?: string;
+  quoteUri?: string;
+}
+
 export interface GlobalOptions {
   json?: boolean;
   profile?: string;
