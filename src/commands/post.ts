@@ -151,7 +151,7 @@ export async function createPost(
     video?: string;
     videoAlt?: string;
   },
-): Promise<string> {
+): Promise<{ uri: string; cid: string }> {
   const facets = await buildFacets(agent, text);
 
   const post: AppBskyFeedPost.Record = {
@@ -216,10 +216,10 @@ export async function createPost(
   }
 
   const resp = await agent.post(post);
-  return resp.uri;
+  return { uri: resp.uri, cid: resp.cid };
 }
 
-function isNetworkError(err: unknown): boolean {
+export function isNetworkError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : "";
   const cause = err instanceof Error ? err.cause : undefined;
   const causeMsg = cause instanceof Error ? cause.message : "";
@@ -235,7 +235,7 @@ function isNetworkError(err: unknown): boolean {
   );
 }
 
-function isLengthError(err: unknown): boolean {
+export function isLengthError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : "";
   return msg.includes("must not be longer than") || msg.includes("InvalidRecord");
 }
@@ -244,7 +244,7 @@ async function executeOrDraft(
   program: Command,
   draftData: Omit<Draft, "id" | "createdAt" | "reason">,
   opts: { draft?: boolean },
-  execute: () => Promise<string>,
+  execute: () => Promise<{ uri: string; cid: string }>,
 ): Promise<void> {
   const profile = program.opts().profile;
 
@@ -284,8 +284,8 @@ async function executeOrDraft(
   }
 
   try {
-    const uri = await execute();
-    console.log(uri);
+    const result = await execute();
+    console.log(result.uri);
   } catch (err: unknown) {
     if (isLengthError(err)) {
       const draft = await saveDraft({ ...draftData, reason: "length" }, profile);
@@ -380,7 +380,7 @@ export function registerReply(program: Command): void {
       };
 
       if (opts.draft) {
-        await executeOrDraft(program, draftData, opts, async () => "");
+        await executeOrDraft(program, draftData, opts, async () => ({ uri: "", cid: "" }));
         return;
       }
 
@@ -436,7 +436,7 @@ export function registerQuote(program: Command): void {
       };
 
       if (opts.draft) {
-        await executeOrDraft(program, draftData, opts, async () => "");
+        await executeOrDraft(program, draftData, opts, async () => ({ uri: "", cid: "" }));
         return;
       }
 

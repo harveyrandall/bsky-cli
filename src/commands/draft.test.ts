@@ -170,7 +170,7 @@ describe("drafts send", () => {
   it("publishes a simple post draft and deletes it", async () => {
     mockResolveDraftId.mockResolvedValue("1741392000000-a7f3");
     mockLoadDraft.mockResolvedValue(sampleDraft);
-    mockCreatePost.mockResolvedValue("at://did:plc:test/app.bsky.feed.post/new");
+    mockCreatePost.mockResolvedValue({ uri: "at://did:plc:test/app.bsky.feed.post/new", cid: "bafyreicid-new" });
     mockDeleteDraft.mockResolvedValue(undefined);
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -202,7 +202,7 @@ describe("drafts send", () => {
     };
     mockResolveDraftId.mockResolvedValue("1741392000000-a7f3");
     mockLoadDraft.mockResolvedValue(replyDraft);
-    mockCreatePost.mockResolvedValue("at://did:plc:test/app.bsky.feed.post/reply1");
+    mockCreatePost.mockResolvedValue({ uri: "at://did:plc:test/app.bsky.feed.post/reply1", cid: "bafyreicid-reply1" });
     mockDeleteDraft.mockResolvedValue(undefined);
 
     mockAgent.com.atproto.repo.getRecord.mockResolvedValue({
@@ -252,7 +252,7 @@ describe("drafts send", () => {
     };
     mockResolveDraftId.mockResolvedValue("1741392000000-a7f3");
     mockLoadDraft.mockResolvedValue(quoteDraft);
-    mockCreatePost.mockResolvedValue("at://did:plc:test/app.bsky.feed.post/quote1");
+    mockCreatePost.mockResolvedValue({ uri: "at://did:plc:test/app.bsky.feed.post/quote1", cid: "bafyreicid-quote1" });
     mockDeleteDraft.mockResolvedValue(undefined);
 
     mockAgent.com.atproto.repo.getRecord.mockResolvedValue({

@@ -1,5 +1,3 @@
-import { Segmenter } from "node:util";
-
 const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
 
 /**

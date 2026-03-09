@@ -96,9 +96,9 @@ export async function syncNetworkDrafts(
         };
       }
 
-      const uri = await createPost(agent, draft.text, opts);
+      const result = await createPost(agent, draft.text, opts);
       await deleteDraft(draft.id, profile);
-      console.error(`  Sent: ${uri}`);
+      console.error(`  Sent: ${result.uri}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  Failed (${draft.id}): ${msg}`);
@@ -247,8 +247,8 @@ export function registerDrafts(program: Command): void {
         };
       }
 
-      const uri = await createPost(agent, draft.text, opts);
-      console.log(uri);
+      const result = await createPost(agent, draft.text, opts);
+      console.log(result.uri);
       await deleteDraft(id, profile);
       console.error(`Draft ${id} published and removed.`);
     });
