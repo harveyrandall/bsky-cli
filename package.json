@@ -17,6 +17,7 @@
     "unlink:global": "npm unlink -g @harveyrandall/bsky-cli",
     "prepublishOnly": "yarn typecheck && yarn test:run && yarn build",
     "publish:npm": "npm publish --access public",
+    "release:version": "scripts/commit-version-bump.sh",
     "release:push": "git push --follow-tags"
   },
   "engines": {
@@ -60,7 +61,9 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
+    "@types/semver": "^7.7.1",
     "@types/ws": "^8",
+    "semver": "^7.7.4",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

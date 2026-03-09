@@ -3,7 +3,7 @@
 
 __metadata:
   version: 8
-  cacheKey: 10c0
+  cacheKey: 10
 
 "@atproto/api@npm:^0.19.1":
   version: 0.19.1
@@ -284,10 +284,12 @@ __metadata:
   dependencies:
     "@atproto/api": "npm:^0.19.1"
     "@types/node": "npm:^25.3.3"
+    "@types/semver": "npm:^7.7.1"
     "@types/ws": "npm:^8"
     chalk: "npm:^5.6.2"
     cheerio: "npm:^1.2.0"
     commander: "npm:^14.0.3"
+    semver: "npm:^7.7.4"
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.21.0"
     typescript: "npm:^5.9.3"
@@ -575,6 +577,13 @@ __metadata:
   dependencies:
     undici-types: "npm:~7.18.0"
   checksum: 10/883e8942b0ddf89f9aae56c4205af8d9a368acd6cab83aa052447a6c5e69ce2bc8ab3f54e549233ada160ba9216dad7f30c62c35867c584fe844ae99f7dea2e0
+  languageName: node
+  linkType: hard
+
+"@types/semver@npm:^7.7.1":
+  version: 7.7.1
+  resolution: "@types/semver@npm:7.7.1"
+  checksum: 10/8f09e7e6ca3ded67d78ba7a8f7535c8d9cf8ced83c52e7f3ac3c281fe8c689c3fe475d199d94390dc04fc681d51f2358b430bb7b2e21c62de24f2bee2c719068
   languageName: node
   linkType: hard
 
@@ -1757,7 +1766,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"semver@npm:^7.3.5":
+"semver@npm:^7.3.5, semver@npm:^7.7.4":
   version: 7.7.4
   resolution: "semver@npm:7.7.4"
   bin:
