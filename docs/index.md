@@ -6,6 +6,8 @@ A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 
 - **Full timeline access** — read your feed, stream the firehose with regex filtering, browse threads
 - **Rich posting** — text, images, videos, replies, quotes, and deletions
+- **Threads** — split long text into threads at sentence boundaries with interactive preview
+- **Drafts** — automatic draft saving on network failure, manual `--draft` flag, offline sync
 - **Social graph** — follow, block, mute, and view followers/following
 - **Bookmarks** — save and manage posts locally
 - **Multi-account** — named profiles for switching between accounts
@@ -47,6 +49,9 @@ bsky tl
 
 # Post something
 bsky post "Hello from the command line!"
+
+# Create a thread from long text
+bsky create-thread "Your long text that exceeds 300 characters..."
 
 # Stream the firehose, filtering for keywords
 bsky stream --pattern "typescript|rust"

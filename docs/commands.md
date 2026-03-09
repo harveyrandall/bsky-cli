@@ -71,6 +71,7 @@ bsky post "Watch this" --video clip.mp4 --video-alt "A video clip"
 | Flag | Description |
 |------|-------------|
 | `--stdin` | Read post text from stdin |
+| `--draft` | Save as draft instead of publishing |
 | `-i, --image <path...>` | Attach images (up to 4) |
 | `--image-alt <text...>` | Alt text for images (one per image) |
 | `--video <path>` | Attach a video |
@@ -92,6 +93,47 @@ Quote an existing post.
 bsky quote at://did:plc:abc123/app.bsky.feed.post/xyz "This is interesting"
 ```
 
+### `bsky create-thread`
+
+Create a thread from long text. Text is split at sentence boundaries and posted as a self-reply chain.
+
+```bash
+bsky create-thread "Long text that exceeds 300 characters..."
+bsky create-thread --stdin < essay.txt
+bsky create-thread "Text..." --thread-label          # add 🧵 1/N labels
+bsky create-thread "Text..." --draft                 # save as draft
+bsky create-thread "Text..." --no-preview            # skip interactive preview
+bsky create-thread "Text..." --skip-validation       # bypass 301-375 char edge case
+bsky create-thread "Text..." -i a.jpg b.jpg          # distribute images across posts
+bsky create-thread "Text..." --reply-to at://...     # first post replies to URI
+```
+
+| Flag | Description |
+|------|-------------|
+| `--stdin` | Read text from stdin |
+| `--draft` | Save as draft instead of publishing |
+| `--thread-label` | Add 🧵 1/N label to each post |
+| `--prepend-thread-label` | Put label at start (default: append) |
+| `-i, --image <files...>` | Images distributed across posts in order |
+| `--image-alt <alts...>` | Alt text for images |
+| `--video <file>` | Video (first post only) |
+| `--video-alt <alt>` | Alt text for video |
+| `--link <urls...>` | Link embeds distributed across posts |
+| `--media-all` | Attach same media to every post |
+| `--reply-to <uri>` | First post replies to this URI |
+| `--quote <uri>` | First post quotes this URI |
+| `--no-preview` | Skip interactive preview |
+| `--skip-validation` | Skip edge-case validation for 301-375 char text |
+
+!!! tip
+    Text between 301-375 characters triggers an edge case flow. You'll see a split preview and can choose to post anyway, trim the text, or save as a draft. Use `--skip-validation` to skip this and split directly.
+
+!!! info "Interactive preview"
+    By default, threads show a preview with commands: `[c]onfirm`, `[e]dit <N>` (opens `$EDITOR`), `[d]elete <N>`, `[q]uit` (offers to save as draft). Disable with `--no-preview` or in non-TTY environments.
+
+!!! info "Partial failure recovery"
+    If posting fails mid-thread, the remaining posts are saved as a draft with the reply chain intact. Use `bsky drafts send <id>` to resume.
+
 ### `bsky delete`
 
 Delete one or more of your posts.
@@ -99,6 +141,41 @@ Delete one or more of your posts.
 ```bash
 bsky delete at://did:plc:abc123/app.bsky.feed.post/xyz
 bsky delete <uri1> <uri2> <uri3>
+```
+
+## Drafts
+
+Drafts are saved locally when posting fails (network errors, edge cases) or when `--draft` is used. Network drafts are automatically offered for sending next time you run a command while online.
+
+### `bsky drafts list` / `bsky drafts ls`
+
+```bash
+bsky drafts list
+bsky drafts ls --json
+```
+
+### `bsky drafts show`
+
+Show full contents of a draft, including individual posts for thread drafts.
+
+```bash
+bsky drafts show <id>
+bsky drafts show 1741392    # unique prefix match
+```
+
+### `bsky drafts send`
+
+Publish a saved draft. For thread drafts, posts are sent sequentially with reply chaining. Drafts saved from partial failures resume from where they left off.
+
+```bash
+bsky drafts send <id>
+```
+
+### `bsky drafts delete` / `bsky drafts rm`
+
+```bash
+bsky drafts delete <id>
+bsky drafts rm <id>
 ```
 
 ## Engagement
