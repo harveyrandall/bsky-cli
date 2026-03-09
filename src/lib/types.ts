@@ -12,11 +12,20 @@ export interface AuthInfo {
   refreshJwt: string;
 }
 
+export interface ThreadDraftPost {
+  text: string;
+  images?: string[];
+  imageAlts?: string[];
+  video?: string;
+  videoAlt?: string;
+  link?: string;
+}
+
 export interface Draft {
   id: string;
   createdAt: string;
   reason: "manual" | "length" | "network";
-  type: "post" | "reply" | "quote";
+  type: "post" | "reply" | "quote" | "thread";
   text: string;
   images?: string[];
   imageAlts?: string[];
@@ -24,6 +33,7 @@ export interface Draft {
   videoAlt?: string;
   replyUri?: string;
   quoteUri?: string;
+  posts?: ThreadDraftPost[];
 }
 
 export interface GlobalOptions {
