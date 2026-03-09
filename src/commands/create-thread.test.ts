@@ -106,10 +106,10 @@ describe("create-thread: edge case 301-375", () => {
     mockFetch.mockResolvedValue({ ok: false });
   });
 
-  it("auto-saves as draft and shows trim suggestions", async () => {
-    // 320 chars with a sentence boundary near 300
-    const text =
-      "A".repeat(280) + ". " + "B".repeat(38);
+  it("shows split preview and saves as draft in non-TTY", async () => {
+    // ~320 chars with word boundaries and a sentence boundary near 300
+    const words = Array(47).fill("alpha").join(" "); // 47*6-1 = 281
+    const text = words + ". " + Array(6).fill("bravo").join(" ") + "."; // ~314
 
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -123,12 +123,23 @@ describe("create-thread: edge case 301-375", () => {
     const program = createProgram();
     await program.parseAsync(["node", "test", "create-thread", text, "--no-preview"]);
 
+    // Should show the split preview first
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("too long for one post"),
+    );
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("split as"),
+    );
+
+    // Then save as draft
     expect(mockSaveDraft).toHaveBeenCalledWith(
       expect.objectContaining({ type: "post", reason: "length" }),
       undefined,
     );
+
+    // Should mention --skip-validation
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining("too long for one post"),
+      expect.stringContaining("--skip-validation"),
     );
 
     errSpy.mockRestore();
@@ -136,6 +147,40 @@ describe("create-thread: edge case 301-375", () => {
       value: originalIsTTY,
       configurable: true,
     });
+  });
+
+  it("bypasses edge case with --skip-validation", async () => {
+    const words = Array(47).fill("alpha").join(" ");
+    const text = words + ". " + Array(6).fill("bravo").join(" ") + ".";
+
+    let callCount = 0;
+    mockAgent.post.mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        uri: `at://did:plc:test/app.bsky.feed.post/s${callCount}`,
+        cid: `bafyreicid-s${callCount}`,
+      });
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync([
+      "node",
+      "test",
+      "create-thread",
+      text,
+      "--skip-validation",
+      "--no-preview",
+    ]);
+
+    // Should have posted as a thread, not saved as draft
+    expect(mockAgent.post.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mockSaveDraft).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
   });
 });
 

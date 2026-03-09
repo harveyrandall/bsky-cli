@@ -311,6 +311,7 @@ export function registerCreateThread(program: Command): void {
     .option("--reply-to <uri>", "First post replies to this URI")
     .option("--quote <uri>", "First post quotes this URI")
     .option("--no-preview", "Skip interactive preview")
+    .option("--skip-validation", "Skip edge-case validation for 301-375 char text")
     .action(
       async (
         textParts: string[],
@@ -328,6 +329,7 @@ export function registerCreateThread(program: Command): void {
           replyTo?: string;
           quote?: string;
           preview?: boolean;
+          skipValidation?: boolean;
         },
       ) => {
         let text = textParts.join(" ");
@@ -371,76 +373,130 @@ export function registerCreateThread(program: Command): void {
         }
 
         // Edge case: 301-375 chars
-        if (isEdgeCaseLength(text)) {
-          const draft = await saveDraft(
-            { type: "post", text, reason: "length" },
-            profile,
-          );
+        if (isEdgeCaseLength(text) && !opts.skipValidation) {
+          // Show what the split would look like
+          const edgePosts = splitThread(text, {
+            threadLabel: opts.threadLabel,
+            threadLabelPosition: opts.prependThreadLabel ? "prepend" : "append",
+          });
 
-          const over = len - 300;
           console.error(
-            `Thread text is ${len} characters — too long for one post, too short to split naturally.`,
+            chalk.yellow(`Thread text is ${len} characters — too long for one post, short for a thread.\n`),
           );
-          console.error(`Saved as draft: ${chalk.blue(draft.id)}\n`);
-
-          const suggestions = trimSuggestions(text);
-          if (suggestions.length > 0) {
-            console.error(`Trim suggestions (need to remove ${over} characters):`);
-            for (let i = 0; i < suggestions.length; i++) {
-              console.error(
-                `  ${i + 1}. End after "${suggestions[i].preview}" ${chalk.dim(`(cuts ${suggestions[i].charsToRemove} chars)`)}`,
-              );
-            }
+          console.error("The thread would be split as:");
+          for (const ep of edgePosts) {
+            const chars = graphemeLength(ep.text);
+            console.error(
+              `${chalk.blue(`--- Post ${ep.index + 1}/${edgePosts.length}`)} ${chalk.dim(`(${chars} chars)`)} ${chalk.blue("---")}`,
+            );
+            console.error(ep.text);
             console.error();
           }
 
-          // Offer to accept suggestion in TTY mode
-          if (stdin.isTTY && suggestions.length > 0) {
+          // Ask if user wants to post anyway (TTY only)
+          if (stdin.isTTY) {
             const rl = createInterface({ input: stdin, output: stderr });
-            const answer = await rl.question(
-              "Accept a suggestion? [1-" + suggestions.length + "/n] ",
-            );
+            const confirm = await rl.question("Post this thread anyway? [y/N] ");
             rl.close();
 
-            const choice = parseInt(answer.trim(), 10);
-            if (choice >= 1 && choice <= suggestions.length) {
-              // Trim text to the suggestion boundary
-              const trimmedText = text
-                .trim()
-                .slice(0, text.trim().length - suggestions[choice - 1].charsToRemove);
+            if (confirm.trim().toLowerCase() === "y") {
+              // Fall through to normal thread posting
+              // (handled below after this block)
+            } else {
+              // Declined — save as draft and show trim suggestions
+              const draft = await saveDraft(
+                { type: "post", text, reason: "length" },
+                profile,
+              );
 
-              if (opts.draft) {
-                console.error(`Trimmed text saved in draft ${draft.id}`);
-                return;
+              const over = len - 300;
+              console.error(`Saved as draft: ${chalk.blue(draft.id)}\n`);
+
+              const suggestions = trimSuggestions(text);
+              if (suggestions.length > 0) {
+                console.error(`Trim suggestions (need to remove ${over} characters):`);
+                for (let i = 0; i < suggestions.length; i++) {
+                  console.error(
+                    `  ${i + 1}. End after "${suggestions[i].preview}" ${chalk.dim(`(cuts ${suggestions[i].charsToRemove} chars)`)}`,
+                  );
+                }
+                console.error();
               }
 
-              const agent = await getClient(program);
-              const result = await createPost(agent, trimmedText, {
-                images: opts.image,
-                imageAlts: opts.imageAlt,
-                video: opts.video,
-                videoAlt: opts.videoAlt,
-              });
+              // Offer to accept suggestion
+              if (suggestions.length > 0) {
+                const rl2 = createInterface({ input: stdin, output: stderr });
+                const answer = await rl2.question(
+                  "Accept a suggestion? [1-" + suggestions.length + "/n] ",
+                );
+                rl2.close();
 
-              if (json) {
-                outputJson({ uris: [result.uri] });
-              } else {
-                console.log(result.uri);
+                const choice = parseInt(answer.trim(), 10);
+                if (choice >= 1 && choice <= suggestions.length) {
+                  const trimmedText = text
+                    .trim()
+                    .slice(0, text.trim().length - suggestions[choice - 1].charsToRemove);
+
+                  if (opts.draft) {
+                    console.error(`Trimmed text saved in draft ${draft.id}`);
+                    return;
+                  }
+
+                  const agent = await getClient(program);
+                  const result = await createPost(agent, trimmedText, {
+                    images: opts.image,
+                    imageAlts: opts.imageAlt,
+                    video: opts.video,
+                    videoAlt: opts.videoAlt,
+                  });
+
+                  if (json) {
+                    outputJson({ uris: [result.uri] });
+                  } else {
+                    console.log(result.uri);
+                  }
+
+                  const { deleteDraft } = await import("@/drafts");
+                  await deleteDraft(draft.id, profile);
+                  console.error("Draft deleted after successful post.");
+                  return;
+                }
               }
 
-              // Delete the draft on success
-              const { deleteDraft } = await import("@/drafts");
-              await deleteDraft(draft.id, profile);
-              console.error("Draft deleted after successful post.");
+              console.error(
+                `Tip: pipe through 'llm' to auto-trim:\n  bsky drafts show ${draft.id.slice(0, 7)} | llm "shorten to under 300 chars" | bsky post`,
+              );
               return;
             }
-          }
+          } else {
+            // Non-TTY: save as draft, show suggestions
+            const draft = await saveDraft(
+              { type: "post", text, reason: "length" },
+              profile,
+            );
 
-          // No suggestion accepted
-          console.error(
-            `Tip: pipe through 'llm' to auto-trim:\n  bsky drafts show ${draft.id.slice(0, 7)} | llm "shorten to under 300 chars" | bsky post`,
-          );
-          return;
+            const over = len - 300;
+            console.error(`Saved as draft: ${chalk.blue(draft.id)}\n`);
+
+            const suggestions = trimSuggestions(text);
+            if (suggestions.length > 0) {
+              console.error(`Trim suggestions (need to remove ${over} characters):`);
+              for (let i = 0; i < suggestions.length; i++) {
+                console.error(
+                  `  ${i + 1}. End after "${suggestions[i].preview}" ${chalk.dim(`(cuts ${suggestions[i].charsToRemove} chars)`)}`,
+                );
+              }
+              console.error();
+            }
+
+            console.error(
+              `Tip: pipe through 'llm' to auto-trim:\n  bsky drafts show ${draft.id.slice(0, 7)} | llm "shorten to under 300 chars" | bsky post`,
+            );
+            console.error(
+              `Or use --skip-validation to post the thread as-is.`,
+            );
+            return;
+          }
         }
 
         // Normal thread: split text
