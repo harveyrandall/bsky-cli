@@ -13,7 +13,8 @@ import {
   deleteDraft,
   resolveDraftId,
 } from "@/drafts";
-import { createPost } from "@/commands/post";
+import { createPost, isNetworkError } from "@/commands/post";
+import { graphemeLength } from "@/lib/split-thread";
 import { outputJson } from "@/lib/format";
 
 function reasonTag(reason: string): string {
@@ -45,6 +46,50 @@ export async function syncNetworkDrafts(
 
   for (const draft of pending) {
     try {
+      // Thread draft: post each split post sequentially
+      if (draft.type === "thread" && draft.posts) {
+        let rootRef: ComAtprotoRepoStrongRef.Main | undefined;
+        let parentRef: ComAtprotoRepoStrongRef.Main | undefined;
+
+        if (draft.replyUri) {
+          const replyParts = draft.replyUri.split("/");
+          const replyRkey = replyParts[replyParts.length - 1];
+          const replyCollection = replyParts[replyParts.length - 2];
+          const replyDid = replyParts[2];
+
+          const replyRecord = await agent.com.atproto.repo.getRecord({
+            repo: replyDid,
+            collection: replyCollection,
+            rkey: replyRkey,
+          });
+
+          parentRef = { uri: replyRecord.data.uri, cid: replyRecord.data.cid! };
+          const parentValue = replyRecord.data.value as AppBskyFeedPost.Record;
+          rootRef = (parentValue.reply?.root ?? parentRef) as ComAtprotoRepoStrongRef.Main;
+        }
+
+        for (let i = 0; i < draft.posts.length; i++) {
+          const post = draft.posts[i];
+          const result = await createPost(agent, post.text, {
+            reply: parentRef,
+            replyRoot: rootRef,
+            images: post.images,
+            imageAlts: post.imageAlts,
+            video: post.video,
+            videoAlt: post.videoAlt,
+          });
+
+          if (i === 0 && !rootRef) {
+            rootRef = { uri: result.uri, cid: result.cid };
+          }
+          parentRef = { uri: result.uri, cid: result.cid };
+        }
+
+        await deleteDraft(draft.id, profile);
+        console.error(`  Sent thread: ${draft.posts.length} posts (${draft.id})`);
+        continue;
+      }
+
       const opts: Parameters<typeof createPost>[2] = {
         images: draft.images,
         imageAlts: draft.imageAlts,
@@ -129,7 +174,10 @@ export function registerDrafts(program: Command): void {
         if (json) {
           outputJson(draft);
         } else {
-          const typeLabel = draft.type !== "post" ? ` [${draft.type}]` : "";
+          let typeLabel = draft.type !== "post" ? ` [${draft.type}]` : "";
+          if (draft.type === "thread" && draft.posts) {
+            typeLabel = ` [thread: ${draft.posts.length} posts]`;
+          }
           const preview =
             draft.text.length > 80
               ? draft.text.slice(0, 77) + "..."
@@ -169,8 +217,30 @@ export function registerDrafts(program: Command): void {
           console.log(`${chalk.blue("Reply to:")} ${draft.replyUri}`);
         if (draft.quoteUri)
           console.log(`${chalk.blue("Quote of:")} ${draft.quoteUri}`);
-        console.log(`${chalk.blue("Text:")}`);
-        console.log(draft.text);
+        if (draft.type === "thread" && draft.posts) {
+          console.log(`${chalk.blue("Posts:")}`);
+          for (let i = 0; i < draft.posts.length; i++) {
+            const p = draft.posts[i];
+            const chars = graphemeLength(p.text);
+            console.log(
+              `${chalk.blue(`--- Post ${i + 1}/${draft.posts.length}`)} ${chalk.dim(`(${chars} chars)`)} ${chalk.blue("---")}`,
+            );
+            console.log(p.text);
+            if (p.images?.length) {
+              console.log(`  ${chalk.dim(`${p.images.length} image(s)`)}`);
+            }
+            if (p.video) {
+              console.log(`  ${chalk.dim(`Video: ${p.video}`)}`);
+            }
+            if (p.link) {
+              console.log(`  ${chalk.dim(`Link: ${p.link}`)}`);
+            }
+            console.log();
+          }
+        } else {
+          console.log(`${chalk.blue("Text:")}`);
+          console.log(draft.text);
+        }
         if (draft.images?.length) {
           console.log(`${chalk.blue("Images:")}`);
           for (let i = 0; i < draft.images.length; i++) {
@@ -245,6 +315,56 @@ export function registerDrafts(program: Command): void {
           uri: record.data.uri,
           cid: record.data.cid!,
         };
+      }
+
+      // Thread draft: post each split post sequentially
+      if (draft.type === "thread" && draft.posts) {
+        let rootRef: ComAtprotoRepoStrongRef.Main | undefined;
+        let parentRef: ComAtprotoRepoStrongRef.Main | undefined;
+
+        // Resume from replyUri if set (partial failure recovery)
+        if (draft.replyUri) {
+          const replyParts = draft.replyUri.split("/");
+          const replyRkey = replyParts[replyParts.length - 1];
+          const replyCollection = replyParts[replyParts.length - 2];
+          const replyDid = replyParts[2];
+
+          const replyRecord = await agent.com.atproto.repo.getRecord({
+            repo: replyDid,
+            collection: replyCollection,
+            rkey: replyRkey,
+          });
+
+          parentRef = { uri: replyRecord.data.uri, cid: replyRecord.data.cid! };
+          const parentValue = replyRecord.data.value as AppBskyFeedPost.Record;
+          rootRef = (parentValue.reply?.root ?? parentRef) as ComAtprotoRepoStrongRef.Main;
+        }
+
+        const uris: string[] = [];
+        for (let i = 0; i < draft.posts.length; i++) {
+          const post = draft.posts[i];
+          const postOpts: Parameters<typeof createPost>[2] = {
+            reply: parentRef,
+            replyRoot: rootRef,
+            images: post.images,
+            imageAlts: post.imageAlts,
+            video: post.video,
+            videoAlt: post.videoAlt,
+          };
+
+          const result = await createPost(agent, post.text, postOpts);
+          uris.push(result.uri);
+
+          if (i === 0 && !rootRef) {
+            rootRef = { uri: result.uri, cid: result.cid };
+          }
+          parentRef = { uri: result.uri, cid: result.cid };
+        }
+
+        for (const uri of uris) console.log(uri);
+        await deleteDraft(id, profile);
+        console.error(`Thread draft ${id} published (${uris.length} posts) and removed.`);
+        return;
       }
 
       const result = await createPost(agent, draft.text, opts);
