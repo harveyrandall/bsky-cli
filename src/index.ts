@@ -31,6 +31,7 @@ import { registerAppPassword } from "@/commands/password";
 import { registerInviteCodes } from "@/commands/invite";
 import { registerCompletions } from "@/commands/completions";
 import { registerDrafts, syncNetworkDrafts } from "@/commands/draft";
+import { registerCreateThread } from "@/commands/create-thread";
 import type { AtpAgent } from "@atproto/api";
 import type { Config } from "@/lib/types";
 
@@ -109,6 +110,7 @@ registerAppPassword(program);
 registerInviteCodes(program);
 registerCompletions(program);
 registerDrafts(program);
+registerCreateThread(program);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err.message ?? err);

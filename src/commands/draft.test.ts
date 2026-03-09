@@ -27,6 +27,7 @@ vi.mock("@/drafts", () => ({
 const mockCreatePost = vi.fn();
 vi.mock("@/commands/post", () => ({
   createPost: (...args: unknown[]) => mockCreatePost(...args),
+  isNetworkError: vi.fn(() => false),
 }));
 
 import { registerDrafts, syncNetworkDrafts } from "./draft";
@@ -170,7 +171,7 @@ describe("drafts send", () => {
   it("publishes a simple post draft and deletes it", async () => {
     mockResolveDraftId.mockResolvedValue("1741392000000-a7f3");
     mockLoadDraft.mockResolvedValue(sampleDraft);
-    mockCreatePost.mockResolvedValue("at://did:plc:test/app.bsky.feed.post/new");
+    mockCreatePost.mockResolvedValue({ uri: "at://did:plc:test/app.bsky.feed.post/new", cid: "bafyreicid-new" });
     mockDeleteDraft.mockResolvedValue(undefined);
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -202,7 +203,7 @@ describe("drafts send", () => {
     };
     mockResolveDraftId.mockResolvedValue("1741392000000-a7f3");
     mockLoadDraft.mockResolvedValue(replyDraft);
-    mockCreatePost.mockResolvedValue("at://did:plc:test/app.bsky.feed.post/reply1");
+    mockCreatePost.mockResolvedValue({ uri: "at://did:plc:test/app.bsky.feed.post/reply1", cid: "bafyreicid-reply1" });
     mockDeleteDraft.mockResolvedValue(undefined);
 
     mockAgent.com.atproto.repo.getRecord.mockResolvedValue({
@@ -252,7 +253,7 @@ describe("drafts send", () => {
     };
     mockResolveDraftId.mockResolvedValue("1741392000000-a7f3");
     mockLoadDraft.mockResolvedValue(quoteDraft);
-    mockCreatePost.mockResolvedValue("at://did:plc:test/app.bsky.feed.post/quote1");
+    mockCreatePost.mockResolvedValue({ uri: "at://did:plc:test/app.bsky.feed.post/quote1", cid: "bafyreicid-quote1" });
     mockDeleteDraft.mockResolvedValue(undefined);
 
     mockAgent.com.atproto.repo.getRecord.mockResolvedValue({
@@ -355,5 +356,173 @@ describe("syncNetworkDrafts", () => {
 
     errSpy.mockRestore();
     Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
+  });
+});
+
+const threadDraft = {
+  id: "1741392000000-t001",
+  createdAt: "2025-03-07T12:00:00.000Z",
+  reason: "network" as const,
+  type: "thread" as const,
+  text: "Original long text",
+  posts: [
+    { text: "First post of thread" },
+    { text: "Second post of thread" },
+    { text: "Third post of thread" },
+  ],
+};
+
+describe("drafts list: thread drafts", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("shows [thread: N posts] tag for thread drafts", async () => {
+    mockListDrafts.mockResolvedValue([threadDraft]);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync(["node", "test", "drafts", "list"]);
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[thread: 3 posts]"),
+    );
+
+    logSpy.mockRestore();
+  });
+});
+
+describe("drafts show: thread drafts", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("renders individual posts with char counts", async () => {
+    mockResolveDraftId.mockResolvedValue("1741392000000-t001");
+    mockLoadDraft.mockResolvedValue(threadDraft);
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync(["node", "test", "drafts", "show", "1741392000"]);
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Post 1/3"),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Post 2/3"),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Post 3/3"),
+    );
+    expect(logSpy).toHaveBeenCalledWith("First post of thread");
+    expect(logSpy).toHaveBeenCalledWith("Second post of thread");
+    expect(logSpy).toHaveBeenCalledWith("Third post of thread");
+
+    logSpy.mockRestore();
+  });
+});
+
+describe("drafts send: thread drafts", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("posts all thread posts sequentially and deletes draft", async () => {
+    mockResolveDraftId.mockResolvedValue("1741392000000-t001");
+    mockLoadDraft.mockResolvedValue({
+      ...threadDraft,
+      reason: "manual",
+    });
+    mockDeleteDraft.mockResolvedValue(undefined);
+
+    let callCount = 0;
+    mockCreatePost.mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        uri: `at://did:plc:test/app.bsky.feed.post/t${callCount}`,
+        cid: `bafyreicid-t${callCount}`,
+      });
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync(["node", "test", "drafts", "send", "1741392000"]);
+
+    expect(mockCreatePost).toHaveBeenCalledTimes(3);
+
+    // Second post should reply to first
+    expect(mockCreatePost.mock.calls[1][2]).toEqual(
+      expect.objectContaining({
+        reply: { uri: "at://did:plc:test/app.bsky.feed.post/t1", cid: "bafyreicid-t1" },
+        replyRoot: { uri: "at://did:plc:test/app.bsky.feed.post/t1", cid: "bafyreicid-t1" },
+      }),
+    );
+
+    // Third post should reply to second with root = first
+    expect(mockCreatePost.mock.calls[2][2]).toEqual(
+      expect.objectContaining({
+        reply: { uri: "at://did:plc:test/app.bsky.feed.post/t2", cid: "bafyreicid-t2" },
+        replyRoot: { uri: "at://did:plc:test/app.bsky.feed.post/t1", cid: "bafyreicid-t1" },
+      }),
+    );
+
+    expect(mockDeleteDraft).toHaveBeenCalledWith("1741392000000-t001", undefined);
+    expect(logSpy).toHaveBeenCalledWith("at://did:plc:test/app.bsky.feed.post/t1");
+    expect(logSpy).toHaveBeenCalledWith("at://did:plc:test/app.bsky.feed.post/t2");
+    expect(logSpy).toHaveBeenCalledWith("at://did:plc:test/app.bsky.feed.post/t3");
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  it("resumes thread from replyUri when set", async () => {
+    const resumeDraft = {
+      ...threadDraft,
+      reason: "network" as const,
+      replyUri: "at://did:plc:abc/app.bsky.feed.post/prev",
+      posts: [
+        { text: "Remaining post 1" },
+        { text: "Remaining post 2" },
+      ],
+    };
+    mockResolveDraftId.mockResolvedValue("1741392000000-t001");
+    mockLoadDraft.mockResolvedValue(resumeDraft);
+    mockDeleteDraft.mockResolvedValue(undefined);
+
+    mockAgent.com.atproto.repo.getRecord.mockResolvedValue({
+      data: {
+        uri: "at://did:plc:abc/app.bsky.feed.post/prev",
+        cid: "bafyreicid-prev",
+        value: {
+          $type: "app.bsky.feed.post",
+          text: "Previous post",
+          createdAt: "2025-01-01T00:00:00Z",
+        },
+      },
+    });
+
+    let callCount = 0;
+    mockCreatePost.mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        uri: `at://did:plc:test/app.bsky.feed.post/r${callCount}`,
+        cid: `bafyreicid-r${callCount}`,
+      });
+    });
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync(["node", "test", "drafts", "send", "1741392000"]);
+
+    // First post should reply to the previous post (from replyUri)
+    expect(mockCreatePost.mock.calls[0][2]).toEqual(
+      expect.objectContaining({
+        reply: { uri: "at://did:plc:abc/app.bsky.feed.post/prev", cid: "bafyreicid-prev" },
+      }),
+    );
+
+    expect(mockDeleteDraft).toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
   });
 });

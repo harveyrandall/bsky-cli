@@ -42,6 +42,7 @@ describe("post command", () => {
 
     mockAgent.post.mockResolvedValue({
       uri: "at://did:plc:test123/app.bsky.feed.post/abc",
+      cid: "bafyreicid-abc",
     });
 
     // Default: fetch returns a non-ok response so link card is skipped
@@ -177,6 +178,7 @@ describe("reply command", () => {
 
     mockAgent.post.mockResolvedValue({
       uri: "at://did:plc:test123/app.bsky.feed.post/reply789",
+      cid: "bafyreicid-reply789",
     });
 
     mockFetch.mockResolvedValue({ ok: false });
@@ -300,6 +302,7 @@ describe("quote command", () => {
 
     mockAgent.post.mockResolvedValue({
       uri: "at://did:plc:test123/app.bsky.feed.post/quote999",
+      cid: "bafyreicid-quote999",
     });
 
     mockFetch.mockResolvedValue({ ok: false });
