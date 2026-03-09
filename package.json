@@ -17,6 +17,7 @@
     "unlink:global": "npm unlink -g @harveyrandall/bsky-cli",
     "prepublishOnly": "yarn typecheck && yarn test:run && yarn build",
     "publish:npm": "npm publish --access public",
+    "release": "scripts/commit-version-bump.sh && git push --follow-tags",
     "release:version": "scripts/commit-version-bump.sh",
     "release:push": "git push --follow-tags"
   },
