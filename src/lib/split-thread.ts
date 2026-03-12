@@ -23,6 +23,7 @@ export interface SplitOptions {
   minLastPostChars: number;
   threadLabel: boolean;
   threadLabelPosition: "append" | "prepend";
+  splitMarker: string | false;
 }
 
 export interface ThreadPost {
@@ -35,6 +36,7 @@ const DEFAULT_OPTS: SplitOptions = {
   minLastPostChars: 75,
   threadLabel: false,
   threadLabelPosition: "append",
+  splitMarker: "///",
 };
 
 /**
@@ -169,10 +171,63 @@ function redistributeLastChunk(
 }
 
 /**
+ * Split text on a manual marker. Returns null if the marker isn't present,
+ * signalling the caller to fall through to automatic splitting.
+ */
+export function splitManual(
+  text: string,
+  marker: string,
+): string[] | null {
+  if (!text.includes(marker)) return null;
+  const segments = text.split(marker).map((s) => s.trim()).filter(Boolean);
+  return segments.length > 0 ? segments : null;
+}
+
+/**
+ * Validate that no manual segment exceeds the character limit.
+ */
+function validateSegments(segments: string[], maxChars: number): void {
+  for (let i = 0; i < segments.length; i++) {
+    const len = graphemeLength(segments[i]);
+    if (len > maxChars) {
+      throw new Error(
+        `Post ${i + 1} is ${len} characters (max ${maxChars}). ` +
+          `Shorten it or add another split marker.`,
+      );
+    }
+  }
+}
+
+/**
+ * Attach thread labels to an array of text segments.
+ */
+function attachLabels(
+  segments: string[],
+  opts: SplitOptions,
+): ThreadPost[] {
+  return segments.map((seg, i) => {
+    let postText = seg;
+    if (opts.threadLabel) {
+      const label = `🧵 ${i + 1}/${segments.length}`;
+      if (opts.threadLabelPosition === "prepend") {
+        postText = `${label}\n${seg}`;
+      } else {
+        postText = `${seg}\n${label}`;
+      }
+    }
+    return { text: postText, index: i };
+  });
+}
+
+/**
  * Split long text into thread posts.
  *
  * Returns an array of ThreadPost objects. If labels are enabled,
  * the label text (e.g. "🧵 1/5") is included in each post's text.
+ *
+ * If the text contains the split marker (default "///"), posts are split
+ * at marker positions instead of automatically. Use `splitMarker: false`
+ * to disable manual splitting.
  */
 export function splitThread(
   text: string,
@@ -180,6 +235,23 @@ export function splitThread(
 ): ThreadPost[] {
   const o = { ...DEFAULT_OPTS, ...opts };
   const trimmed = text.trim();
+
+  // Manual split path — check for markers before anything else
+  if (o.splitMarker !== false) {
+    const segments = splitManual(trimmed, o.splitMarker);
+    if (segments !== null) {
+      if (segments.length === 1) {
+        return [{ text: segments[0], index: 0 }];
+      }
+      let effectiveMax = o.maxChars;
+      if (o.threadLabel) {
+        const worst = labelLength(segments.length, segments.length);
+        effectiveMax = o.maxChars - worst - 1;
+      }
+      validateSegments(segments, effectiveMax);
+      return attachLabels(segments, o);
+    }
+  }
 
   // Single post — no splitting needed
   if (graphemeLength(trimmed) <= o.maxChars) {
@@ -215,19 +287,7 @@ export function splitThread(
     iterations++;
   }
 
-  // Attach labels if enabled
-  return chunks.map((chunk, i) => {
-    let postText = chunk;
-    if (o.threadLabel) {
-      const label = `🧵 ${i + 1}/${chunks.length}`;
-      if (o.threadLabelPosition === "prepend") {
-        postText = `${label}\n${chunk}`;
-      } else {
-        postText = `${chunk}\n${label}`;
-      }
-    }
-    return { text: postText, index: i };
-  });
+  return attachLabels(chunks, o);
 }
 
 /**
