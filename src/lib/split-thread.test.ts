@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   graphemeLength,
   splitThread,
+  splitManual,
   isEdgeCaseLength,
   trimSuggestions,
 } from "./split-thread";
@@ -248,5 +249,124 @@ describe("trimSuggestions", () => {
     const suggestions = trimSuggestions(text);
 
     expect(suggestions.length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe("splitManual", () => {
+  it("returns null when no markers are present", () => {
+    expect(splitManual("Hello world", "///")).toBeNull();
+  });
+
+  it("splits on /// correctly", () => {
+    const result = splitManual("Post one /// Post two /// Post three", "///");
+    expect(result).toEqual(["Post one", "Post two", "Post three"]);
+  });
+
+  it("trims whitespace from segments", () => {
+    const result = splitManual("  First  ///  Second  ", "///");
+    expect(result).toEqual(["First", "Second"]);
+  });
+
+  it("filters empty segments", () => {
+    const result = splitManual("/// First /// /// Second ///", "///");
+    expect(result).toEqual(["First", "Second"]);
+  });
+
+  it("returns null for marker-only text", () => {
+    expect(splitManual("/// /// ///", "///")).toBeNull();
+  });
+
+  it("works with custom markers", () => {
+    const result = splitManual("Part A --- Part B --- Part C", "---");
+    expect(result).toEqual(["Part A", "Part B", "Part C"]);
+  });
+});
+
+describe("splitThread with manual markers", () => {
+  it("uses manual splits when /// is in text", () => {
+    const result = splitThread("First post /// Second post /// Third post");
+    expect(result).toHaveLength(3);
+    expect(result[0].text).toBe("First post");
+    expect(result[1].text).toBe("Second post");
+    expect(result[2].text).toBe("Third post");
+    expect(result[0].index).toBe(0);
+    expect(result[1].index).toBe(1);
+    expect(result[2].index).toBe(2);
+  });
+
+  it("returns single post when only one segment after split", () => {
+    const result = splitThread("Only content ///");
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe("Only content");
+    expect(result[0].index).toBe(0);
+  });
+
+  it("falls through to auto-split when no markers found", () => {
+    const s1 = "A".repeat(200) + ".";
+    const s2 = " " + "B".repeat(200) + ".";
+    const text = s1 + s2;
+    const result = splitThread(text);
+    // Should auto-split, not return single post
+    expect(result.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("adds thread labels to manual splits", () => {
+    const result = splitThread("Post A /// Post B", { threadLabel: true });
+    expect(result).toHaveLength(2);
+    expect(result[0].text).toContain("Post A");
+    expect(result[0].text).toContain("🧵 1/2");
+    expect(result[1].text).toContain("Post B");
+    expect(result[1].text).toContain("🧵 2/2");
+  });
+
+  it("prepends thread labels to manual splits", () => {
+    const result = splitThread("Post A /// Post B", {
+      threadLabel: true,
+      threadLabelPosition: "prepend",
+    });
+    expect(result[0].text).toMatch(/^🧵 1\/2\n/);
+    expect(result[1].text).toMatch(/^🧵 2\/2\n/);
+  });
+
+  it("throws when a manual segment exceeds maxChars", () => {
+    const longPost = "A".repeat(301);
+    expect(() => splitThread(`${longPost} /// Short`)).toThrow(
+      "Post 1 is 301 characters (max 300)",
+    );
+  });
+
+  it("throws for second segment exceeding maxChars", () => {
+    const longPost = "A".repeat(305);
+    expect(() => splitThread(`Short /// ${longPost}`)).toThrow(
+      "Post 2 is 305 characters (max 300)",
+    );
+  });
+
+  it("uses custom marker via splitMarker option", () => {
+    const result = splitThread("Alpha --- Beta --- Gamma", {
+      splitMarker: "---",
+    });
+    expect(result).toHaveLength(3);
+    expect(result[0].text).toBe("Alpha");
+    expect(result[1].text).toBe("Beta");
+    expect(result[2].text).toBe("Gamma");
+  });
+
+  it("disables manual splitting when splitMarker is false", () => {
+    // Text contains /// but splitMarker is false — should auto-split or return single post
+    const result = splitThread("Hello /// world", { splitMarker: false });
+    // "Hello /// world" is 15 chars — fits in one post
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe("Hello /// world");
+  });
+
+  it("accounts for label length when validating manual segments", () => {
+    // labelLength(2, 2) = graphemeLength("🧵 2/2") = 5
+    // effectiveMax = 300 - 5 - 1 (newline) = 294
+    // So 295 chars should exceed the effective max
+    const text = "A".repeat(295) + " /// " + "B".repeat(100);
+    expect(() => splitThread(text, { threadLabel: true })).toThrow(
+      /Post 1 is 295 characters/,
+    );
   });
 });
