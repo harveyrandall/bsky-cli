@@ -121,6 +121,30 @@ bsky quote <uri> <text>
 bsky delete <uri...>
 ```
 
+### Threads
+
+```
+bsky create-thread <text> [--stdin] [--thread-label] [--draft] [--no-preview]
+                          [--split-on <marker>] [--skip-validation]
+```
+
+Splits long text into a thread. Uses `///` as the default manual split marker:
+
+```bash
+bsky create-thread "First post /// Second post /// Third post"
+bsky create-thread "Part A --- Part B" --split-on "---"
+bsky create-thread --stdin < essay.txt --thread-label
+```
+
+### Drafts
+
+```
+bsky drafts list
+bsky drafts show <id>
+bsky drafts send <id>
+bsky drafts delete <id>
+```
+
 ### Engagement
 
 ```
@@ -215,7 +239,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
 ## Roadmap
 
-- [x] Direct messages
+- [x] Threads with automatic and manual splitting
+- [x] Drafts with offline sync and partial failure recovery
 - [ ] List creation and management
 - [ ] Starter packs
 - [ ] Moderation lists
