@@ -310,6 +310,7 @@ export function registerCreateThread(program: Command): void {
     .option("--media-all", "Attach same media to every post")
     .option("--reply-to <uri>", "First post replies to this URI")
     .option("--quote <uri>", "First post quotes this URI")
+    .option("--split-on <marker>", "Custom split marker (default: ///)")
     .option("--no-preview", "Skip interactive preview")
     .option("--skip-validation", "Skip edge-case validation for 301-375 char text")
     .action(
@@ -328,6 +329,7 @@ export function registerCreateThread(program: Command): void {
           mediaAll?: boolean;
           replyTo?: string;
           quote?: string;
+          splitOn?: string;
           preview?: boolean;
           skipValidation?: boolean;
         },
@@ -346,9 +348,11 @@ export function registerCreateThread(program: Command): void {
         const profile = program.opts().profile;
         const json = isJson(program);
         const len = graphemeLength(text);
+        const splitMarker = opts.splitOn ?? "///";
+        const hasManualSplits = text.includes(splitMarker);
 
-        // Single post: delegate
-        if (len <= 300) {
+        // Single post: delegate (but not if manual split markers are present)
+        if (len <= 300 && !hasManualSplits) {
           if (opts.draft) {
             const draft = await saveDraft(
               { type: "post", text, reason: "manual" },
@@ -372,12 +376,13 @@ export function registerCreateThread(program: Command): void {
           return;
         }
 
-        // Edge case: 301-375 chars
-        if (isEdgeCaseLength(text) && !opts.skipValidation) {
+        // Edge case: 301-375 chars (skip when manual markers are present)
+        if (isEdgeCaseLength(text) && !opts.skipValidation && !hasManualSplits) {
           // Show what the split would look like
           const edgePosts = splitThread(text, {
             threadLabel: opts.threadLabel,
             threadLabelPosition: opts.prependThreadLabel ? "prepend" : "append",
+            splitMarker,
           });
 
           console.error(
@@ -500,10 +505,17 @@ export function registerCreateThread(program: Command): void {
         }
 
         // Normal thread: split text
-        const splitPosts = splitThread(text, {
-          threadLabel: opts.threadLabel,
-          threadLabelPosition: opts.prependThreadLabel ? "prepend" : "append",
-        });
+        let splitPosts: ThreadPost[];
+        try {
+          splitPosts = splitThread(text, {
+            threadLabel: opts.threadLabel,
+            threadLabelPosition: opts.prependThreadLabel ? "prepend" : "append",
+            splitMarker,
+          });
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
 
         // Warn about extra images
         if (

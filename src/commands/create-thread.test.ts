@@ -363,6 +363,110 @@ describe("create-thread: thread splitting", () => {
   });
 });
 
+describe("create-thread: manual split markers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockResolvedValue({ ok: false });
+
+    let callCount = 0;
+    mockAgent.post.mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        uri: `at://did:plc:test/app.bsky.feed.post/m${callCount}`,
+        cid: `bafyreicid-m${callCount}`,
+      });
+    });
+  });
+
+  it("splits on /// markers and posts exact number of segments", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync([
+      "node", "test", "create-thread",
+      "First post /// Second post /// Third post",
+      "--no-preview",
+    ]);
+
+    expect(mockAgent.post).toHaveBeenCalledTimes(3);
+    expect(mockAgent.post.mock.calls[0][0].text).toBe("First post");
+    expect(mockAgent.post.mock.calls[1][0].text).toBe("Second post");
+    expect(mockAgent.post.mock.calls[2][0].text).toBe("Third post");
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  it("uses --split-on with a custom marker", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync([
+      "node", "test", "create-thread",
+      "Part A --- Part B",
+      "--split-on", "---",
+      "--no-preview",
+    ]);
+
+    expect(mockAgent.post).toHaveBeenCalledTimes(2);
+    expect(mockAgent.post.mock.calls[0][0].text).toBe("Part A");
+    expect(mockAgent.post.mock.calls[1][0].text).toBe("Part B");
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  it("skips edge case (301-375) when /// markers are present", async () => {
+    // Text in edge case range (301-375) but with manual markers
+    const seg1 = "A".repeat(200);
+    const seg2 = "B".repeat(150);
+    const text = `${seg1} /// ${seg2}`; // > 300 total, but each segment fits
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync([
+      "node", "test", "create-thread", text, "--no-preview",
+    ]);
+
+    // Should post directly, not trigger edge case flow
+    expect(mockAgent.post).toHaveBeenCalledTimes(2);
+    expect(mockSaveDraft).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  it("exits with error when a manual segment exceeds 300 chars", async () => {
+    const long = "A".repeat(301);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((code) => {
+        throw new Error(`exit ${code}`);
+      });
+
+    const program = createProgram();
+    await expect(
+      program.parseAsync([
+        "node", "test", "create-thread",
+        `${long} /// Short`,
+        "--no-preview",
+      ]),
+    ).rejects.toThrow("exit 1");
+
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Post 1 is 301 characters"),
+    );
+
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+});
+
 describe("create-thread: partial failure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
