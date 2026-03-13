@@ -40,7 +40,21 @@
     "atproto",
     "cli",
     "social",
-    "command-line"
+    "command-line",
+    "command line",
+    "command line interface",
+    "social media",
+    "social network",
+    "decentralized",
+    "typescript",
+    "node",
+    "javascript",
+    "js",
+    "ts",
+    "atproto api",
+    "at protocol",
+    "authenticated transfer protocol",
+    "websocket"
   ],
   "files": [
     "dist/",
