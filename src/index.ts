@@ -6,8 +6,12 @@ import { registerTimeline, registerStream } from "@/commands/timeline";
 import { registerThread } from "@/commands/thread";
 import { registerPost, registerReply, registerQuote } from "@/commands/post";
 import { registerDelete } from "@/commands/delete";
-import { registerLike, registerLikes } from "@/commands/like";
-import { registerRepost, registerReposts } from "@/commands/repost";
+import { registerLike, registerUnlike, registerLikes } from "@/commands/like";
+import {
+  registerRepost,
+  registerRemoveRepost,
+  registerReposts,
+} from "@/commands/repost";
 import {
   registerFollow,
   registerUnfollow,
@@ -86,8 +90,10 @@ registerReply(program);
 registerQuote(program);
 registerDelete(program);
 registerLike(program);
+registerUnlike(program);
 registerLikes(program);
 registerRepost(program);
+registerRemoveRepost(program);
 registerReposts(program);
 registerFollow(program);
 registerUnfollow(program);

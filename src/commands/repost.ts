@@ -30,6 +30,34 @@ export function registerRepost(program: Command): void {
     });
 }
 
+export function registerRemoveRepost(program: Command): void {
+  program
+    .command("remove-repost")
+    .alias("unrepost")
+    .description("Remove a repost")
+    .argument("<uri...>", "Repost URI(s) to remove")
+    .action(async (uris: string[]) => {
+      const agent = await getClient(program);
+
+      for (const uri of uris) {
+        const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
+        const parts = atUri.split("/");
+        if (parts.length < 3) {
+          console.error(`Invalid URI: ${uri}`);
+          continue;
+        }
+        const rkey = parts[parts.length - 1];
+        const collection = parts[parts.length - 2];
+
+        await agent.com.atproto.repo.deleteRecord({
+          repo: agent.session!.did,
+          collection,
+          rkey,
+        });
+      }
+    });
+}
+
 export function registerReposts(program: Command): void {
   program
     .command("reposts")

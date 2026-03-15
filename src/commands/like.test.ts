@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Command } from "commander";
 import { createMockAgent } from "@/test-utils";
-import { registerLike, registerLikes } from "@/commands/like";
+import { registerLike, registerUnlike, registerLikes } from "@/commands/like";
 
 const mockAgent = createMockAgent();
 
@@ -56,6 +56,49 @@ describe("like command", () => {
     );
 
     consoleSpy.mockRestore();
+  });
+});
+
+describe("unlike command", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockAgent.com.atproto.repo.deleteRecord.mockResolvedValue({});
+  });
+
+  it("calls deleteRecord with correct repo, collection, and rkey", async () => {
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    registerUnlike(program);
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "unlike",
+      "at://did:plc:test123/app.bsky.feed.like/456",
+    ]);
+
+    expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledWith({
+      repo: "did:plc:test123",
+      collection: "app.bsky.feed.like",
+      rkey: "456",
+    });
+  });
+
+  it("handles multiple URIs", async () => {
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    registerUnlike(program);
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "unlike",
+      "at://did:plc:test123/app.bsky.feed.like/456",
+      "at://did:plc:test123/app.bsky.feed.like/789",
+    ]);
+
+    expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledTimes(2);
   });
 });
 

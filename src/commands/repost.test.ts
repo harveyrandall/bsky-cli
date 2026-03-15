@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Command } from "commander";
 import { createMockAgent } from "@/test-utils";
-import { registerRepost, registerReposts } from "@/commands/repost";
+import {
+  registerRepost,
+  registerRemoveRepost,
+  registerReposts,
+} from "@/commands/repost";
 
 const mockAgent = createMockAgent();
 
@@ -56,6 +60,49 @@ describe("repost command", () => {
     );
 
     consoleSpy.mockRestore();
+  });
+});
+
+describe("remove-repost command", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockAgent.com.atproto.repo.deleteRecord.mockResolvedValue({});
+  });
+
+  it("calls deleteRecord with correct repo, collection, and rkey", async () => {
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    registerRemoveRepost(program);
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "remove-repost",
+      "at://did:plc:test123/app.bsky.feed.repost/789",
+    ]);
+
+    expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledWith({
+      repo: "did:plc:test123",
+      collection: "app.bsky.feed.repost",
+      rkey: "789",
+    });
+  });
+
+  it("handles multiple URIs", async () => {
+    const program = new Command();
+    program.option("--json", "Output as JSON");
+    registerRemoveRepost(program);
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "remove-repost",
+      "at://did:plc:test123/app.bsky.feed.repost/789",
+      "at://did:plc:test123/app.bsky.feed.repost/101",
+    ]);
+
+    expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledTimes(2);
   });
 });
 
