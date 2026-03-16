@@ -1,8 +1,22 @@
+/** @deprecated Use SessionConfig — password must never be persisted */
 export interface Config {
   bgs: string;
   host: string;
   handle: string;
   password: string;
+}
+
+/**
+ * Persisted session — contains only JWT tokens, never passwords.
+ * Stored with 0o600 permissions in platform-appropriate config dir.
+ */
+export interface SessionConfig {
+  host: string;
+  bgs: string;
+  handle: string;
+  did: string;
+  accessJwt: string;
+  refreshJwt: string;
 }
 
 export interface AuthInfo {
