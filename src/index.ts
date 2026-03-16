@@ -1,6 +1,8 @@
 import { Command } from "commander";
-import { loadConfig } from "@/config";
+import { AtpAgent } from "@atproto/api";
+import { loadSessionConfig, saveSessionConfig } from "@/config";
 import { createClient } from "@/client";
+import { promptPassword, prompt2FA } from "@/auth";
 import { registerLogin } from "@/commands/login";
 import { registerTimeline, registerStream } from "@/commands/timeline";
 import { registerThread } from "@/commands/thread";
@@ -36,8 +38,7 @@ import { registerInviteCodes } from "@/commands/invite";
 import { registerCompletions } from "@/commands/completions";
 import { registerDrafts, syncNetworkDrafts } from "@/commands/draft";
 import { registerCreateThread } from "@/commands/create-thread";
-import type { AtpAgent } from "@atproto/api";
-import type { Config } from "@/lib/types";
+import type { SessionConfig } from "@/lib/types";
 
 const program = new Command();
 
@@ -58,9 +59,45 @@ let syncDone = false;
 
 export async function getClient(program: Command): Promise<AtpAgent> {
   const profile = resolveProfile(program);
-  const config = await loadConfig(profile);
-  const prefix = profile ? `${profile}-` : "";
-  const agent = await createClient(config, prefix);
+
+  // Check for env-var-only auth (CI/scripts) — no session file needed
+  if (process.env.BSKY_HANDLE && process.env.BSKY_PASSWORD) {
+    const host = process.env.BSKY_HOST ?? "https://bsky.social";
+    const agent = new AtpAgent({ service: host });
+
+    try {
+      const resp = await agent.login({
+        identifier: process.env.BSKY_HANDLE,
+        password: process.env.BSKY_PASSWORD,
+      });
+
+      // One-time sync check
+      if (!syncDone) {
+        syncDone = true;
+        await syncNetworkDrafts(agent, profile);
+      }
+
+      return agent;
+    } catch (err: unknown) {
+      if (
+        err instanceof Error &&
+        err.message.includes("AuthFactorTokenRequired")
+      ) {
+        const token = await prompt2FA();
+        await agent.login({
+          identifier: process.env.BSKY_HANDLE,
+          password: process.env.BSKY_PASSWORD,
+          authFactorToken: token,
+        });
+        return agent;
+      }
+      throw err;
+    }
+  }
+
+  // Session-based auth (normal usage)
+  const session = await loadSessionConfig(profile);
+  const agent = await createClient(session, profile);
 
   // One-time sync check: successful auth proves connectivity
   if (!syncDone) {
@@ -71,9 +108,9 @@ export async function getClient(program: Command): Promise<AtpAgent> {
   return agent;
 }
 
-export async function getConfig(program: Command): Promise<Config> {
+export async function getConfig(program: Command): Promise<SessionConfig> {
   const profile = resolveProfile(program);
-  return loadConfig(profile);
+  return loadSessionConfig(profile);
 }
 
 export function isJson(program: Command): boolean {
