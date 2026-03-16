@@ -1,107 +1,64 @@
 import { AtpAgent } from "@atproto/api";
-import { readAuth, writeAuth, prompt2FA } from "@/auth";
-import type { Config } from "@/lib/types";
+import { saveSessionConfig } from "@/config";
+import type { SessionConfig } from "@/lib/types";
 
+/**
+ * Create an authenticated AT Protocol client from a saved session.
+ *
+ * This function does NOT take a password — authentication happens
+ * during `bsky login`. Here we only resume and refresh the saved
+ * JWT tokens. If the refresh token has expired, the user must
+ * run `bsky login` again.
+ */
 export async function createClient(
-  config: Config,
-  prefix: string = "",
+  session: SessionConfig,
+  profile?: string,
 ): Promise<AtpAgent> {
-  const agent = new AtpAgent({ service: config.host });
+  const agent = new AtpAgent({ service: session.host });
 
-  // Try refreshing existing session first
-  const auth = await readAuth(config.handle, prefix);
-  if (auth) {
-    try {
-      // Resume session using saved auth, then refresh
-      await agent.resumeSession({
-        did: auth.did,
-        handle: auth.handle,
-        accessJwt: auth.refreshJwt,
-        refreshJwt: auth.refreshJwt,
-        active: true,
-      });
-
-      const refreshed = await agent.com.atproto.server.refreshSession(
-        undefined,
-        {
-          headers: {
-            authorization: `Bearer ${auth.refreshJwt}`,
-          },
-        },
-      );
-
-      // Resume with refreshed tokens
-      await agent.resumeSession({
-        did: refreshed.data.did,
-        handle: refreshed.data.handle,
-        accessJwt: refreshed.data.accessJwt,
-        refreshJwt: refreshed.data.refreshJwt,
-        active: true,
-      });
-
-      await writeAuth(
-        {
-          did: refreshed.data.did,
-          handle: refreshed.data.handle,
-          accessJwt: refreshed.data.accessJwt,
-          refreshJwt: refreshed.data.refreshJwt,
-        },
-        config.handle,
-        prefix,
-      );
-
-      return agent;
-    } catch {
-      // Refresh failed, fall through to full login
-    }
-  }
-
-  // Full login with credentials
   try {
-    const loginResponse = await agent.login({
-      identifier: config.handle,
-      password: config.password,
+    // Resume session using saved tokens
+    await agent.resumeSession({
+      did: session.did,
+      handle: session.handle,
+      accessJwt: session.refreshJwt,
+      refreshJwt: session.refreshJwt,
+      active: true,
     });
 
-    await writeAuth(
+    // Refresh to get fresh access token
+    const refreshed = await agent.com.atproto.server.refreshSession(
+      undefined,
       {
-        did: loginResponse.data.did,
-        handle: loginResponse.data.handle,
-        accessJwt: loginResponse.data.accessJwt,
-        refreshJwt: loginResponse.data.refreshJwt,
+        headers: {
+          authorization: `Bearer ${session.refreshJwt}`,
+        },
       },
-      config.handle,
-      prefix,
     );
 
+    // Resume with refreshed tokens
+    await agent.resumeSession({
+      did: refreshed.data.did,
+      handle: refreshed.data.handle,
+      accessJwt: refreshed.data.accessJwt,
+      refreshJwt: refreshed.data.refreshJwt,
+      active: true,
+    });
+
+    // Persist refreshed tokens
+    const updated: SessionConfig = {
+      ...session,
+      did: refreshed.data.did,
+      handle: refreshed.data.handle,
+      accessJwt: refreshed.data.accessJwt,
+      refreshJwt: refreshed.data.refreshJwt,
+    };
+    await saveSessionConfig(updated, profile);
+
     return agent;
-  } catch (err: unknown) {
-    // Handle 2FA
-    if (
-      err instanceof Error &&
-      err.message.includes("AuthFactorTokenRequired")
-    ) {
-      const token = await prompt2FA();
-      const loginResponse = await agent.login({
-        identifier: config.handle,
-        password: config.password,
-        authFactorToken: token,
-      });
-
-      await writeAuth(
-        {
-          did: loginResponse.data.did,
-          handle: loginResponse.data.handle,
-          accessJwt: loginResponse.data.accessJwt,
-          refreshJwt: loginResponse.data.refreshJwt,
-        },
-        config.handle,
-        prefix,
-      );
-
-      return agent;
-    }
-
-    throw new Error(`Cannot create session: ${err}`);
+  } catch {
+    throw new Error(
+      "Session expired. Run 'bsky login' to re-authenticate.",
+    );
   }
 }

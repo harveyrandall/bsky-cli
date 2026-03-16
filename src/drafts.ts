@@ -1,11 +1,11 @@
 import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { bskyDir } from "@/config";
 import type { Draft } from "@/lib/types";
 
 function draftsDir(profile?: string): string {
-  const base = join(homedir(), ".config", "bsky");
+  const base = bskyDir();
   return profile ? join(base, `drafts-${profile}`) : join(base, "drafts");
 }
 

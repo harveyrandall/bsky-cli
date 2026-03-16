@@ -12,13 +12,16 @@ vi.mock("node:crypto", () => ({
   randomBytes: vi.fn(() => Buffer.from([0xa7, 0xf3])),
 }));
 
+vi.mock("@/config", () => ({
+  bskyDir: vi.fn(() => "/mock/bsky-cli"),
+}));
+
 import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { saveDraft, loadDraft, listDrafts, deleteDraft, resolveDraftId } from "./drafts";
 
-const bskyDir = join(homedir(), ".config", "bsky");
-const defaultDraftsDir = join(bskyDir, "drafts");
+const mockBase = "/mock/bsky-cli";
+const defaultDraftsDir = join(mockBase, "drafts");
 
 describe("saveDraft", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -54,7 +57,7 @@ describe("saveDraft", () => {
     await saveDraft({ type: "post", text: "test", reason: "network" }, "work");
 
     expect(mkdir).toHaveBeenCalledWith(
-      join(bskyDir, "drafts-work"),
+      join(mockBase, "drafts-work"),
       { recursive: true },
     );
   });
@@ -157,7 +160,7 @@ describe("deleteDraft", () => {
     await deleteDraft("1741392000000-a7f3", "work");
 
     expect(unlink).toHaveBeenCalledWith(
-      join(bskyDir, "drafts-work", "1741392000000-a7f3.json"),
+      join(mockBase, "drafts-work", "1741392000000-a7f3.json"),
     );
   });
 });

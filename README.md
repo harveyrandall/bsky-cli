@@ -76,7 +76,7 @@ All configuration can be set via environment variables, useful for CI and script
 | `BSKY_BGS` | BGS host URL (default: `https://bsky.network`) |
 | `BSKY_PROFILE` | Profile name (same as `--profile`) |
 
-Precedence: CLI args > environment variables > config file.
+Precedence: CLI args > environment variables > saved session.
 
 ```bash
 # No login needed - authenticate directly from env
@@ -101,6 +101,28 @@ bsky tl -p personal
 bsky tl -p work
 bsky -p ? tl              # list all profiles
 ```
+
+## Data storage
+
+bsky-cli stores session tokens (never passwords) in platform-appropriate locations:
+
+| Platform | Default path | Override |
+|----------|-------------|----------|
+| **macOS** | `~/Library/Application Support/bsky-cli/` | `$XDG_CONFIG_HOME/bsky-cli/` |
+| **Linux** | `~/.config/bsky-cli/` | `$XDG_CONFIG_HOME/bsky-cli/` |
+| **Windows** | `%APPDATA%\bsky-cli\` | `$XDG_CONFIG_HOME/bsky-cli/` |
+
+Files stored:
+- `session.json` — session tokens (did, handle, accessJwt, refreshJwt) with `0o600` permissions
+- `session-{profile}.json` — per-profile sessions
+- `drafts/` — locally saved drafts
+
+Where available, session tokens are also stored in the OS keychain
+(macOS Keychain, GNOME Keyring/libsecret, Windows Credential Manager)
+with filesystem as fallback.
+
+Passwords are **never** saved to disk. They are used only during `bsky login`
+to obtain session tokens, then discarded from memory.
 
 ## Commands
 
@@ -149,8 +171,10 @@ bsky drafts delete <id>
 
 ```
 bsky like <uri...>
+bsky unlike <uri...>
 bsky likes <uri>
 bsky repost <uri...>
+bsky remove-repost|unrepost <uri...>
 bsky reposts <uri>
 ```
 
@@ -241,6 +265,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
 - [x] Threads with automatic and manual splitting
 - [x] Drafts with offline sync and partial failure recovery
+- [x] Secure credential storage (OS keychain + session tokens, no plaintext passwords)
 - [ ] List creation and management
 - [ ] Starter packs
 - [ ] Moderation lists
