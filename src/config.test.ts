@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { configPath, authPath } from "./config";
+import { sessionPath, configPath, authPath, bskyDir } from "./config";
 
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
   mkdir: vi.fn(),
+  rename: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -12,31 +13,84 @@ vi.mock("node:fs", () => ({
   readdirSync: vi.fn(),
 }));
 
-describe("configPath", () => {
-  it("returns default path without profile", () => {
+vi.mock("chalk", () => ({
+  default: {
+    yellow: (s: string) => s,
+    dim: (s: string) => s,
+  },
+}));
+
+describe("sessionPath", () => {
+  it("returns default session path without profile", () => {
+    const path = sessionPath();
+    expect(path).toMatch(/session\.json$/);
+  });
+
+  it("returns profile-specific session path", () => {
+    const path = sessionPath("work");
+    expect(path).toMatch(/session-work\.json$/);
+  });
+});
+
+describe("configPath (legacy)", () => {
+  it("returns legacy config path for migration", () => {
     const path = configPath();
     expect(path).toMatch(/\.config\/bsky\/config\.json$/);
   });
 
-  it("returns profile-specific path", () => {
+  it("returns legacy profile-specific path", () => {
     const path = configPath("work");
     expect(path).toMatch(/\.config\/bsky\/config-work\.json$/);
   });
 });
 
-describe("authPath", () => {
-  it("returns auth path for handle", () => {
+describe("authPath (legacy)", () => {
+  it("returns legacy auth path for handle", () => {
     const path = authPath("alice.bsky.social");
     expect(path).toMatch(/\.config\/bsky\/alice\.bsky\.social\.auth$/);
   });
 
-  it("returns prefixed auth path", () => {
+  it("returns prefixed legacy auth path", () => {
     const path = authPath("alice.bsky.social", "work-");
-    expect(path).toMatch(/\.config\/bsky\/work-alice\.bsky\.social\.auth$/);
+    expect(path).toMatch(
+      /\.config\/bsky\/work-alice\.bsky\.social\.auth$/,
+    );
   });
 });
 
-describe("loadConfig", () => {
+describe("bskyDir", () => {
+  const originalEnv = process.env;
+  const originalPlatform = process.platform;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.XDG_CONFIG_HOME;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+  });
+
+  it("respects XDG_CONFIG_HOME on any platform", () => {
+    process.env.XDG_CONFIG_HOME = "/custom/config";
+    expect(bskyDir()).toBe("/custom/config/bsky-cli");
+  });
+
+  it("uses Library/Application Support on macOS", () => {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const dir = bskyDir();
+    expect(dir).toMatch(/Library\/Application Support\/bsky-cli$/);
+  });
+
+  it("uses .config on linux", () => {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const dir = bskyDir();
+    expect(dir).toMatch(/\.config\/bsky-cli$/);
+  });
+});
+
+describe("loadSessionConfig", () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
@@ -48,52 +102,78 @@ describe("loadConfig", () => {
     process.env = originalEnv;
   });
 
-  it("throws when no credentials available", async () => {
+  it("throws when no session file exists and no legacy config", async () => {
     const { readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync } = await import("node:fs");
     (mkdir as any).mockResolvedValue(undefined);
     (readFile as any).mockRejectedValue(new Error("ENOENT"));
+    (existsSync as any).mockReturnValue(false);
 
-    const { loadConfig } = await import("./config");
-    await expect(loadConfig()).rejects.toThrow("No credentials found");
+    const { loadSessionConfig } = await import("./config");
+    await expect(loadSessionConfig()).rejects.toThrow("No session found");
   });
 
-  it("loads config from file", async () => {
+  it("loads session from file", async () => {
+    const session = {
+      host: "https://bsky.social",
+      bgs: "https://bsky.network",
+      handle: "alice.bsky.social",
+      did: "did:plc:abc",
+      accessJwt: "access",
+      refreshJwt: "refresh",
+    };
     const { readFile, mkdir } = await import("node:fs/promises");
     (mkdir as any).mockResolvedValue(undefined);
-    (readFile as any).mockResolvedValue(
-      JSON.stringify({ host: "https://bsky.social", bgs: "https://bsky.network", handle: "alice.bsky.social", password: "secret" })
-    );
+    (readFile as any).mockResolvedValue(JSON.stringify(session));
 
-    const { loadConfig } = await import("./config");
-    const cfg = await loadConfig();
+    const { loadSessionConfig } = await import("./config");
+    const cfg = await loadSessionConfig();
     expect(cfg.handle).toBe("alice.bsky.social");
-    expect(cfg.password).toBe("secret");
+    expect(cfg.did).toBe("did:plc:abc");
+    expect((cfg as any).password).toBeUndefined();
   });
 
-  it("env vars override file values", async () => {
+  it("env vars override session values", async () => {
+    const session = {
+      host: "https://bsky.social",
+      bgs: "https://bsky.network",
+      handle: "alice.bsky.social",
+      did: "did:plc:abc",
+      accessJwt: "access",
+      refreshJwt: "refresh",
+    };
     const { readFile, mkdir } = await import("node:fs/promises");
     (mkdir as any).mockResolvedValue(undefined);
-    (readFile as any).mockResolvedValue(
-      JSON.stringify({ host: "https://bsky.social", bgs: "https://bsky.network", handle: "alice.bsky.social", password: "file-pw" })
-    );
+    (readFile as any).mockResolvedValue(JSON.stringify(session));
 
-    process.env.BSKY_PASSWORD = "env-pw";
-    const { loadConfig } = await import("./config");
-    const cfg = await loadConfig();
-    expect(cfg.password).toBe("env-pw");
+    process.env.BSKY_HOST = "https://custom.pds.social";
+    const { loadSessionConfig } = await import("./config");
+    const cfg = await loadSessionConfig();
+    expect(cfg.host).toBe("https://custom.pds.social");
   });
 });
 
-describe("saveConfig", () => {
-  it("writes config as JSON", async () => {
+describe("saveSessionConfig", () => {
+  it("writes session as JSON with 0o600 permissions", async () => {
     const { writeFile, mkdir } = await import("node:fs/promises");
     (mkdir as any).mockResolvedValue(undefined);
     (writeFile as any).mockResolvedValue(undefined);
 
-    const { saveConfig } = await import("./config");
-    await saveConfig({ host: "https://bsky.social", bgs: "https://bsky.network", handle: "alice", password: "pw" });
+    const { saveSessionConfig } = await import("./config");
+    const session = {
+      host: "https://bsky.social",
+      bgs: "https://bsky.network",
+      handle: "alice",
+      did: "did:plc:abc",
+      accessJwt: "access",
+      refreshJwt: "refresh",
+    };
+    await saveSessionConfig(session);
     expect(writeFile).toHaveBeenCalled();
-    const written = (writeFile as any).mock.calls[0][1];
-    expect(JSON.parse(written.trim())).toEqual({ host: "https://bsky.social", bgs: "https://bsky.network", handle: "alice", password: "pw" });
+    const [, content, opts] = (writeFile as any).mock.calls[0];
+    expect(opts.mode).toBe(0o600);
+    const parsed = JSON.parse(content.trim());
+    expect(parsed).toEqual(session);
+    expect(parsed.password).toBeUndefined();
   });
 });
