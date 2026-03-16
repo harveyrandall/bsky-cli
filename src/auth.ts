@@ -1,51 +1,80 @@
-import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { createWriteStream } from "node:fs";
 import { stdin, stdout, stderr } from "node:process";
-import { authPath } from "@/config";
-import type { AuthInfo, Config } from "@/lib/types";
 
-export async function readAuth(
-  handle: string,
-  prefix: string = "",
-): Promise<AuthInfo | null> {
-  try {
-    const fp = authPath(handle, prefix);
-    const data = await readFile(fp, "utf-8");
-    return JSON.parse(data) as AuthInfo;
-  } catch {
-    return null;
-  }
-}
-
-export async function writeAuth(
-  auth: AuthInfo,
-  handle: string,
-  prefix: string = "",
-): Promise<void> {
-  const fp = authPath(handle, prefix);
-  await writeFile(fp, JSON.stringify(auth, null, "  ") + "\n", {
-    mode: 0o600,
-  });
-}
-
+/**
+ * Prompt for a password with secure input.
+ *
+ * Resolution chain (in login.ts, not here):
+ *   1. CLI argument  →  2. BSKY_PASSWORD env  →  3. this function
+ *
+ * This function handles two cases:
+ * - Piped stdin (!isTTY): reads a single line (e.g. echo "pw" | bsky login)
+ * - Interactive TTY: uses raw mode to suppress keystroke echo at the
+ *   kernel level, so the password is never visible on screen.
+ */
 export async function promptPassword(): Promise<string> {
-  if (stdin.isTTY) {
-    // Interactive: hide input by sending output to /dev/null
-    stderr.write("Password: ");
-    const muted = createWriteStream("/dev/null");
-    const rl = createInterface({ input: stdin, output: muted });
+  if (!stdin.isTTY) {
+    // Piped input — read a single line from stdin
+    const rl = createInterface({ input: stdin });
     const password = await rl.question("");
     rl.close();
-    stderr.write("\n");
     return password.trim();
   }
 
-  // Piped: read a single line from stdin
-  const rl = createInterface({ input: stdin });
-  const password = await rl.question("");
-  rl.close();
-  return password.trim();
+  // Interactive TTY: disable echo at the kernel level
+  stderr.write("Password: ");
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding("utf-8");
+
+  return new Promise<string>((resolve) => {
+    let password = "";
+
+    const onData = (chunk: string) => {
+      for (const char of chunk) {
+        // Enter → done
+        if (char === "\r" || char === "\n") {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.removeListener("data", onData);
+          stderr.write("\n");
+          resolve(password.trim());
+          return;
+        }
+
+        // Ctrl+C → abort
+        if (char === "\u0003") {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stderr.write("\n");
+          process.exit(1);
+        }
+
+        // Ctrl+D → done (EOF)
+        if (char === "\u0004") {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.removeListener("data", onData);
+          stderr.write("\n");
+          resolve(password.trim());
+          return;
+        }
+
+        // Backspace / Delete
+        if (char === "\u007F" || char === "\b") {
+          password = password.slice(0, -1);
+          continue;
+        }
+
+        // Skip other control characters
+        if (char.charCodeAt(0) < 32) continue;
+
+        password += char;
+      }
+    };
+
+    stdin.on("data", onData);
+  });
 }
 
 export async function prompt2FA(): Promise<string> {
