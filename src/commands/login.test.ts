@@ -1,17 +1,49 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
 
+const mockLogin = vi.fn();
+
+vi.mock("@atproto/api", () => ({
+  AtpAgent: vi.fn(function (opts: { service: string }) {
+    return {
+      service: opts.service,
+      login: mockLogin,
+    };
+  }),
+}));
+
 vi.mock("@/config", () => ({
-  saveConfig: vi.fn(),
+  saveSessionConfig: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
   promptPassword: vi.fn(() => Promise.resolve("prompted-pass")),
+  prompt2FA: vi.fn(),
+}));
+
+vi.mock("@/lib/credential-store", () => ({
+  keychainStore: vi.fn().mockResolvedValue(true),
+  sessionKey: vi.fn((handle: string, profile?: string) =>
+    profile ? `${profile}:${handle}` : handle,
+  ),
+}));
+
+vi.mock("chalk", () => ({
+  default: { green: (s: string) => s },
 }));
 
 import { registerLogin } from "./login";
-import { saveConfig } from "@/config";
+import { saveSessionConfig } from "@/config";
 import { promptPassword } from "@/auth";
+
+const loginResponse = {
+  data: {
+    handle: "alice.bsky.social",
+    did: "did:plc:test123",
+    accessJwt: "access-token",
+    refreshJwt: "refresh-token",
+  },
+};
 
 function makeProgram(): Command {
   const program = new Command();
@@ -26,6 +58,7 @@ describe("login", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLogin.mockResolvedValue(loginResponse);
     delete process.env.BSKY_PASSWORD;
   });
 
@@ -37,18 +70,27 @@ describe("login", () => {
     }
   });
 
-  it("saves config with handle and password", async () => {
+  it("authenticates and saves session (no password stored)", async () => {
     const program = makeProgram();
     await program.parseAsync(["login", "alice.bsky.social", "mypassword"], {
       from: "user",
     });
 
-    expect(saveConfig).toHaveBeenCalledWith(
+    // Verify login was called with correct credentials
+    expect(mockLogin).toHaveBeenCalledWith({
+      identifier: "alice.bsky.social",
+      password: "mypassword",
+    });
+
+    // Verify session saved WITHOUT password
+    expect(saveSessionConfig).toHaveBeenCalledWith(
       {
         host: "https://bsky.social",
         bgs: "https://bsky.network",
         handle: "alice.bsky.social",
-        password: "mypassword",
+        did: "did:plc:test123",
+        accessJwt: "access-token",
+        refreshJwt: "refresh-token",
       },
       undefined,
     );
@@ -62,8 +104,13 @@ describe("login", () => {
       from: "user",
     });
 
-    expect(saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ password: "env-pass" }),
+    expect(mockLogin).toHaveBeenCalledWith({
+      identifier: "alice.bsky.social",
+      password: "env-pass",
+    });
+    // Session saved — no password field
+    expect(saveSessionConfig).toHaveBeenCalledWith(
+      expect.not.objectContaining({ password: expect.anything() }),
       undefined,
     );
   });
@@ -77,13 +124,13 @@ describe("login", () => {
     });
 
     expect(promptPassword).toHaveBeenCalled();
-    expect(saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ password: "prompted-pass" }),
-      undefined,
-    );
+    expect(mockLogin).toHaveBeenCalledWith({
+      identifier: "alice.bsky.social",
+      password: "prompted-pass",
+    });
   });
 
-  it("saves config with custom host and bgs", async () => {
+  it("saves session with custom host and bgs", async () => {
     const program = makeProgram();
     await program.parseAsync(
       [
@@ -98,13 +145,11 @@ describe("login", () => {
       { from: "user" },
     );
 
-    expect(saveConfig).toHaveBeenCalledWith(
-      {
+    expect(saveSessionConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
         host: "https://custom.pds.example",
         bgs: "https://custom.bgs.example",
-        handle: "alice.bsky.social",
-        password: "mypassword",
-      },
+      }),
       undefined,
     );
   });

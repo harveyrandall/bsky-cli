@@ -6,23 +6,20 @@ describe("promptPassword", () => {
   });
 
   it("reads from stdin when piped (non-TTY)", async () => {
-    // Mock stdin as non-TTY
-    const mockStdin = {
-      isTTY: false,
-    };
-
-    vi.mock("node:process", () => ({
-      stdin: mockStdin,
-      stdout: { write: vi.fn() },
-      stderr: { write: vi.fn() },
-    }));
-
     const mockRl = {
       question: vi.fn().mockResolvedValue("piped-password"),
       close: vi.fn(),
     };
 
-    vi.mock("node:readline/promises", () => ({
+    // vi.doMock (not vi.mock) is NOT hoisted — runs in-place so
+    // local variables like mockRl are accessible in the factory.
+    vi.doMock("node:process", () => ({
+      stdin: { isTTY: false },
+      stdout: { write: vi.fn() },
+      stderr: { write: vi.fn() },
+    }));
+
+    vi.doMock("node:readline/promises", () => ({
       createInterface: vi.fn(() => mockRl),
     }));
 
@@ -44,11 +41,11 @@ describe("prompt2FA", () => {
       close: vi.fn(),
     };
 
-    vi.mock("node:readline/promises", () => ({
+    vi.doMock("node:readline/promises", () => ({
       createInterface: vi.fn(() => mockRl),
     }));
 
-    vi.mock("node:process", () => ({
+    vi.doMock("node:process", () => ({
       stdin: { isTTY: true },
       stdout: { write: vi.fn() },
       stderr: { write: vi.fn() },

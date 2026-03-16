@@ -35,7 +35,10 @@ const session = {
 
 describe("createClient", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // mockReset clears history AND implementations (mockRejectedValue, etc.)
+    mockAgent.resumeSession.mockReset();
+    mockAgent.com.atproto.server.refreshSession.mockReset();
+    vi.mocked(saveSessionConfig).mockReset();
   });
 
   it("resumes session and refreshes tokens", async () => {

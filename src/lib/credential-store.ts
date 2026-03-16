@@ -10,10 +10,27 @@
  * tools are unavailable (headless servers, containers, etc.).
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+/** Run a command with data piped to stdin */
+function spawnWithInput(
+  cmd: string,
+  args: string[],
+  input: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ["pipe", "ignore", "ignore"] });
+    child.stdin.write(input);
+    child.stdin.end();
+    child.on("close", (code) =>
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`)),
+    );
+    child.on("error", reject);
+  });
+}
 
 const SERVICE = "bsky-cli";
 
@@ -146,10 +163,10 @@ async function macosLoad(key: string): Promise<string | null> {
 // ── Linux: libsecret / GNOME Keyring ─────────────────────────────────
 
 async function linuxStore(key: string, data: string): Promise<boolean> {
-  await execFileAsync(
+  await spawnWithInput(
     "secret-tool",
     ["store", "--label", `${SERVICE} session`, "service", SERVICE, "account", key],
-    { input: data },
+    data,
   );
   return true;
 }
