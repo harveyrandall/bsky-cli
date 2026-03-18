@@ -33,3 +33,6 @@ coverage/
 
 # LLMs
 .claude/*
+
+# macOS specific files
+.DS_Store
