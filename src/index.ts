@@ -40,12 +40,15 @@ import { registerDrafts, syncNetworkDrafts } from "@/commands/draft";
 import { registerCreateThread } from "@/commands/create-thread";
 import type { SessionConfig } from "@/lib/types";
 
+import packageJson from "../package.json";
+
+const VERSION = packageJson.version;
 const program = new Command();
 
 program
   .name("bsky")
   .description("A CLI client for Bluesky")
-  .version("1.0.0")
+  .version(VERSION, "-V, --version", "Output the version number")
   .option("--json", "Output as JSON")
   .option("-p, --profile <name>", "Profile name")
   .option("-v, --verbose", "Verbose output");
