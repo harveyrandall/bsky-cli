@@ -45,6 +45,57 @@ export function sessionPath(profile?: string): string {
   return join(bskyDir(), "session.json");
 }
 
+// ── Handle-based session lookup ──────────────────────────────────────
+
+/**
+ * Scan all session files for one whose `handle` field matches the given handle.
+ * Checks session.json (default) first, then session-*.json files.
+ *
+ * This enables `bsky -p alice.bsky.social post "text"` to work even when
+ * the user logged in without `-p` (session stored in session.json, not
+ * session-alice.bsky.social.json).
+ */
+async function findSessionByHandle(
+  handle: string,
+): Promise<{ session: SessionConfig; profile?: string } | null> {
+  const dir = bskyDir();
+  if (!existsSync(dir)) return null;
+
+  const files = readdirSync(dir);
+  const lower = handle.toLowerCase();
+
+  // Check default session first
+  if (files.includes("session.json")) {
+    try {
+      const data = await readFile(join(dir, "session.json"), "utf-8");
+      const session: SessionConfig = JSON.parse(data);
+      if (session.handle?.toLowerCase() === lower) {
+        return { session, profile: undefined };
+      }
+    } catch {
+      // Skip corrupted files
+    }
+  }
+
+  // Then check named profile sessions
+  for (const file of files) {
+    if (file.startsWith("session-") && file.endsWith(".json")) {
+      try {
+        const data = await readFile(join(dir, file), "utf-8");
+        const session: SessionConfig = JSON.parse(data);
+        if (session.handle?.toLowerCase() === lower) {
+          const profileName = file.slice("session-".length, -".json".length);
+          return { session, profile: profileName };
+        }
+      } catch {
+        // Skip corrupted files
+      }
+    }
+  }
+
+  return null;
+}
+
 /** @deprecated Legacy config path — used only for migration */
 export function configPath(profile?: string): string {
   if (profile) {
@@ -140,7 +191,29 @@ export async function loadSessionConfig(
 
     return session;
   } catch {
-    // No session file — try migration
+    // No session file — try handle-based fallback, then migration
+  }
+
+  // Handle-based fallback: if profile looks like a handle (contains a dot),
+  // scan session files for one with a matching handle field.
+  // Named profiles like "work" never contain dots; handles always do.
+  if (profile && profile.includes(".")) {
+    const found = await findSessionByHandle(profile);
+    if (found) {
+      console.error(
+        chalk.dim(
+          `Using session for ${found.session.handle}` +
+            (found.profile
+              ? ` (profile: ${found.profile})`
+              : " (default profile)"),
+        ),
+      );
+
+      if (process.env.BSKY_HOST) found.session.host = process.env.BSKY_HOST;
+      if (process.env.BSKY_BGS) found.session.bgs = process.env.BSKY_BGS;
+
+      return found.session;
+    }
   }
 
   // Attempt migration from legacy config

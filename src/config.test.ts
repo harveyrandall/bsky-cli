@@ -153,6 +153,146 @@ describe("loadSessionConfig", () => {
   });
 });
 
+describe("loadSessionConfig — handle-based fallback", () => {
+  const originalEnv = process.env;
+
+  const aliceSession = {
+    host: "https://bsky.social",
+    bgs: "https://bsky.network",
+    handle: "alice.bsky.social",
+    did: "did:plc:alice",
+    accessJwt: "access-alice",
+    refreshJwt: "refresh-alice",
+  };
+
+  const bobSession = {
+    host: "https://bsky.social",
+    bgs: "https://bsky.network",
+    handle: "bob.bsky.social",
+    did: "did:plc:bob",
+    accessJwt: "access-bob",
+    refreshJwt: "refresh-bob",
+  };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("finds session by handle in default session.json", async () => {
+    const { readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync, readdirSync } = await import("node:fs");
+    (mkdir as any).mockResolvedValue(undefined);
+
+    // First readFile call: exact profile file (session-alice.bsky.social.json) → ENOENT
+    // Second readFile call: session.json → alice's session
+    (readFile as any)
+      .mockRejectedValueOnce(new Error("ENOENT"))
+      .mockResolvedValueOnce(JSON.stringify(aliceSession));
+    (existsSync as any).mockReturnValue(true); // bskyDir exists
+    (readdirSync as any).mockReturnValue(["session.json"]);
+
+    const { loadSessionConfig } = await import("./config");
+    const cfg = await loadSessionConfig("alice.bsky.social");
+    expect(cfg.handle).toBe("alice.bsky.social");
+    expect(cfg.did).toBe("did:plc:alice");
+  });
+
+  it("finds session by handle in named profile file", async () => {
+    const { readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync, readdirSync } = await import("node:fs");
+    (mkdir as any).mockResolvedValue(undefined);
+
+    // Exact file miss, then scan: session.json has wrong handle, session-work.json matches
+    (readFile as any)
+      .mockRejectedValueOnce(new Error("ENOENT")) // session-bob.bsky.social.json
+      .mockResolvedValueOnce(JSON.stringify(aliceSession)) // session.json (wrong handle)
+      .mockResolvedValueOnce(JSON.stringify(bobSession)); // session-work.json
+    (existsSync as any).mockReturnValue(true);
+    (readdirSync as any).mockReturnValue(["session.json", "session-work.json"]);
+
+    const { loadSessionConfig } = await import("./config");
+    const cfg = await loadSessionConfig("bob.bsky.social");
+    expect(cfg.handle).toBe("bob.bsky.social");
+  });
+
+  it("returns null and falls through when no handle matches", async () => {
+    const { readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync, readdirSync } = await import("node:fs");
+    (mkdir as any).mockResolvedValue(undefined);
+
+    (readFile as any)
+      .mockRejectedValueOnce(new Error("ENOENT")) // exact file
+      .mockResolvedValueOnce(JSON.stringify(aliceSession)); // session.json (wrong handle)
+    (existsSync as any).mockReturnValue(false); // No bskyDir for scan, no legacy
+    (readdirSync as any).mockReturnValue([]);
+
+    const { loadSessionConfig } = await import("./config");
+    await expect(
+      loadSessionConfig("unknown.bsky.social"),
+    ).rejects.toThrow("No session found");
+  });
+
+  it("does NOT attempt handle fallback for simple profile names", async () => {
+    const { readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync, readdirSync } = await import("node:fs");
+
+    // Clear any queued mockResolvedValueOnce from prior tests
+    (readFile as any).mockReset();
+    (mkdir as any).mockResolvedValue(undefined);
+
+    // "work" does not contain a dot → no handle scan
+    (readFile as any).mockRejectedValue(new Error("ENOENT"));
+    (existsSync as any).mockReturnValue(false);
+    (readdirSync as any).mockReturnValue(["session.json"]);
+
+    const { loadSessionConfig } = await import("./config");
+    await expect(loadSessionConfig("work")).rejects.toThrow("No session found");
+    // readdirSync should NOT have been called for handle scanning
+    // (it might be called by listProfiles or other code, but the key point
+    // is that it doesn't try to read session.json for handle comparison)
+    expect(readFile).toHaveBeenCalledTimes(1); // Only the exact file attempt
+  });
+
+  it("matches handles case-insensitively", async () => {
+    const { readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync, readdirSync } = await import("node:fs");
+    (mkdir as any).mockResolvedValue(undefined);
+
+    const mixedCaseSession = { ...aliceSession, handle: "Alice.Bsky.Social" };
+    (readFile as any)
+      .mockRejectedValueOnce(new Error("ENOENT"))
+      .mockResolvedValueOnce(JSON.stringify(mixedCaseSession));
+    (existsSync as any).mockReturnValue(true);
+    (readdirSync as any).mockReturnValue(["session.json"]);
+
+    const { loadSessionConfig } = await import("./config");
+    const cfg = await loadSessionConfig("alice.bsky.social");
+    expect(cfg.handle).toBe("Alice.Bsky.Social");
+  });
+
+  it("skips corrupted session files during scan", async () => {
+    const { readFile, mkdir } = await import("node:fs/promises");
+    const { existsSync, readdirSync } = await import("node:fs");
+    (mkdir as any).mockResolvedValue(undefined);
+
+    (readFile as any)
+      .mockRejectedValueOnce(new Error("ENOENT")) // exact file
+      .mockResolvedValueOnce("not valid json{{{") // corrupted session.json
+      .mockResolvedValueOnce(JSON.stringify(aliceSession)); // session-backup.json
+    (existsSync as any).mockReturnValue(true);
+    (readdirSync as any).mockReturnValue(["session.json", "session-backup.json"]);
+
+    const { loadSessionConfig } = await import("./config");
+    const cfg = await loadSessionConfig("alice.bsky.social");
+    expect(cfg.handle).toBe("alice.bsky.social");
+  });
+});
+
 describe("saveSessionConfig", () => {
   it("writes session as JSON with 0o600 permissions", async () => {
     const { writeFile, mkdir } = await import("node:fs/promises");
