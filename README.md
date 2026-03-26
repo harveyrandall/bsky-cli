@@ -6,6 +6,9 @@
 [![license](https://img.shields.io/github/license/harveyrandall/bsky-cli)](LICENSE.md)
 [![downloads](https://img.shields.io/npm/dm/@harveyrandall/bsky-cli)](https://www.npmjs.com/package/@harveyrandall/bsky-cli)
 
+> [!CAUTION]
+> **Versions 1.5.0 and earlier stored credentials in plaintext.** Upgrade to v1.6.0 or later immediately. If you were on an affected version, change your Bluesky app password after upgrading.
+
 A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 
 ## Install
