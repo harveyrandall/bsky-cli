@@ -38,6 +38,7 @@ import { registerInviteCodes } from "@/commands/invite";
 import { registerCompletions } from "@/commands/completions";
 import { registerDrafts, syncNetworkDrafts } from "@/commands/draft";
 import { registerCreateThread } from "@/commands/create-thread";
+import { registerSchedule } from "@/commands/schedule";
 import type { SessionConfig } from "@/lib/types";
 
 import packageJson from "../package.json";
@@ -157,6 +158,7 @@ registerInviteCodes(program);
 registerCompletions(program);
 registerDrafts(program);
 registerCreateThread(program);
+registerSchedule(program);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err.message ?? err);
