@@ -178,6 +178,156 @@ bsky drafts delete <id>
 bsky drafts rm <id>
 ```
 
+## Scheduling
+
+Schedule posts for future publication, with optional recurring support and cross-platform automation.
+
+### `bsky schedule post`
+
+Schedule a post for future publication. You'll be prompted to choose a date and time.
+
+```bash
+bsky schedule post "Hello world!"
+bsky schedule post "Check this out" -i photo.jpg --image-alt "A photo"
+bsky schedule post --stdin < message.txt
+```
+
+| Flag | Description |
+|------|-------------|
+| `--stdin` | Read post text from stdin |
+| `-i, --image <path...>` | Attach images (up to 4) |
+| `--image-alt <text...>` | Alt text for images |
+| `--video <path>` | Attach a video |
+| `--video-alt <text>` | Alt text for the video |
+| `--repeat <frequency>` | Repeat: `hourly`, `daily`, `fortnightly`, `monthly`, `annually` |
+| `--times <count>` | Number of repetitions (number or word, e.g. `5` or `three`) |
+
+#### Recurring posts
+
+Use `--repeat` to create posts that automatically re-schedule after each publication:
+
+```bash
+bsky schedule post "Daily update" --repeat daily --times 5
+bsky schedule post "Weekly digest" --repeat fortnightly --times "three"
+bsky schedule post "Good morning!" --repeat daily              # forever (until deleted)
+```
+
+| Frequency | Interval |
+|-----------|----------|
+| `hourly` | Every hour |
+| `daily` | Every day |
+| `fortnightly` | Every 2 weeks |
+| `monthly` | Every month |
+| `annually` | Every year |
+
+When `--times` is omitted, the post repeats indefinitely until manually deleted. You can also leave the interactive "How many times?" prompt blank for the same effect.
+
+!!! info "How recurring posts work"
+    Each recurring post is a single file that gets updated in place. After publishing, the scheduled date advances to the next occurrence and the remaining count decrements. On the last occurrence, the file is deleted. Recurrence rules are stored as RFC 5545 RRULE strings.
+
+!!! tip "First-use onboarding"
+    The first time you schedule a post, you'll be offered to enable the background scheduler automatically. You can also set it up later with `bsky schedule enable`.
+
+### `bsky schedule list` / `bsky schedule ls`
+
+List scheduled posts, sorted by date (soonest first by default).
+
+```bash
+bsky schedule list
+bsky schedule ls -a                # show all
+bsky schedule list -n 10           # show 10
+bsky schedule list -o desc         # latest first
+bsky schedule list --json          # JSON output
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --number <num>` | Number of posts to show (default: 5) |
+| `-a, --all` | Show all scheduled posts |
+| `-o, --order <order>` | Sort order: `asc` (default) or `desc` |
+
+### `bsky schedule edit`
+
+Interactively edit a scheduled post's text, date/time, or recurrence.
+
+```bash
+bsky schedule edit        # select from list
+bsky schedule edit 1      # edit post #1 directly
+```
+
+For recurring posts, an additional `(r)ecurrence` option lets you change the frequency, remaining count, or switch between finite and infinite repeat.
+
+### `bsky schedule delete` / `bsky schedule rm`
+
+Delete a scheduled post with confirmation. Offers to save it as a draft.
+
+```bash
+bsky schedule delete      # select from list
+bsky schedule rm 1        # delete post #1 directly
+```
+
+### `bsky schedule run`
+
+Post all scheduled items that are due. Designed for use with external cron jobs or task schedulers.
+
+```bash
+bsky schedule run
+```
+
+### `bsky schedule watch`
+
+Run a foreground watcher that checks for due posts on a cron schedule. Stays open until you press Ctrl+C.
+
+```bash
+bsky schedule watch                             # every minute (default)
+bsky schedule watch --interval "*/5 * * * *"    # every 5 minutes
+```
+
+| Flag | Description |
+|------|-------------|
+| `--interval <cron>` | Cron expression (default: `* * * * *`) |
+
+!!! info
+    The watcher uses [croner](https://github.com/hexagon/croner) with `protect: true`, which prevents overlapping ticks if a previous check is still running.
+
+### `bsky schedule enable`
+
+Set up an OS-level background scheduler that runs `bsky schedule run` automatically. Works on Linux (crontab), macOS (launchd), and Windows (Task Scheduler).
+
+```bash
+bsky schedule enable                  # every 1 minute (default)
+bsky schedule enable --interval 5     # every 5 minutes
+```
+
+| Flag | Description |
+|------|-------------|
+| `--interval <minutes>` | Check interval in minutes (default: 1) |
+
+### `bsky schedule disable`
+
+Pause the background scheduler without removing its configuration. The crontab entry, launchd plist, or scheduled task is preserved but deactivated.
+
+```bash
+bsky schedule disable
+```
+
+### `bsky schedule status`
+
+Show whether the background scheduler is enabled, disabled, or not installed.
+
+```bash
+bsky schedule status
+bsky schedule status --json
+```
+
+### `bsky schedule uninstall`
+
+Permanently remove the background scheduler configuration. Prompts for confirmation (default: no).
+
+```bash
+bsky schedule uninstall
+```
+
 ## Engagement
 
 ### `bsky like`

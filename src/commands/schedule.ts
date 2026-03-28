@@ -3,21 +3,93 @@ import { resolve } from "node:path";
 import { stdin, stderr } from "node:process";
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
+import { Cron } from "croner";
 import { getClient, isJson } from "@/index";
 import {
   saveScheduledPost,
   listScheduledPosts,
   deleteScheduledPost,
   updateScheduledPost,
+  isScheduledDirEmpty,
 } from "@/scheduled";
 import { saveDraft } from "@/drafts";
 import { createPost } from "@/commands/post";
 import { graphemeLength } from "@/lib/split-thread";
 import { promptDateTime, formatLocalDateTime } from "@/lib/date-prompt";
 import { outputJson } from "@/lib/format";
+import {
+  enableScheduler,
+  disableScheduler,
+  getSchedulerStatus,
+  uninstallScheduler,
+} from "@/lib/scheduler";
+import {
+  buildRRule,
+  nextOccurrence,
+  parseCount,
+  parseRRuleFrequency,
+  formatFrequency,
+  VALID_FREQUENCIES,
+} from "@/lib/recurrence";
+import type { RecurrenceFrequency } from "@/lib/recurrence";
 import type { ScheduledPost } from "@/lib/types";
 
 const PAGE_SIZE = 5;
+
+/**
+ * Find all scheduled posts that are due and publish them.
+ * Returns the number of successfully posted items.
+ */
+async function postDueItems(program: Command): Promise<number> {
+  const profile = program.opts().profile;
+  const posts = await listScheduledPosts(profile);
+  const due = posts.filter((p) => new Date(p.scheduledAt) <= new Date());
+
+  if (due.length === 0) return 0;
+
+  const agent = await getClient(program);
+  let posted = 0;
+
+  for (const post of due) {
+    try {
+      const result = await createPost(agent, post.text, {
+        images: post.images,
+        imageAlts: post.imageAlts,
+        video: post.video,
+        videoAlt: post.videoAlt,
+      });
+      console.log(result.uri);
+      posted++;
+
+      // Handle recurring posts: mutate in place instead of deleting
+      if (post.rrule) {
+        const isLastOccurrence = post.remainingCount != null && post.remainingCount <= 1;
+        if (!isLastOccurrence) {
+          const freq = parseRRuleFrequency(post.rrule);
+          if (freq) {
+            const next = nextOccurrence(new Date(post.scheduledAt), freq);
+            if (next) {
+              post.scheduledAt = next.toISOString();
+              if (post.remainingCount != null) {
+                post.remainingCount = post.remainingCount - 1;
+                post.rrule = buildRRule(freq, post.remainingCount);
+              }
+              await updateScheduledPost(post, profile);
+              continue;
+            }
+          }
+        }
+      }
+      // One-shot post or last occurrence — delete
+      await deleteScheduledPost(post.id, profile);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to post ${post.id}: ${msg}`);
+    }
+  }
+
+  return posted;
+}
 
 /**
  * Display a page of scheduled posts with 1-based indices.
@@ -35,6 +107,17 @@ function displayPosts(posts: ScheduledPost[], offset: number): void {
     }
     if (post.video) {
       console.log(`   ${chalk.dim("1 video")}`);
+    }
+    if (post.rrule) {
+      const freq = parseRRuleFrequency(post.rrule);
+      if (freq) {
+        const suffix = post.remainingCount != null
+          ? ` (${post.remainingCount} remaining)`
+          : " (forever)";
+        console.log(
+          `   ${chalk.dim(`Repeats ${formatFrequency(freq)}${suffix}`)}`,
+        );
+      }
     }
   }
 }
@@ -106,6 +189,8 @@ export function registerSchedule(program: Command): void {
     .option("--image-alt <alts...>", "Alt text for images")
     .option("--video <file>", "Video file to attach")
     .option("--video-alt <alt>", "Alt text for video")
+    .option("--repeat <frequency>", "Repeat: hourly, daily, fortnightly, monthly, annually")
+    .option("--times <count>", "Number of times to repeat (number or word, e.g. '5' or 'three')")
     .action(
       async (
         textParts: string[],
@@ -115,6 +200,8 @@ export function registerSchedule(program: Command): void {
           imageAlt?: string[];
           video?: string;
           videoAlt?: string;
+          repeat?: string;
+          times?: string;
         },
       ) => {
         const profile = program.opts().profile;
@@ -128,8 +215,58 @@ export function registerSchedule(program: Command): void {
           process.exit(1);
         }
 
+        // Validate --repeat / --times options
+        if (opts.times && !opts.repeat) {
+          console.error("Error: --times requires --repeat");
+          process.exit(1);
+        }
+
+        let rrule: string | undefined;
+        let remainingCount: number | undefined;
+        let repeatFreq: RecurrenceFrequency | undefined;
+
+        if (opts.repeat) {
+          if (!VALID_FREQUENCIES.includes(opts.repeat as RecurrenceFrequency)) {
+            console.error(
+              `Error: --repeat must be one of: ${VALID_FREQUENCIES.join(", ")}`,
+            );
+            process.exit(1);
+          }
+          repeatFreq = opts.repeat as RecurrenceFrequency;
+        }
+
+        const wasEmpty = await isScheduledDirEmpty(profile);
+
         const rl = createInterface({ input: stdin, output: stderr });
         try {
+          // If --repeat was given, resolve the optional count
+          if (repeatFreq) {
+            if (opts.times) {
+              const parsed = parseCount(opts.times);
+              if (!parsed) {
+                console.error(
+                  `Error: could not parse "${opts.times}" as a number`,
+                );
+                process.exit(1);
+              }
+              remainingCount = parsed;
+            } else {
+              const answer = await rl.question(
+                "How many times? (leave blank for forever) ",
+              );
+              if (answer.trim()) {
+                const parsed = parseCount(answer);
+                if (!parsed) {
+                  console.error("Could not parse that as a number.");
+                  process.exit(1);
+                }
+                remainingCount = parsed;
+              }
+              // blank → remainingCount stays undefined → infinite
+            }
+            rrule = buildRRule(repeatFreq, remainingCount);
+          }
+
           const scheduledAt = await promptDateTime(rl);
 
           const post = await saveScheduledPost(
@@ -140,6 +277,8 @@ export function registerSchedule(program: Command): void {
               imageAlts: opts.imageAlt,
               video: opts.video ? resolve(opts.video) : undefined,
               videoAlt: opts.videoAlt,
+              rrule,
+              remainingCount,
             },
             profile,
           );
@@ -147,6 +286,40 @@ export function registerSchedule(program: Command): void {
           console.error(
             `Scheduled post saved: ${chalk.blue(post.id)} (${formatLocalDateTime(scheduledAt)})`,
           );
+          if (repeatFreq) {
+            const countDesc = remainingCount != null
+              ? `${remainingCount} times`
+              : "forever";
+            console.error(
+              `  Repeats ${formatFrequency(repeatFreq)}, ${countDesc}`,
+            );
+          }
+
+          // First-use onboarding: offer to set up the scheduler
+          if (wasEmpty && stdin.isTTY) {
+            console.error(`
+To automate posting, you can:
+
+  Enable the scheduler to run in the background:
+    ${chalk.blue("bsky schedule enable")}
+
+  Or run a foreground watcher (stays open in your terminal,
+  checks every minute, handles overlapping runs, stops cleanly
+  with Ctrl+C, customizable with --interval):
+    ${chalk.blue("bsky schedule watch")}
+`);
+            const answer = await rl.question(
+              "Would you like to enable the scheduler now? (Y/n) ",
+            );
+            if (answer.trim().toLowerCase() !== "n") {
+              enableScheduler(1, profile);
+              console.error("Scheduler enabled (every 1 minute).");
+            } else {
+              console.error(
+                chalk.dim("You can enable it later with: bsky schedule enable"),
+              );
+            }
+          }
         } finally {
           rl.close();
         }
@@ -225,13 +398,29 @@ export function registerSchedule(program: Command): void {
           `${chalk.blue("Scheduled:")} ${formatLocalDateTime(post.scheduledAt)}`,
         );
 
+        const hasRecurrence = !!post.rrule;
+        if (hasRecurrence) {
+          const freq = parseRRuleFrequency(post.rrule!);
+          if (freq) {
+            const suffix = post.remainingCount != null
+              ? `(${post.remainingCount} remaining)`
+              : "(forever)";
+            console.log(
+              `${chalk.blue("Repeats:")} ${formatFrequency(freq)} ${suffix}`,
+            );
+          }
+        }
+
         // Ask what to edit
-        const choice = await rl.question(
-          "\nEdit (t)ext, (d)ate/time, or (b)oth? ",
-        );
+        const prompt = hasRecurrence
+          ? "\nEdit (t)ext, (d)ate/time, (r)ecurrence, or (a)ll? "
+          : "\nEdit (t)ext, (d)ate/time, or (b)oth? ";
+        const choice = await rl.question(prompt);
         const c = choice.trim().toLowerCase();
 
-        if (c === "t" || c === "text" || c === "b" || c === "both") {
+        const editAll = c === "a" || c === "all" || c === "b" || c === "both";
+
+        if (c === "t" || c === "text" || editAll) {
           // Edit text
           // eslint-disable-next-line no-constant-condition
           while (true) {
@@ -252,9 +441,40 @@ export function registerSchedule(program: Command): void {
           }
         }
 
-        if (c === "d" || c === "date" || c === "time" || c === "b" || c === "both") {
+        if (c === "d" || c === "date" || c === "time" || editAll) {
           // Edit date/time
           post.scheduledAt = await promptDateTime(rl);
+        }
+
+        if (c === "r" || c === "recurrence" || editAll) {
+          // Edit recurrence
+          const freqAnswer = await rl.question(
+            `Frequency (${VALID_FREQUENCIES.join(", ")}) or "none" to remove: `,
+          );
+          const freqTrimmed = freqAnswer.trim().toLowerCase();
+
+          if (freqTrimmed === "none" || freqTrimmed === "remove") {
+            delete post.rrule;
+            delete post.remainingCount;
+          } else if (VALID_FREQUENCIES.includes(freqTrimmed as RecurrenceFrequency)) {
+            const countAnswer = await rl.question(
+              "How many times? (leave blank for forever) ",
+            );
+            if (countAnswer.trim()) {
+              const count = parseCount(countAnswer);
+              if (!count) {
+                console.error("Could not parse that as a number. Recurrence unchanged.");
+              } else {
+                post.rrule = buildRRule(freqTrimmed as RecurrenceFrequency, count);
+                post.remainingCount = count;
+              }
+            } else {
+              post.rrule = buildRRule(freqTrimmed as RecurrenceFrequency);
+              delete post.remainingCount;
+            }
+          } else {
+            console.error("Invalid frequency. Recurrence unchanged.");
+          }
         }
 
         await updateScheduledPost(post, profile);
@@ -338,29 +558,112 @@ export function registerSchedule(program: Command): void {
     .command("run")
     .description("Post all scheduled posts that are due (for use with cron)")
     .action(async () => {
+      await postDueItems(program);
+    });
+
+  // ── schedule watch ────────────────────────────────────────────
+  schedule
+    .command("watch")
+    .description("Run a foreground watcher that posts due scheduled items")
+    .option("--interval <cron>", "Cron expression for check interval", "* * * * *")
+    .action(async (opts: { interval: string }) => {
+      console.error("Watching for due scheduled posts...");
+      console.error(`Interval: ${opts.interval}`);
+      console.error("Press Ctrl+C to stop.\n");
+
+      const job = new Cron(
+        opts.interval,
+        { catch: true, protect: true },
+        async () => {
+          const count = await postDueItems(program);
+          if (count > 0) {
+            console.error(`Posted ${count} item(s).`);
+          }
+        },
+      );
+
+      const shutdown = () => {
+        console.error("\nWatcher stopped.");
+        job.stop();
+        process.exit(0);
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+    });
+
+  // ── schedule enable ───────────────────────────────────────────
+  schedule
+    .command("enable")
+    .description("Enable OS-level scheduler for posting due items")
+    .option("--interval <minutes>", "Check interval in minutes", "1")
+    .action((opts: { interval: string }) => {
       const profile = program.opts().profile;
-      const posts = await listScheduledPosts(profile);
-      const now = new Date();
-      const due = posts.filter((p) => new Date(p.scheduledAt) <= now);
-
-      if (due.length === 0) return;
-
-      const agent = await getClient(program);
-
-      for (const post of due) {
-        try {
-          const result = await createPost(agent, post.text, {
-            images: post.images,
-            imageAlts: post.imageAlts,
-            video: post.video,
-            videoAlt: post.videoAlt,
-          });
-          await deleteScheduledPost(post.id, profile);
-          console.log(result.uri);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`Failed to post ${post.id}: ${msg}`);
-        }
+      const interval = parseInt(opts.interval, 10);
+      if (isNaN(interval) || interval < 1) {
+        console.error("Error: interval must be a positive integer (minutes)");
+        process.exit(1);
       }
+      enableScheduler(interval, profile);
+      console.error(`Scheduler enabled (every ${interval} minute(s)).`);
+      console.error(
+        chalk.dim("Disable with: bsky schedule disable"),
+      );
+      console.error(
+        chalk.dim("Remove with:  bsky schedule uninstall"),
+      );
+    });
+
+  // ── schedule disable ──────────────────────────────────────────
+  schedule
+    .command("disable")
+    .description("Disable the OS-level scheduler (preserves config)")
+    .action(() => {
+      disableScheduler();
+      console.error("Scheduler disabled. Config preserved.");
+      console.error(
+        chalk.dim("Re-enable with: bsky schedule enable"),
+      );
+    });
+
+  // ── schedule status ───────────────────────────────────────────
+  schedule
+    .command("status")
+    .description("Show the current scheduler state")
+    .action(() => {
+      const json = isJson(program);
+      const state = getSchedulerStatus();
+      if (json) {
+        outputJson({ scheduler: state });
+      } else {
+        console.log(`Scheduler: ${state}`);
+      }
+    });
+
+  // ── schedule uninstall ────────────────────────────────────────
+  schedule
+    .command("uninstall")
+    .description("Fully remove the OS-level scheduler")
+    .action(async () => {
+      const status = getSchedulerStatus();
+      if (status === "not installed") {
+        console.error("Scheduler is not installed.");
+        return;
+      }
+
+      const rl = createInterface({ input: stdin, output: stderr });
+      try {
+        const answer = await rl.question(
+          "This will permanently remove the scheduler configuration.\nAre you sure? (y/N) ",
+        );
+        if (answer.trim().toLowerCase() !== "y") {
+          console.error("Cancelled.");
+          return;
+        }
+      } finally {
+        rl.close();
+      }
+
+      uninstallScheduler();
+      console.error("Scheduler uninstalled.");
     });
 }

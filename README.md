@@ -119,6 +119,7 @@ Files stored:
 - `session.json` — session tokens (did, handle, accessJwt, refreshJwt) with `0o600` permissions
 - `session-{profile}.json` — per-profile sessions
 - `drafts/` — locally saved drafts
+- `scheduled/` — scheduled posts (one JSON file per post)
 
 Where available, session tokens are also stored in the OS keychain
 (macOS Keychain, GNOME Keyring/libsecret, Windows Credential Manager)
@@ -168,6 +169,21 @@ bsky drafts list
 bsky drafts show <id>
 bsky drafts send <id>
 bsky drafts delete <id>
+```
+
+### Scheduling
+
+```
+bsky schedule post <text> [--repeat freq] [--times count]
+bsky schedule list|ls [-n count] [-a] [-o asc|desc]
+bsky schedule edit [index]
+bsky schedule delete|rm [index]
+bsky schedule run
+bsky schedule watch [--interval cron]
+bsky schedule enable [--interval minutes]
+bsky schedule disable
+bsky schedule status
+bsky schedule uninstall
 ```
 
 ### Engagement
@@ -269,6 +285,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 - [x] Threads with automatic and manual splitting
 - [x] Drafts with offline sync and partial failure recovery
 - [x] Secure credential storage (OS keychain + session tokens, no plaintext passwords)
+- [x] Scheduled and recurring posts with cross-platform automation
 - [ ] List creation and management
 - [ ] Starter packs
 - [ ] Moderation lists
