@@ -67,6 +67,15 @@ vi.mock("@/lib/recurrence", () => ({
   VALID_FREQUENCIES: ["hourly", "daily", "fortnightly", "monthly", "annually"],
 }));
 
+const mockQuestion = vi.fn();
+const mockRlClose = vi.fn();
+vi.mock("node:readline/promises", () => ({
+  createInterface: vi.fn(() => ({
+    question: mockQuestion,
+    close: mockRlClose,
+  })),
+}));
+
 import {
   saveScheduledPost,
   listScheduledPosts,
@@ -86,7 +95,7 @@ import {
   getSchedulerStatus,
   uninstallScheduler,
 } from "@/lib/scheduler";
-import { nextOccurrence } from "@/lib/recurrence";
+import { buildRRule, nextOccurrence, parseCount } from "@/lib/recurrence";
 import type { ScheduledPost } from "@/lib/types";
 
 // Helper to create mock posts
@@ -577,5 +586,188 @@ describe("schedule list with recurring posts", () => {
     const allOutput = logSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
     expect(allOutput).toContain("Repeats");
     expect(allOutput).toContain("3 remaining");
+  });
+});
+
+describe("schedule edit with recurrence", () => {
+  let program: Command;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(isJson).mockReturnValue(false);
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("displays recurrence info for recurring posts", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+    // Choose "t" to edit text, provide new text
+    mockQuestion
+      .mockResolvedValueOnce("t")
+      .mockResolvedValueOnce("Updated text");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    const allOutput = logSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+    expect(allOutput).toContain("Repeats:");
+    expect(allOutput).toContain("3 remaining");
+  });
+
+  it("shows (r)ecurrence option for recurring posts", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+    mockQuestion
+      .mockResolvedValueOnce("t")
+      .mockResolvedValueOnce("Updated text");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    // The prompt should include (r)ecurrence
+    expect(mockQuestion).toHaveBeenCalledWith(
+      expect.stringContaining("(r)ecurrence"),
+    );
+  });
+
+  it("does not show (r)ecurrence option for one-shot posts", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([mockPost()]);
+    mockQuestion
+      .mockResolvedValueOnce("t")
+      .mockResolvedValueOnce("Updated text");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    // The prompt should include (b)oth, not (r)ecurrence
+    expect(mockQuestion).toHaveBeenCalledWith(
+      expect.stringContaining("(b)oth"),
+    );
+    expect(mockQuestion).not.toHaveBeenCalledWith(
+      expect.stringContaining("(r)ecurrence"),
+    );
+  });
+
+  it("allows editing recurrence frequency and count", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+    // Choose "r" for recurrence, then provide new frequency and count
+    mockQuestion
+      .mockResolvedValueOnce("r")
+      .mockResolvedValueOnce("monthly")
+      .mockResolvedValueOnce("10");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    expect(buildRRule).toHaveBeenCalledWith("monthly", 10);
+    expect(updateScheduledPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remainingCount: 10,
+      }),
+      undefined,
+    );
+  });
+
+  it("allows removing recurrence with 'none'", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+    mockQuestion
+      .mockResolvedValueOnce("r")
+      .mockResolvedValueOnce("none");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    expect(updateScheduledPost).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        rrule: expect.anything(),
+        remainingCount: expect.anything(),
+      }),
+      undefined,
+    );
+  });
+
+  it("handles invalid frequency gracefully", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+    mockQuestion
+      .mockResolvedValueOnce("r")
+      .mockResolvedValueOnce("invalid-freq");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid frequency"),
+    );
+    // Post should still be updated (other fields unchanged)
+    expect(updateScheduledPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+      undefined,
+    );
+  });
+
+  it("edits all fields including recurrence with 'a'", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+    vi.mocked(promptDateTime).mockResolvedValue("2026-05-01T10:00:00.000Z");
+    // Choose "a" for all, provide new text, then date handled by promptDateTime,
+    // then frequency and count for recurrence
+    mockQuestion
+      .mockResolvedValueOnce("a")
+      .mockResolvedValueOnce("Brand new text")
+      .mockResolvedValueOnce("fortnightly")
+      .mockResolvedValueOnce("6");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    expect(updateScheduledPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "Brand new text",
+        scheduledAt: "2026-05-01T10:00:00.000Z",
+        remainingCount: 6,
+      }),
+      undefined,
+    );
   });
 });

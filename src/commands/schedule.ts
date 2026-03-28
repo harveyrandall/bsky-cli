@@ -376,13 +376,26 @@ To automate posting, you can:
           `${chalk.blue("Scheduled:")} ${formatLocalDateTime(post.scheduledAt)}`,
         );
 
+        const hasRecurrence = !!(post.rrule && post.remainingCount);
+        if (hasRecurrence) {
+          const freq = parseRRuleFrequency(post.rrule!);
+          if (freq) {
+            console.log(
+              `${chalk.blue("Repeats:")} ${formatFrequency(freq)} (${post.remainingCount} remaining)`,
+            );
+          }
+        }
+
         // Ask what to edit
-        const choice = await rl.question(
-          "\nEdit (t)ext, (d)ate/time, or (b)oth? ",
-        );
+        const prompt = hasRecurrence
+          ? "\nEdit (t)ext, (d)ate/time, (r)ecurrence, or (a)ll? "
+          : "\nEdit (t)ext, (d)ate/time, or (b)oth? ";
+        const choice = await rl.question(prompt);
         const c = choice.trim().toLowerCase();
 
-        if (c === "t" || c === "text" || c === "b" || c === "both") {
+        const editAll = c === "a" || c === "all" || c === "b" || c === "both";
+
+        if (c === "t" || c === "text" || editAll) {
           // Edit text
           // eslint-disable-next-line no-constant-condition
           while (true) {
@@ -403,9 +416,33 @@ To automate posting, you can:
           }
         }
 
-        if (c === "d" || c === "date" || c === "time" || c === "b" || c === "both") {
+        if (c === "d" || c === "date" || c === "time" || editAll) {
           // Edit date/time
           post.scheduledAt = await promptDateTime(rl);
+        }
+
+        if (c === "r" || c === "recurrence" || editAll) {
+          // Edit recurrence
+          const freqAnswer = await rl.question(
+            `Frequency (${VALID_FREQUENCIES.join(", ")}) or "none" to remove: `,
+          );
+          const freqTrimmed = freqAnswer.trim().toLowerCase();
+
+          if (freqTrimmed === "none" || freqTrimmed === "remove") {
+            delete post.rrule;
+            delete post.remainingCount;
+          } else if (VALID_FREQUENCIES.includes(freqTrimmed as RecurrenceFrequency)) {
+            const countAnswer = await rl.question("How many times? ");
+            const count = parseCount(countAnswer);
+            if (!count) {
+              console.error("Could not parse that as a number. Recurrence unchanged.");
+            } else {
+              post.rrule = buildRRule(freqTrimmed as RecurrenceFrequency, count);
+              post.remainingCount = count;
+            }
+          } else {
+            console.error("Invalid frequency. Recurrence unchanged.");
+          }
         }
 
         await updateScheduledPost(post, profile);
