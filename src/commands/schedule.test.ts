@@ -41,6 +41,19 @@ vi.mock("chalk", () => ({
   },
 }));
 
+const mockCronStop = vi.fn();
+vi.mock("croner", () => {
+  const MockCron = vi.fn().mockImplementation(() => ({ stop: mockCronStop }));
+  return { Cron: MockCron };
+});
+
+vi.mock("@/lib/scheduler", () => ({
+  enableScheduler: vi.fn(),
+  disableScheduler: vi.fn(),
+  getSchedulerStatus: vi.fn(() => "not installed"),
+  uninstallScheduler: vi.fn(),
+}));
+
 import {
   saveScheduledPost,
   listScheduledPosts,
@@ -52,6 +65,13 @@ import { createPost } from "@/commands/post";
 import { promptDateTime } from "@/lib/date-prompt";
 import { getClient, isJson } from "@/index";
 import { outputJson } from "@/lib/format";
+import { Cron } from "croner";
+import {
+  enableScheduler,
+  disableScheduler,
+  getSchedulerStatus,
+  uninstallScheduler,
+} from "@/lib/scheduler";
 import type { ScheduledPost } from "@/lib/types";
 
 // Helper to create mock posts
@@ -252,5 +272,184 @@ describe("schedule run", () => {
     // Only the successful post is deleted
     expect(deleteScheduledPost).toHaveBeenCalledTimes(1);
     expect(deleteScheduledPost).toHaveBeenCalledWith("ok-2", undefined);
+  });
+});
+
+describe("schedule watch", () => {
+  let program: Command;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("creates a Cron job with default pattern and correct options", async () => {
+    await program.parseAsync(["node", "bsky", "schedule", "watch"]);
+
+    expect(Cron).toHaveBeenCalledWith(
+      "* * * * *",
+      { catch: true, protect: true },
+      expect.any(Function),
+    );
+  });
+
+  it("passes custom --interval to Cron", async () => {
+    await program.parseAsync([
+      "node", "bsky", "schedule", "watch", "--interval", "*/5 * * * *",
+    ]);
+
+    expect(Cron).toHaveBeenCalledWith(
+      "*/5 * * * *",
+      expect.any(Object),
+      expect.any(Function),
+    );
+  });
+
+  it("prints startup message", async () => {
+    await program.parseAsync(["node", "bsky", "schedule", "watch"]);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Watching for due scheduled posts"),
+    );
+  });
+});
+
+describe("schedule enable", () => {
+  let program: Command;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("calls enableScheduler with default interval 1", async () => {
+    await program.parseAsync(["node", "bsky", "schedule", "enable"]);
+    expect(enableScheduler).toHaveBeenCalledWith(1, undefined);
+  });
+
+  it("calls enableScheduler with custom interval", async () => {
+    await program.parseAsync([
+      "node", "bsky", "schedule", "enable", "--interval", "5",
+    ]);
+    expect(enableScheduler).toHaveBeenCalledWith(5, undefined);
+  });
+
+  it("passes profile to enableScheduler", async () => {
+    await program.parseAsync([
+      "node", "bsky", "-p", "work", "schedule", "enable",
+    ]);
+    expect(enableScheduler).toHaveBeenCalledWith(1, "work");
+  });
+});
+
+describe("schedule disable", () => {
+  let program: Command;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("calls disableScheduler", async () => {
+    await program.parseAsync(["node", "bsky", "schedule", "disable"]);
+    expect(disableScheduler).toHaveBeenCalled();
+  });
+
+  it("prints confirmation message", async () => {
+    await program.parseAsync(["node", "bsky", "schedule", "disable"]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Scheduler disabled"),
+    );
+  });
+});
+
+describe("schedule status", () => {
+  let program: Command;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(isJson).mockReturnValue(false);
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+  });
+
+  it("outputs 'not installed' state", async () => {
+    vi.mocked(getSchedulerStatus).mockReturnValue("not installed");
+    await program.parseAsync(["node", "bsky", "schedule", "status"]);
+    expect(logSpy).toHaveBeenCalledWith("Scheduler: not installed");
+  });
+
+  it("outputs 'enabled' state", async () => {
+    vi.mocked(getSchedulerStatus).mockReturnValue("enabled");
+    await program.parseAsync(["node", "bsky", "schedule", "status"]);
+    expect(logSpy).toHaveBeenCalledWith("Scheduler: enabled");
+  });
+
+  it("outputs 'disabled' state", async () => {
+    vi.mocked(getSchedulerStatus).mockReturnValue("disabled");
+    await program.parseAsync(["node", "bsky", "schedule", "status"]);
+    expect(logSpy).toHaveBeenCalledWith("Scheduler: disabled");
+  });
+
+  it("outputs JSON when --json flag is set", async () => {
+    vi.mocked(isJson).mockReturnValue(true);
+    vi.mocked(getSchedulerStatus).mockReturnValue("enabled");
+    await program.parseAsync(["node", "bsky", "schedule", "status", "--json"]);
+    expect(outputJson).toHaveBeenCalledWith({ scheduler: "enabled" });
+  });
+});
+
+describe("schedule uninstall", () => {
+  let program: Command;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("reports not installed when scheduler is absent", async () => {
+    vi.mocked(getSchedulerStatus).mockReturnValue("not installed");
+    await program.parseAsync(["node", "bsky", "schedule", "uninstall"]);
+    expect(errorSpy).toHaveBeenCalledWith("Scheduler is not installed.");
+    expect(uninstallScheduler).not.toHaveBeenCalled();
   });
 });

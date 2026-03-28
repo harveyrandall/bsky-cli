@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { stdin, stderr } from "node:process";
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
+import { Cron } from "croner";
 import { getClient, isJson } from "@/index";
 import {
   saveScheduledPost,
@@ -15,6 +16,12 @@ import { createPost } from "@/commands/post";
 import { graphemeLength } from "@/lib/split-thread";
 import { promptDateTime, formatLocalDateTime } from "@/lib/date-prompt";
 import { outputJson } from "@/lib/format";
+import {
+  enableScheduler,
+  disableScheduler,
+  getSchedulerStatus,
+  uninstallScheduler,
+} from "@/lib/scheduler";
 import type { ScheduledPost } from "@/lib/types";
 
 const PAGE_SIZE = 5;
@@ -373,5 +380,111 @@ export function registerSchedule(program: Command): void {
     .description("Post all scheduled posts that are due (for use with cron)")
     .action(async () => {
       await postDueItems(program);
+    });
+
+  // ── schedule watch ────────────────────────────────────────────
+  schedule
+    .command("watch")
+    .description("Run a foreground watcher that posts due scheduled items")
+    .option("--interval <cron>", "Cron expression for check interval", "* * * * *")
+    .action(async (opts: { interval: string }) => {
+      console.error("Watching for due scheduled posts...");
+      console.error(`Interval: ${opts.interval}`);
+      console.error("Press Ctrl+C to stop.\n");
+
+      const job = new Cron(
+        opts.interval,
+        { catch: true, protect: true },
+        async () => {
+          const count = await postDueItems(program);
+          if (count > 0) {
+            console.error(`Posted ${count} item(s).`);
+          }
+        },
+      );
+
+      const shutdown = () => {
+        console.error("\nWatcher stopped.");
+        job.stop();
+        process.exit(0);
+      };
+      process.on("SIGINT", shutdown);
+      process.on("SIGTERM", shutdown);
+    });
+
+  // ── schedule enable ───────────────────────────────────────────
+  schedule
+    .command("enable")
+    .description("Enable OS-level scheduler for posting due items")
+    .option("--interval <minutes>", "Check interval in minutes", "1")
+    .action((opts: { interval: string }) => {
+      const profile = program.opts().profile;
+      const interval = parseInt(opts.interval, 10);
+      if (isNaN(interval) || interval < 1) {
+        console.error("Error: interval must be a positive integer (minutes)");
+        process.exit(1);
+      }
+      enableScheduler(interval, profile);
+      console.error(`Scheduler enabled (every ${interval} minute(s)).`);
+      console.error(
+        chalk.dim("Disable with: bsky schedule disable"),
+      );
+      console.error(
+        chalk.dim("Remove with:  bsky schedule uninstall"),
+      );
+    });
+
+  // ── schedule disable ──────────────────────────────────────────
+  schedule
+    .command("disable")
+    .description("Disable the OS-level scheduler (preserves config)")
+    .action(() => {
+      disableScheduler();
+      console.error("Scheduler disabled. Config preserved.");
+      console.error(
+        chalk.dim("Re-enable with: bsky schedule enable"),
+      );
+    });
+
+  // ── schedule status ───────────────────────────────────────────
+  schedule
+    .command("status")
+    .description("Show the current scheduler state")
+    .action(() => {
+      const json = isJson(program);
+      const state = getSchedulerStatus();
+      if (json) {
+        outputJson({ scheduler: state });
+      } else {
+        console.log(`Scheduler: ${state}`);
+      }
+    });
+
+  // ── schedule uninstall ────────────────────────────────────────
+  schedule
+    .command("uninstall")
+    .description("Fully remove the OS-level scheduler")
+    .action(async () => {
+      const status = getSchedulerStatus();
+      if (status === "not installed") {
+        console.error("Scheduler is not installed.");
+        return;
+      }
+
+      const rl = createInterface({ input: stdin, output: stderr });
+      try {
+        const answer = await rl.question(
+          "This will permanently remove the scheduler configuration.\nAre you sure? (y/N) ",
+        );
+        if (answer.trim().toLowerCase() !== "y") {
+          console.error("Cancelled.");
+          return;
+        }
+      } finally {
+        rl.close();
+      }
+
+      uninstallScheduler();
+      console.error("Scheduler uninstalled.");
     });
 }
