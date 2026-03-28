@@ -62,16 +62,21 @@ async function postDueItems(program: Command): Promise<number> {
       posted++;
 
       // Handle recurring posts: mutate in place instead of deleting
-      if (post.rrule && post.remainingCount && post.remainingCount > 1) {
-        const freq = parseRRuleFrequency(post.rrule);
-        if (freq) {
-          const next = nextOccurrence(new Date(post.scheduledAt), freq);
-          if (next) {
-            post.scheduledAt = next.toISOString();
-            post.remainingCount = post.remainingCount - 1;
-            post.rrule = buildRRule(freq, post.remainingCount);
-            await updateScheduledPost(post, profile);
-            continue;
+      if (post.rrule) {
+        const isLastOccurrence = post.remainingCount != null && post.remainingCount <= 1;
+        if (!isLastOccurrence) {
+          const freq = parseRRuleFrequency(post.rrule);
+          if (freq) {
+            const next = nextOccurrence(new Date(post.scheduledAt), freq);
+            if (next) {
+              post.scheduledAt = next.toISOString();
+              if (post.remainingCount != null) {
+                post.remainingCount = post.remainingCount - 1;
+                post.rrule = buildRRule(freq, post.remainingCount);
+              }
+              await updateScheduledPost(post, profile);
+              continue;
+            }
           }
         }
       }
@@ -103,11 +108,14 @@ function displayPosts(posts: ScheduledPost[], offset: number): void {
     if (post.video) {
       console.log(`   ${chalk.dim("1 video")}`);
     }
-    if (post.rrule && post.remainingCount) {
+    if (post.rrule) {
       const freq = parseRRuleFrequency(post.rrule);
       if (freq) {
+        const suffix = post.remainingCount != null
+          ? ` (${post.remainingCount} remaining)`
+          : " (forever)";
         console.log(
-          `   ${chalk.dim(`Repeats ${formatFrequency(freq)} (${post.remainingCount} remaining)`)}`,
+          `   ${chalk.dim(`Repeats ${formatFrequency(freq)}${suffix}`)}`,
         );
       }
     }
@@ -226,7 +234,7 @@ export function registerSchedule(program: Command): void {
 
         const rl = createInterface({ input: stdin, output: stderr });
         try {
-          // If --repeat was given, resolve the count
+          // If --repeat was given, resolve the optional count
           if (repeatFreq) {
             if (opts.times) {
               const parsed = parseCount(opts.times);
@@ -238,13 +246,18 @@ export function registerSchedule(program: Command): void {
               }
               remainingCount = parsed;
             } else {
-              const answer = await rl.question("How many times? ");
-              const parsed = parseCount(answer);
-              if (!parsed) {
-                console.error("Could not parse that as a number.");
-                process.exit(1);
+              const answer = await rl.question(
+                "How many times? (leave blank for forever) ",
+              );
+              if (answer.trim()) {
+                const parsed = parseCount(answer);
+                if (!parsed) {
+                  console.error("Could not parse that as a number.");
+                  process.exit(1);
+                }
+                remainingCount = parsed;
               }
-              remainingCount = parsed;
+              // blank → remainingCount stays undefined → infinite
             }
             rrule = buildRRule(repeatFreq, remainingCount);
           }
@@ -268,9 +281,12 @@ export function registerSchedule(program: Command): void {
           console.error(
             `Scheduled post saved: ${chalk.blue(post.id)} (${formatLocalDateTime(scheduledAt)})`,
           );
-          if (repeatFreq && remainingCount) {
+          if (repeatFreq) {
+            const countDesc = remainingCount != null
+              ? `${remainingCount} times`
+              : "forever";
             console.error(
-              `  Repeats ${formatFrequency(repeatFreq)}, ${remainingCount} times`,
+              `  Repeats ${formatFrequency(repeatFreq)}, ${countDesc}`,
             );
           }
 
@@ -377,12 +393,15 @@ To automate posting, you can:
           `${chalk.blue("Scheduled:")} ${formatLocalDateTime(post.scheduledAt)}`,
         );
 
-        const hasRecurrence = !!(post.rrule && post.remainingCount);
+        const hasRecurrence = !!post.rrule;
         if (hasRecurrence) {
           const freq = parseRRuleFrequency(post.rrule!);
           if (freq) {
+            const suffix = post.remainingCount != null
+              ? `(${post.remainingCount} remaining)`
+              : "(forever)";
             console.log(
-              `${chalk.blue("Repeats:")} ${formatFrequency(freq)} (${post.remainingCount} remaining)`,
+              `${chalk.blue("Repeats:")} ${formatFrequency(freq)} ${suffix}`,
             );
           }
         }
@@ -433,13 +452,20 @@ To automate posting, you can:
             delete post.rrule;
             delete post.remainingCount;
           } else if (VALID_FREQUENCIES.includes(freqTrimmed as RecurrenceFrequency)) {
-            const countAnswer = await rl.question("How many times? ");
-            const count = parseCount(countAnswer);
-            if (!count) {
-              console.error("Could not parse that as a number. Recurrence unchanged.");
+            const countAnswer = await rl.question(
+              "How many times? (leave blank for forever) ",
+            );
+            if (countAnswer.trim()) {
+              const count = parseCount(countAnswer);
+              if (!count) {
+                console.error("Could not parse that as a number. Recurrence unchanged.");
+              } else {
+                post.rrule = buildRRule(freqTrimmed as RecurrenceFrequency, count);
+                post.remainingCount = count;
+              }
             } else {
-              post.rrule = buildRRule(freqTrimmed as RecurrenceFrequency, count);
-              post.remainingCount = count;
+              post.rrule = buildRRule(freqTrimmed as RecurrenceFrequency);
+              delete post.remainingCount;
             }
           } else {
             console.error("Invalid frequency. Recurrence unchanged.");

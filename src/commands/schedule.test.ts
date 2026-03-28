@@ -56,7 +56,9 @@ vi.mock("@/lib/scheduler", () => ({
 }));
 
 vi.mock("@/lib/recurrence", () => ({
-  buildRRule: vi.fn((freq: string, count: number) => `FREQ=MOCK;COUNT=${count}`),
+  buildRRule: vi.fn((freq: string, count?: number) =>
+    count != null ? `FREQ=MOCK;COUNT=${count}` : `FREQ=MOCK`,
+  ),
   nextOccurrence: vi.fn(() => new Date("2026-04-02T14:00:00.000Z")),
   parseCount: vi.fn((input: string) => {
     const num = parseInt(input, 10);
@@ -530,6 +532,39 @@ describe("schedule run with recurring posts", () => {
     expect(deleteScheduledPost).not.toHaveBeenCalled();
   });
 
+  it("mutates infinite recurring post without decrementing", async () => {
+    const infinitePost = mockPost({
+      id: "inf-1",
+      scheduledAt: "2020-01-01T00:00:00.000Z",
+      text: "Forever post",
+      rrule: "FREQ=DAILY",
+    });
+    vi.mocked(listScheduledPosts).mockResolvedValue([infinitePost]);
+    const mockAgent = {} as Awaited<ReturnType<typeof getClient>>;
+    vi.mocked(getClient).mockResolvedValue(mockAgent);
+    vi.mocked(createPost).mockResolvedValue({
+      uri: "at://did:plc:test/app.bsky.feed.post/inf",
+      cid: "cid789",
+    });
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "run"]);
+
+    // Should update with new date but no remainingCount
+    expect(updateScheduledPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "inf-1",
+        scheduledAt: "2026-04-02T14:00:00.000Z",
+        rrule: "FREQ=DAILY",
+      }),
+      undefined,
+    );
+    // remainingCount should not be set
+    const updatedPost = vi.mocked(updateScheduledPost).mock.calls[0][0] as ScheduledPost;
+    expect(updatedPost.remainingCount).toBeUndefined();
+    expect(deleteScheduledPost).not.toHaveBeenCalled();
+  });
+
   it("deletes recurring post on last occurrence", async () => {
     const lastPost = mockPost({
       id: "rec-last",
@@ -587,6 +622,20 @@ describe("schedule list with recurring posts", () => {
     const allOutput = logSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
     expect(allOutput).toContain("Repeats");
     expect(allOutput).toContain("3 remaining");
+  });
+
+  it("shows 'forever' for infinite recurring posts", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY",
+      }),
+    ]);
+
+    await program.parseAsync(["node", "bsky", "schedule", "list"]);
+
+    const allOutput = logSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+    expect(allOutput).toContain("Repeats");
+    expect(allOutput).toContain("forever");
   });
 });
 
@@ -770,5 +819,45 @@ describe("schedule edit with recurrence", () => {
       }),
       undefined,
     );
+  });
+
+  it("shows (r)ecurrence option for infinite recurring posts", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({ rrule: "FREQ=DAILY" }),
+    ]);
+    mockQuestion
+      .mockResolvedValueOnce("t")
+      .mockResolvedValueOnce("Updated text");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    expect(mockQuestion).toHaveBeenCalledWith(
+      expect.stringContaining("(r)ecurrence"),
+    );
+    const allOutput = logSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+    expect(allOutput).toContain("forever");
+  });
+
+  it("allows setting recurrence to forever with blank count", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+    // Choose "r", pick new frequency, leave count blank for forever
+    mockQuestion
+      .mockResolvedValueOnce("r")
+      .mockResolvedValueOnce("hourly")
+      .mockResolvedValueOnce("");
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    expect(buildRRule).toHaveBeenCalledWith("hourly");
+    const updatedPost = vi.mocked(updateScheduledPost).mock.calls[0][0] as ScheduledPost;
+    expect(updatedPost.remainingCount).toBeUndefined();
+    expect(updatedPost.rrule).toBe("FREQ=MOCK");
   });
 });

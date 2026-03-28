@@ -29,6 +29,14 @@ describe("buildRRule", () => {
   it("builds annually rule", () => {
     expect(buildRRule("annually", 2)).toBe("FREQ=YEARLY;COUNT=2");
   });
+
+  it("builds infinite rule when count is omitted", () => {
+    expect(buildRRule("daily")).toBe("FREQ=DAILY");
+  });
+
+  it("builds infinite fortnightly rule", () => {
+    expect(buildRRule("fortnightly")).toBe("FREQ=WEEKLY;INTERVAL=2");
+  });
 });
 
 describe("nextOccurrence", () => {

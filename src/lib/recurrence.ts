@@ -40,14 +40,16 @@ export const VALID_FREQUENCIES: RecurrenceFrequency[] = [
 ];
 
 /**
- * Build an RFC 5545 RRULE string for the given frequency and count.
+ * Build an RFC 5545 RRULE string for the given frequency and optional count.
  * e.g. buildRRule("daily", 5) → "FREQ=DAILY;COUNT=5"
+ *      buildRRule("daily")    → "FREQ=DAILY"  (infinite)
  */
 export function buildRRule(
   frequency: RecurrenceFrequency,
-  count: number,
+  count?: number,
 ): string {
-  return `${FREQ_MAP[frequency]};COUNT=${count}`;
+  const base = FREQ_MAP[frequency];
+  return count != null ? `${base};COUNT=${count}` : base;
 }
 
 /**
