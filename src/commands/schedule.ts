@@ -69,6 +69,7 @@ async function postDueItems(program: Command): Promise<number> {
           if (next) {
             post.scheduledAt = next.toISOString();
             post.remainingCount = post.remainingCount - 1;
+            post.rrule = buildRRule(freq, post.remainingCount);
             await updateScheduledPost(post, profile);
             continue;
           }
@@ -555,8 +556,8 @@ To automate posting, you can:
         job.stop();
         process.exit(0);
       };
-      process.on("SIGINT", shutdown);
-      process.on("SIGTERM", shutdown);
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
     });
 
   // ── schedule enable ───────────────────────────────────────────

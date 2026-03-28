@@ -77,7 +77,7 @@ describe("Linux (crontab)", () => {
         "crontab",
         ["-"],
         expect.objectContaining({
-          input: expect.stringContaining("*/5 * * * * *"),
+          input: expect.stringContaining("*/5 * * * *"),
         }),
       );
     });
@@ -105,7 +105,7 @@ describe("Linux (crontab)", () => {
         "crontab",
         ["-"],
         expect.objectContaining({
-          input: expect.stringContaining("-p work"),
+          input: expect.stringContaining("-p 'work'"),
         }),
       );
     });

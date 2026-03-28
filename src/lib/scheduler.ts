@@ -40,8 +40,8 @@ function enableLinux(interval: number, bskyPath: string, profile?: string): void
     .split("\n")
     .filter((l) => !l.includes(CRONTAB_MARKER))
     .join("\n");
-  const profileFlag = profile ? ` -p ${profile}` : "";
-  const cronExpr = interval === 1 ? "* * * * *" : `*/${interval} * * * * *`;
+  const profileFlag = profile ? ` -p '${profile}'` : "";
+  const cronExpr = interval === 1 ? "* * * * *" : `*/${interval} * * * *`;
   const newLine = `${cronExpr} ${bskyPath} schedule run${profileFlag} ${CRONTAB_MARKER}`;
   const updated = filtered.trimEnd() + "\n" + newLine + "\n";
   writeCrontab(updated);
@@ -153,7 +153,7 @@ function uninstallMacOS(): void {
 // ── Windows (schtasks) ───────────────────────────────────────────────
 
 function enableWindows(interval: number, bskyPath: string, profile?: string): void {
-  const profileFlag = profile ? ` -p ${profile}` : "";
+  const profileFlag = profile ? ` -p "${profile}"` : "";
   const cmd = `"${bskyPath}" schedule run${profileFlag}`;
   execFileSync("schtasks", [
     "/create",

@@ -517,12 +517,13 @@ describe("schedule run with recurring posts", () => {
 
     await program.parseAsync(["node", "bsky", "schedule", "run"]);
 
-    // Should update, not delete
+    // Should update, not delete — RRULE COUNT updated in lockstep
     expect(updateScheduledPost).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "rec-1",
         scheduledAt: "2026-04-02T14:00:00.000Z",
         remainingCount: 2,
+        rrule: "FREQ=MOCK;COUNT=2",
       }),
       undefined,
     );
