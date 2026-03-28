@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { bskyDir } from "@/config";
 import type { ScheduledPost } from "@/lib/types";
 
-function scheduledDir(profile?: string): string {
+export function scheduledDir(profile?: string): string {
   const base = bskyDir();
   return profile ? join(base, `scheduled-${profile}`) : join(base, "scheduled");
 }
@@ -17,6 +17,16 @@ function generateId(): string {
   const ts = Date.now();
   const rand = randomBytes(2).toString("hex");
   return `${ts}-${rand}`;
+}
+
+export async function isScheduledDirEmpty(profile?: string): Promise<boolean> {
+  const dir = scheduledDir(profile);
+  try {
+    const files = await readdir(dir);
+    return !files.some((f) => f.endsWith(".json"));
+  } catch {
+    return true;
+  }
 }
 
 export async function saveScheduledPost(

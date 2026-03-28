@@ -20,6 +20,40 @@ import type { ScheduledPost } from "@/lib/types";
 const PAGE_SIZE = 5;
 
 /**
+ * Find all scheduled posts that are due and publish them.
+ * Returns the number of successfully posted items.
+ */
+async function postDueItems(program: Command): Promise<number> {
+  const profile = program.opts().profile;
+  const posts = await listScheduledPosts(profile);
+  const due = posts.filter((p) => new Date(p.scheduledAt) <= new Date());
+
+  if (due.length === 0) return 0;
+
+  const agent = await getClient(program);
+  let posted = 0;
+
+  for (const post of due) {
+    try {
+      const result = await createPost(agent, post.text, {
+        images: post.images,
+        imageAlts: post.imageAlts,
+        video: post.video,
+        videoAlt: post.videoAlt,
+      });
+      await deleteScheduledPost(post.id, profile);
+      console.log(result.uri);
+      posted++;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to post ${post.id}: ${msg}`);
+    }
+  }
+
+  return posted;
+}
+
+/**
  * Display a page of scheduled posts with 1-based indices.
  */
 function displayPosts(posts: ScheduledPost[], offset: number): void {
@@ -338,29 +372,6 @@ export function registerSchedule(program: Command): void {
     .command("run")
     .description("Post all scheduled posts that are due (for use with cron)")
     .action(async () => {
-      const profile = program.opts().profile;
-      const posts = await listScheduledPosts(profile);
-      const now = new Date();
-      const due = posts.filter((p) => new Date(p.scheduledAt) <= now);
-
-      if (due.length === 0) return;
-
-      const agent = await getClient(program);
-
-      for (const post of due) {
-        try {
-          const result = await createPost(agent, post.text, {
-            images: post.images,
-            imageAlts: post.imageAlts,
-            video: post.video,
-            videoAlt: post.videoAlt,
-          });
-          await deleteScheduledPost(post.id, profile);
-          console.log(result.uri);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(`Failed to post ${post.id}: ${msg}`);
-        }
-      }
+      await postDueItems(program);
     });
 }
