@@ -50,6 +50,22 @@ export interface Draft {
   posts?: ThreadDraftPost[];
 }
 
+/**
+ * A post scheduled for future publication.
+ * Stored as JSON in the `scheduled/` directory alongside drafts.
+ * `scheduledAt` is always ISO 8601 UTC; displayed in local time.
+ */
+export interface ScheduledPost {
+  id: string;
+  createdAt: string;    // ISO 8601 UTC — when the entry was created
+  scheduledAt: string;  // ISO 8601 UTC — when the post should go live
+  text: string;
+  images?: string[];
+  imageAlts?: string[];
+  video?: string;
+  videoAlt?: string;
+}
+
 export interface GlobalOptions {
   json?: boolean;
   profile?: string;
