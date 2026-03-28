@@ -57,13 +57,15 @@ export interface Draft {
  */
 export interface ScheduledPost {
   id: string;
-  createdAt: string;    // ISO 8601 UTC — when the entry was created
-  scheduledAt: string;  // ISO 8601 UTC — when the post should go live
+  createdAt: string;       // ISO 8601 UTC — when the entry was created
+  scheduledAt: string;     // ISO 8601 UTC — when the post should go live
   text: string;
   images?: string[];
   imageAlts?: string[];
   video?: string;
   videoAlt?: string;
+  rrule?: string;          // RFC 5545 RRULE e.g. "FREQ=DAILY;COUNT=5"
+  remainingCount?: number; // decremented each time post is published
 }
 
 export interface GlobalOptions {
