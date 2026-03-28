@@ -6,6 +6,7 @@ vi.mock("@/scheduled", () => ({
   listScheduledPosts: vi.fn(),
   deleteScheduledPost: vi.fn(),
   updateScheduledPost: vi.fn(),
+  isScheduledDirEmpty: vi.fn(() => false),
 }));
 
 vi.mock("@/drafts", () => ({
@@ -59,6 +60,7 @@ import {
   listScheduledPosts,
   deleteScheduledPost,
   updateScheduledPost,
+  isScheduledDirEmpty,
 } from "@/scheduled";
 import { saveDraft } from "@/drafts";
 import { createPost } from "@/commands/post";

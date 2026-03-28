@@ -10,6 +10,7 @@ import {
   listScheduledPosts,
   deleteScheduledPost,
   updateScheduledPost,
+  isScheduledDirEmpty,
 } from "@/scheduled";
 import { saveDraft } from "@/drafts";
 import { createPost } from "@/commands/post";
@@ -169,6 +170,8 @@ export function registerSchedule(program: Command): void {
           process.exit(1);
         }
 
+        const wasEmpty = await isScheduledDirEmpty(profile);
+
         const rl = createInterface({ input: stdin, output: stderr });
         try {
           const scheduledAt = await promptDateTime(rl);
@@ -188,6 +191,32 @@ export function registerSchedule(program: Command): void {
           console.error(
             `Scheduled post saved: ${chalk.blue(post.id)} (${formatLocalDateTime(scheduledAt)})`,
           );
+
+          // First-use onboarding: offer to set up the scheduler
+          if (wasEmpty && stdin.isTTY) {
+            console.error(`
+To automate posting, you can:
+
+  Enable the scheduler to run in the background:
+    ${chalk.blue("bsky schedule enable")}
+
+  Or run a foreground watcher (stays open in your terminal,
+  checks every minute, handles overlapping runs, stops cleanly
+  with Ctrl+C, customizable with --interval):
+    ${chalk.blue("bsky schedule watch")}
+`);
+            const answer = await rl.question(
+              "Would you like to enable the scheduler now? (Y/n) ",
+            );
+            if (answer.trim().toLowerCase() !== "n") {
+              enableScheduler(1, profile);
+              console.error("Scheduler enabled (every 1 minute).");
+            } else {
+              console.error(
+                chalk.dim("You can enable it later with: bsky schedule enable"),
+              );
+            }
+          }
         } finally {
           rl.close();
         }
