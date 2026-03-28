@@ -215,7 +215,12 @@ export function registerSchedule(program: Command): void {
           process.exit(1);
         }
 
-        // Validate --repeat frequency
+        // Validate --repeat / --times options
+        if (opts.times && !opts.repeat) {
+          console.error("Error: --times requires --repeat");
+          process.exit(1);
+        }
+
         let rrule: string | undefined;
         let remainingCount: number | undefined;
         let repeatFreq: RecurrenceFrequency | undefined;

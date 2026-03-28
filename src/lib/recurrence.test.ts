@@ -111,6 +111,11 @@ describe("parseRRuleFrequency", () => {
     expect(parseRRuleFrequency("FREQ=YEARLY;COUNT=2")).toBe("annually");
   });
 
+  it("parses infinite rules (no COUNT)", () => {
+    expect(parseRRuleFrequency("FREQ=DAILY")).toBe("daily");
+    expect(parseRRuleFrequency("FREQ=WEEKLY;INTERVAL=2")).toBe("fortnightly");
+  });
+
   it("returns null for unknown rules", () => {
     expect(parseRRuleFrequency("FREQ=SECONDLY;COUNT=1")).toBeNull();
   });

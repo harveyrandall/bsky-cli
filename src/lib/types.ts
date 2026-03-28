@@ -64,8 +64,8 @@ export interface ScheduledPost {
   imageAlts?: string[];
   video?: string;
   videoAlt?: string;
-  rrule?: string;          // RFC 5545 RRULE e.g. "FREQ=DAILY;COUNT=5"
-  remainingCount?: number; // decremented each time post is published
+  rrule?: string;          // RFC 5545 RRULE e.g. "FREQ=DAILY;COUNT=5" or "FREQ=DAILY" (infinite)
+  remainingCount?: number; // decremented each time post is published; undefined = infinite
 }
 
 export interface GlobalOptions {

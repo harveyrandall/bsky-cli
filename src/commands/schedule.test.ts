@@ -639,6 +639,82 @@ describe("schedule list with recurring posts", () => {
   });
 });
 
+describe("schedule post with --repeat", () => {
+  let program: Command;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(isJson).mockReturnValue(false);
+    vi.mocked(isScheduledDirEmpty).mockResolvedValue(false);
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("saves infinite repeat when count prompt is left blank", async () => {
+    vi.mocked(promptDateTime).mockResolvedValue("2026-04-01T14:00:00.000Z");
+    vi.mocked(saveScheduledPost).mockResolvedValue(mockPost());
+    // Blank answer to "How many times?" = forever
+    mockQuestion.mockResolvedValueOnce("");
+
+    await program.parseAsync([
+      "node", "bsky", "schedule", "post", "Daily update", "--repeat", "daily",
+    ]);
+
+    expect(buildRRule).toHaveBeenCalledWith("daily", undefined);
+    expect(saveScheduledPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rrule: "FREQ=MOCK",
+        text: "Daily update",
+      }),
+      undefined,
+    );
+    // remainingCount should be undefined
+    const savedData = vi.mocked(saveScheduledPost).mock.calls[0][0];
+    expect(savedData.remainingCount).toBeUndefined();
+  });
+
+  it("saves finite repeat when --times is provided", async () => {
+    vi.mocked(promptDateTime).mockResolvedValue("2026-04-01T14:00:00.000Z");
+    vi.mocked(saveScheduledPost).mockResolvedValue(mockPost());
+
+    await program.parseAsync([
+      "node", "bsky", "schedule", "post", "Weekly digest",
+      "--repeat", "fortnightly", "--times", "3",
+    ]);
+
+    expect(buildRRule).toHaveBeenCalledWith("fortnightly", 3);
+    expect(saveScheduledPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remainingCount: 3,
+        text: "Weekly digest",
+      }),
+      undefined,
+    );
+  });
+
+  it("rejects --times without --repeat", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+
+    await expect(
+      program.parseAsync([
+        "node", "bsky", "schedule", "post", "Hello", "--times", "5",
+      ]),
+    ).rejects.toThrow("process.exit");
+
+    expect(errorSpy).toHaveBeenCalledWith("Error: --times requires --repeat");
+    exitSpy.mockRestore();
+  });
+});
+
 describe("schedule edit with recurrence", () => {
   let program: Command;
   let logSpy: ReturnType<typeof vi.spyOn>;
