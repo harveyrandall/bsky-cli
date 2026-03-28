@@ -55,6 +55,18 @@ vi.mock("@/lib/scheduler", () => ({
   uninstallScheduler: vi.fn(),
 }));
 
+vi.mock("@/lib/recurrence", () => ({
+  buildRRule: vi.fn((freq: string, count: number) => `FREQ=MOCK;COUNT=${count}`),
+  nextOccurrence: vi.fn(() => new Date("2026-04-02T14:00:00.000Z")),
+  parseCount: vi.fn((input: string) => {
+    const num = parseInt(input, 10);
+    return isNaN(num) || num <= 0 ? null : num;
+  }),
+  parseRRuleFrequency: vi.fn(() => "daily"),
+  formatFrequency: vi.fn(() => "every day"),
+  VALID_FREQUENCIES: ["hourly", "daily", "fortnightly", "monthly", "annually"],
+}));
+
 import {
   saveScheduledPost,
   listScheduledPosts,
@@ -74,6 +86,7 @@ import {
   getSchedulerStatus,
   uninstallScheduler,
 } from "@/lib/scheduler";
+import { nextOccurrence } from "@/lib/recurrence";
 import type { ScheduledPost } from "@/lib/types";
 
 // Helper to create mock posts
@@ -453,5 +466,116 @@ describe("schedule uninstall", () => {
     await program.parseAsync(["node", "bsky", "schedule", "uninstall"]);
     expect(errorSpy).toHaveBeenCalledWith("Scheduler is not installed.");
     expect(uninstallScheduler).not.toHaveBeenCalled();
+  });
+});
+
+describe("schedule run with recurring posts", () => {
+  let program: Command;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(isJson).mockReturnValue(false);
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("mutates recurring post in place instead of deleting", async () => {
+    const recurringPost = mockPost({
+      id: "rec-1",
+      scheduledAt: "2020-01-01T00:00:00.000Z",
+      text: "Daily update",
+      rrule: "FREQ=DAILY;COUNT=5",
+      remainingCount: 3,
+    });
+    vi.mocked(listScheduledPosts).mockResolvedValue([recurringPost]);
+    const mockAgent = {} as Awaited<ReturnType<typeof getClient>>;
+    vi.mocked(getClient).mockResolvedValue(mockAgent);
+    vi.mocked(createPost).mockResolvedValue({
+      uri: "at://did:plc:test/app.bsky.feed.post/abc",
+      cid: "cid123",
+    });
+    vi.mocked(updateScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "run"]);
+
+    // Should update, not delete
+    expect(updateScheduledPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "rec-1",
+        scheduledAt: "2026-04-02T14:00:00.000Z",
+        remainingCount: 2,
+      }),
+      undefined,
+    );
+    expect(deleteScheduledPost).not.toHaveBeenCalled();
+  });
+
+  it("deletes recurring post on last occurrence", async () => {
+    const lastPost = mockPost({
+      id: "rec-last",
+      scheduledAt: "2020-01-01T00:00:00.000Z",
+      text: "Last one",
+      rrule: "FREQ=DAILY;COUNT=5",
+      remainingCount: 1,
+    });
+    vi.mocked(listScheduledPosts).mockResolvedValue([lastPost]);
+    const mockAgent = {} as Awaited<ReturnType<typeof getClient>>;
+    vi.mocked(getClient).mockResolvedValue(mockAgent);
+    vi.mocked(createPost).mockResolvedValue({
+      uri: "at://did:plc:test/app.bsky.feed.post/final",
+      cid: "cid456",
+    });
+    vi.mocked(deleteScheduledPost).mockResolvedValue(undefined);
+
+    await program.parseAsync(["node", "bsky", "schedule", "run"]);
+
+    expect(deleteScheduledPost).toHaveBeenCalledWith("rec-last", undefined);
+    expect(updateScheduledPost).not.toHaveBeenCalled();
+  });
+});
+
+describe("schedule list with recurring posts", () => {
+  let program: Command;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(isJson).mockReturnValue(false);
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("shows recurrence info for recurring posts", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([
+      mockPost({
+        rrule: "FREQ=DAILY;COUNT=5",
+        remainingCount: 3,
+      }),
+    ]);
+
+    await program.parseAsync(["node", "bsky", "schedule", "list"]);
+
+    const allOutput = logSpy.mock.calls.map((c: unknown[]) => c[0]).join("\n");
+    expect(allOutput).toContain("Repeats");
+    expect(allOutput).toContain("3 remaining");
   });
 });

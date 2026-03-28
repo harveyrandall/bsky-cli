@@ -23,6 +23,15 @@ import {
   getSchedulerStatus,
   uninstallScheduler,
 } from "@/lib/scheduler";
+import {
+  buildRRule,
+  nextOccurrence,
+  parseCount,
+  parseRRuleFrequency,
+  formatFrequency,
+  VALID_FREQUENCIES,
+} from "@/lib/recurrence";
+import type { RecurrenceFrequency } from "@/lib/recurrence";
 import type { ScheduledPost } from "@/lib/types";
 
 const PAGE_SIZE = 5;
@@ -49,9 +58,24 @@ async function postDueItems(program: Command): Promise<number> {
         video: post.video,
         videoAlt: post.videoAlt,
       });
-      await deleteScheduledPost(post.id, profile);
       console.log(result.uri);
       posted++;
+
+      // Handle recurring posts: mutate in place instead of deleting
+      if (post.rrule && post.remainingCount && post.remainingCount > 1) {
+        const freq = parseRRuleFrequency(post.rrule);
+        if (freq) {
+          const next = nextOccurrence(new Date(post.scheduledAt), freq);
+          if (next) {
+            post.scheduledAt = next.toISOString();
+            post.remainingCount = post.remainingCount - 1;
+            await updateScheduledPost(post, profile);
+            continue;
+          }
+        }
+      }
+      // One-shot post or last occurrence — delete
+      await deleteScheduledPost(post.id, profile);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Failed to post ${post.id}: ${msg}`);
@@ -77,6 +101,14 @@ function displayPosts(posts: ScheduledPost[], offset: number): void {
     }
     if (post.video) {
       console.log(`   ${chalk.dim("1 video")}`);
+    }
+    if (post.rrule && post.remainingCount) {
+      const freq = parseRRuleFrequency(post.rrule);
+      if (freq) {
+        console.log(
+          `   ${chalk.dim(`Repeats ${formatFrequency(freq)} (${post.remainingCount} remaining)`)}`,
+        );
+      }
     }
   }
 }
@@ -148,6 +180,8 @@ export function registerSchedule(program: Command): void {
     .option("--image-alt <alts...>", "Alt text for images")
     .option("--video <file>", "Video file to attach")
     .option("--video-alt <alt>", "Alt text for video")
+    .option("--repeat <frequency>", "Repeat: hourly, daily, fortnightly, monthly, annually")
+    .option("--times <count>", "Number of times to repeat (number or word, e.g. '5' or 'three')")
     .action(
       async (
         textParts: string[],
@@ -157,6 +191,8 @@ export function registerSchedule(program: Command): void {
           imageAlt?: string[];
           video?: string;
           videoAlt?: string;
+          repeat?: string;
+          times?: string;
         },
       ) => {
         const profile = program.opts().profile;
@@ -170,10 +206,48 @@ export function registerSchedule(program: Command): void {
           process.exit(1);
         }
 
+        // Validate --repeat frequency
+        let rrule: string | undefined;
+        let remainingCount: number | undefined;
+        let repeatFreq: RecurrenceFrequency | undefined;
+
+        if (opts.repeat) {
+          if (!VALID_FREQUENCIES.includes(opts.repeat as RecurrenceFrequency)) {
+            console.error(
+              `Error: --repeat must be one of: ${VALID_FREQUENCIES.join(", ")}`,
+            );
+            process.exit(1);
+          }
+          repeatFreq = opts.repeat as RecurrenceFrequency;
+        }
+
         const wasEmpty = await isScheduledDirEmpty(profile);
 
         const rl = createInterface({ input: stdin, output: stderr });
         try {
+          // If --repeat was given, resolve the count
+          if (repeatFreq) {
+            if (opts.times) {
+              const parsed = parseCount(opts.times);
+              if (!parsed) {
+                console.error(
+                  `Error: could not parse "${opts.times}" as a number`,
+                );
+                process.exit(1);
+              }
+              remainingCount = parsed;
+            } else {
+              const answer = await rl.question("How many times? ");
+              const parsed = parseCount(answer);
+              if (!parsed) {
+                console.error("Could not parse that as a number.");
+                process.exit(1);
+              }
+              remainingCount = parsed;
+            }
+            rrule = buildRRule(repeatFreq, remainingCount);
+          }
+
           const scheduledAt = await promptDateTime(rl);
 
           const post = await saveScheduledPost(
@@ -184,6 +258,8 @@ export function registerSchedule(program: Command): void {
               imageAlts: opts.imageAlt,
               video: opts.video ? resolve(opts.video) : undefined,
               videoAlt: opts.videoAlt,
+              rrule,
+              remainingCount,
             },
             profile,
           );
@@ -191,6 +267,11 @@ export function registerSchedule(program: Command): void {
           console.error(
             `Scheduled post saved: ${chalk.blue(post.id)} (${formatLocalDateTime(scheduledAt)})`,
           );
+          if (repeatFreq && remainingCount) {
+            console.error(
+              `  Repeats ${formatFrequency(repeatFreq)}, ${remainingCount} times`,
+            );
+          }
 
           // First-use onboarding: offer to set up the scheduler
           if (wasEmpty && stdin.isTTY) {
