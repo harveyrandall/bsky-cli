@@ -66,22 +66,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - run: corepack enable
-
-      - run: yarn install
-
-      # Bun provides a real node_modules/ that esbuild can resolve from
-      # (Yarn 4 PnP zips are invisible to esbuild on Windows)
+      # Use Bun for both build and binary compilation
+      # (Yarn 4 PnP zips cause esbuild resolution failures on Windows)
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install
 
-      # Build dist/index.js with tsup (resolves @/ path aliases)
-      - run: yarn build
+      # Build dist/index.js with tsup via bun (real node_modules/)
+      - run: bun run build
 
       # Compile standalone binary from the tsup output
       - name: Compile binary
