@@ -29,6 +29,12 @@ jobs:
       - name: Run tests
         run: yarn test:run
 
+      - name: Build
+        run: yarn build
+
+      - name: Smoke test (Node ESM)
+        run: node dist/index.js --help
+
   build-binaries:
     needs: test
     strategy:
