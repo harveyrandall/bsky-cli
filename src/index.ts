@@ -39,7 +39,9 @@ import { registerCompletions } from "@/commands/completions";
 import { registerDrafts, syncNetworkDrafts } from "@/commands/draft";
 import { registerCreateThread } from "@/commands/create-thread";
 import { registerSchedule } from "@/commands/schedule";
+import { registerConfig } from "@/commands/config-cmd";
 import type { SessionConfig } from "@/lib/types";
+import { configFilePath, loadTomlConfig, applyConfigToProgram } from "@/toml-config";
 
 import packageJson from "../package.json";
 
@@ -52,7 +54,8 @@ program
   .version(VERSION, "-V, --version", "Output the version number")
   .option("--json", "Output as JSON")
   .option("-p, --profile <name>", "Profile name")
-  .option("-v, --verbose", "Verbose output");
+  .option("-v, --verbose", "Verbose output")
+  .option("-c, --config <path>", "Path to config file");
 
 function resolveProfile(program: Command): string | undefined {
   return program.opts().profile ?? process.env.BSKY_PROFILE;
@@ -159,6 +162,18 @@ registerCompletions(program);
 registerDrafts(program);
 registerCreateThread(program);
 registerSchedule(program);
+registerConfig(program);
+
+// Pre-parse --config/-c from argv before Commander runs
+function preParseConfigPath(): string | undefined {
+  const idx = process.argv.findIndex((a) => a === "--config" || a === "-c");
+  return idx !== -1 ? process.argv[idx + 1] : undefined;
+}
+
+// Load TOML config and apply to program before parsing
+const tomlPath = configFilePath(preParseConfigPath());
+const tomlConfig = loadTomlConfig(tomlPath);
+applyConfigToProgram(program, tomlConfig);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err.message ?? err);

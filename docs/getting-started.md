@@ -128,5 +128,6 @@ bsky -p ? tl
 ## Next steps
 
 - Browse the full [command reference](commands.md)
-- Set up [environment variables](configuration.md) for CI/scripts
+- Create a [config file](configuration.md) with `bsky config init` for persistent defaults
+- Set up [environment variables](configuration.md#environment-variables) for CI/scripts
 - Install [shell completions](completions.md) for tab completion
