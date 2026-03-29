@@ -66,7 +66,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Build dist/index.js with tsup (resolves @/ path aliases)
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -75,15 +74,16 @@ jobs:
 
       - run: yarn install
 
+      # Bun provides a real node_modules/ that esbuild can resolve from
+      # (Yarn 4 PnP zips are invisible to esbuild on Windows)
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+
+      # Build dist/index.js with tsup (resolves @/ path aliases)
       - run: yarn build
 
       # Compile standalone binary from the tsup output
-      - uses: oven-sh/setup-bun@v2
-
-      # Bun needs a standard node_modules/ to resolve imports during cross-compilation
-      # (Yarn 4 PnP is invisible to Bun)
-      - run: bun install
-
       - name: Compile binary
         run: bun build --compile --target ${{ matrix.target }} dist/index.js --outfile bsky
 
