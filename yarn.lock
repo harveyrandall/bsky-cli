@@ -291,6 +291,7 @@ __metadata:
     rrule: "npm:2.8.1"
     semver: "npm:^7.7.4"
     smol-toml: "npm:^1.6.1"
+    tslib: "npm:^2.8.1"
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.21.0"
     typescript: "npm:^5.9.3"
