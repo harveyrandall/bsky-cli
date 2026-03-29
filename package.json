@@ -74,6 +74,7 @@
     "commander": "^14.0.3",
     "croner": "10.0.1",
     "rrule": "2.8.1",
+    "smol-toml": "^1.6.1",
     "ws": "^8.19.0"
   },
   "devDependencies": {
