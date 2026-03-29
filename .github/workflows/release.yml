@@ -33,7 +33,7 @@ jobs:
         run: yarn build
 
       - name: Smoke test (Node ESM)
-        run: node dist/index.js --help
+        run: yarn node dist/index.js --help
 
   build-binaries:
     needs: test
