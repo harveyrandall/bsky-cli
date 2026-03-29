@@ -509,6 +509,54 @@ Create a moderation list.
 bsky mod-list user1.bsky.social user2.bsky.social --name "My Block List" --desc "Spammers"
 ```
 
+## Configuration
+
+bsky-cli supports a TOML config file for setting persistent defaults. CLI flags always take precedence over config values.
+
+### `bsky config init`
+
+Create the default config file with all options documented and commented out.
+
+```bash
+bsky config init
+```
+
+### `bsky config path`
+
+Print the resolved config file path.
+
+```bash
+bsky config path
+```
+
+### `bsky config show`
+
+Print the current config file contents.
+
+```bash
+bsky config show
+```
+
+### `bsky config edit`
+
+Open the config file in `$EDITOR` (falls back to `vi`).
+
+```bash
+bsky config edit
+```
+
+!!! tip "Config file location"
+    The config file lives at the platform default config directory:
+
+    - **Linux:** `~/.config/bsky-cli/config.toml`
+    - **macOS:** `~/Library/Application Support/bsky-cli/config.toml`
+    - **Windows:** `%APPDATA%/bsky-cli/config.toml`
+
+    Override with `-c` / `--config`: `bsky -c /path/to/config.toml timeline`
+
+!!! info "Precedence"
+    CLI flags > environment variables > config file > defaults
+
 ## Global Flags
 
 These flags work with all commands:
@@ -518,5 +566,6 @@ These flags work with all commands:
 | `--json` | Output as JSON |
 | `-p, --profile <name>` | Use a named profile |
 | `-v, --verbose` | Verbose output |
+| `-c, --config <path>` | Path to config file |
 | `--version` | Show version |
 | `--help` | Show help |

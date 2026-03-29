@@ -242,6 +242,7 @@ bsky mod-list <handles...> [--name] [--desc]
 
 ```
 bsky completions bash|zsh|fish
+bsky config init|path|show|edit
 ```
 
 ## Global flags
@@ -251,7 +252,27 @@ bsky completions bash|zsh|fish
 | `--json` | Output as JSON |
 | `-p, --profile <name>` | Use a named profile |
 | `-v, --verbose` | Verbose output |
+| `-c, --config <path>` | Path to config file |
 | `--version` | Show version |
+
+## Configuration
+
+bsky-cli supports a TOML config file for persistent defaults. CLI flags always override config values.
+
+```bash
+# Create default config
+bsky config init
+
+# Open in your editor
+bsky config edit
+
+# Use a custom config file
+bsky -c /path/to/config.toml timeline
+```
+
+The config file lives at the platform default: `~/.config/bsky-cli/config.toml` (Linux), `~/Library/Application Support/bsky-cli/config.toml` (macOS), or `%APPDATA%/bsky-cli/config.toml` (Windows).
+
+Precedence: **CLI flags > environment variables > config file > defaults**
 
 ## Shell completions
 

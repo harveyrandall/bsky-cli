@@ -13,6 +13,7 @@ A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 - **Multi-account** — named profiles for switching between accounts
 - **Shell completions** — bash, zsh, and fish
 - **JSON output** — pipe everything into `jq`, scripts, or other tools
+- **TOML config file** — persistent defaults for any command, with CLI overrides
 
 ## Quick install
 
