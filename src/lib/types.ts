@@ -72,6 +72,7 @@ export interface GlobalOptions {
   json?: boolean;
   profile?: string;
   verbose?: boolean;
+  config?: string;
 }
 
 // Jetstream WebSocket event types
