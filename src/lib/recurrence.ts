@@ -1,4 +1,6 @@
-import { RRule, Frequency } from "rrule";
+import type { Frequency } from "rrule";
+import rrulePkg from "rrule";
+const { RRule } = rrulePkg;
 
 export type RecurrenceFrequency =
   | "hourly"
