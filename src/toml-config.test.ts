@@ -16,15 +16,37 @@ import {
 // ── configFilePath ──────────────────────────────────────────────────
 
 describe("configFilePath", () => {
+  const savedBskyConfig = process.env.BSKY_CONFIG;
+
+  afterEach(() => {
+    if (savedBskyConfig !== undefined) {
+      process.env.BSKY_CONFIG = savedBskyConfig;
+    } else {
+      delete process.env.BSKY_CONFIG;
+    }
+  });
+
   it("returns override path when provided", () => {
     expect(configFilePath("/tmp/custom.toml")).toBe("/tmp/custom.toml");
   });
 
-  it("returns default path when no override", () => {
+  it("returns override path even when BSKY_CONFIG is set", () => {
+    process.env.BSKY_CONFIG = "/env/config.toml";
+    expect(configFilePath("/tmp/custom.toml")).toBe("/tmp/custom.toml");
+  });
+
+  it("returns BSKY_CONFIG env var when no override", () => {
+    process.env.BSKY_CONFIG = "/env/config.toml";
+    expect(configFilePath()).toBe("/env/config.toml");
+  });
+
+  it("returns default path when no override and no env var", () => {
+    delete process.env.BSKY_CONFIG;
     expect(configFilePath()).toBe("/mock/bsky-cli/config.toml");
   });
 
-  it("returns default path for undefined override", () => {
+  it("returns default path for undefined override without env var", () => {
+    delete process.env.BSKY_CONFIG;
     expect(configFilePath(undefined)).toBe("/mock/bsky-cli/config.toml");
   });
 });

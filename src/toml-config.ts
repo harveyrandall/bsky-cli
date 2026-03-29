@@ -24,10 +24,11 @@ const ENV_OVERRIDES: Record<string, string> = {
 
 /**
  * Resolve the config file path.
- * Uses the override path if provided, otherwise the default location.
+ * Precedence: overridePath (-c flag) > BSKY_CONFIG env var > default location.
  */
 export function configFilePath(overridePath?: string): string {
   if (overridePath) return overridePath;
+  if (process.env.BSKY_CONFIG) return process.env.BSKY_CONFIG;
   return join(bskyDir(), "config.toml");
 }
 

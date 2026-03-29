@@ -78,8 +78,9 @@ All configuration can be set via environment variables, useful for CI and script
 | `BSKY_HOST` | PDS host URL (default: `https://bsky.social`) |
 | `BSKY_BGS` | BGS host URL (default: `https://bsky.network`) |
 | `BSKY_PROFILE` | Profile name (same as `--profile`) |
+| `BSKY_CONFIG` | Path to config file (same as `--config`) |
 
-Precedence: CLI args > environment variables > saved session.
+Precedence: CLI args > environment variables > config file > defaults.
 
 ```bash
 # No login needed - authenticate directly from env

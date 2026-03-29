@@ -37,11 +37,18 @@ bsky config edit
 
 ### Using a custom config file
 
-Override the config file path with `-c` or `--config`:
+Override the config file path with `-c` / `--config` or the `BSKY_CONFIG` environment variable:
 
 ```bash
+# Flag (highest priority)
 bsky -c /path/to/config.toml timeline
+
+# Environment variable
+export BSKY_CONFIG=/path/to/config.toml
+bsky timeline
 ```
+
+Precedence for config path: `-c` flag > `BSKY_CONFIG` env var > default location.
 
 ### Config file format
 
@@ -167,6 +174,7 @@ All configuration can be set via environment variables. This is useful for CI pi
 | `BSKY_HOST` | PDS host URL | `https://bsky.social` |
 | `BSKY_BGS` | BGS host URL | `https://bsky.network` |
 | `BSKY_PROFILE` | Profile name | — |
+| `BSKY_CONFIG` | Path to config file | — |
 
 ### Example: CI pipeline
 
