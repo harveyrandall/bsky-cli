@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 This changelog is generated from [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [1.9.1] — 2026-03-31
+
+### Bug Fixes
+
+- **dm:** resolve chat proxy ordering so handle-based commands work ([957556b](https://github.com/harveyrandall/bsky-cli/commit/957556b))
+  - `configureProxy()` is agent-wide; `getProfile()` was routed through the chat service causing 501 errors
+  - Handle resolution now runs before enabling the chat proxy
+- **dm:** add graceful fallbacks for server-unimplemented chat methods ([957556b](https://github.com/harveyrandall/bsky-cli/commit/957556b))
+  - `getConvoAvailability` → falls back to `getConvoForMembers`
+  - `updateAllRead` → falls back to paginated `listConvos` + `updateRead`
+  - `acceptConvo` → prints workaround guidance if not implemented
+- **dm:** fix case-insensitive matching for "Method Not Implemented" errors
+
+### Documentation
+
+- generate full CHANGELOG.md from conventional commits ([98b4d18](https://github.com/harveyrandall/bsky-cli/commit/98b4d18))
+- add Version Issues page to mkdocs and wiki ([b10917a](https://github.com/harveyrandall/bsky-cli/commit/b10917a))
+- add DM upgrade notice banner to README ([fd43274](https://github.com/harveyrandall/bsky-cli/commit/fd43274))
+
 ## [1.9.0] — 2026-03-30
 
 ### Features
