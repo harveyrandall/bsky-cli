@@ -4,6 +4,7 @@ export function createMockAgent() {
   const agent = {
     session: { did: "did:plc:test123", handle: "test.bsky.social" },
     login: vi.fn(),
+    configureProxy: vi.fn(),
     resumeSession: vi.fn(),
     post: vi.fn(),
     like: vi.fn(),
@@ -58,6 +59,24 @@ export function createMockAgent() {
         },
         notification: {
           updateSeen: vi.fn(),
+        },
+      },
+    },
+    chat: {
+      bsky: {
+        convo: {
+          listConvos: vi.fn(),
+          getConvo: vi.fn(),
+          getConvoForMembers: vi.fn(),
+          getConvoAvailability: vi.fn(),
+          sendMessage: vi.fn(),
+          getMessages: vi.fn(),
+          deleteMessageForSelf: vi.fn(),
+          muteConvo: vi.fn(),
+          unmuteConvo: vi.fn(),
+          updateRead: vi.fn(),
+          updateAllRead: vi.fn(),
+          acceptConvo: vi.fn(),
         },
       },
     },

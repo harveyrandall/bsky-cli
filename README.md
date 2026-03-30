@@ -206,6 +206,19 @@ bsky bookmarks delete <uri...>
 bsky bookmarks get [-n count]
 ```
 
+### Direct Messages
+
+```
+bsky dm list [-n count] [--unread] [--requests]
+bsky dm read <handle-or-convo-id> [-n count]
+bsky dm send <handle> <text...> [--stdin]
+bsky dm delete <convo-id> <message-id>
+bsky dm mute <convo-id>
+bsky dm unmute <convo-id>
+bsky dm accept <convo-id>
+bsky dm mark-read [convo-id] [--all]
+```
+
 ### Social
 
 ```
@@ -308,6 +321,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 - [x] Drafts with offline sync and partial failure recovery
 - [x] Secure credential storage (OS keychain + session tokens, no plaintext passwords)
 - [x] Scheduled and recurring posts with cross-platform automation
+- [x] Direct messages (list, read, send, mute, accept requests)
 - [ ] List creation and management
 - [ ] Starter packs
 - [ ] Moderation lists
