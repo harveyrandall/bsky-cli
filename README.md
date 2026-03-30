@@ -9,6 +9,9 @@
 > [!CAUTION]
 > **Versions 1.5.0 and earlier stored credentials in plaintext.** Upgrade to v1.6.0 or later immediately. If you were on an affected version, change your Bluesky app password after upgrading.
 
+> [!IMPORTANT]
+> **DM support in v1.9.0 has a proxy routing bug** that causes `bsky dm read <handle>` and `bsky dm send <handle>` to fail with "Method Not Implemented". Upgrade to v1.9.1 or later for the fix. See [Version Issues](https://harveyrandall.github.io/bsky-cli/version-issues/) for details.
+
 A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 
 ## Install
