@@ -143,6 +143,12 @@ Below is the complete config file with all available options and their defaults.
 [bookmarks.get]
 # count = 50
 
+[dm.list]
+# count = 50
+
+[dm.read]
+# count = 30
+
 [schedule.list]
 # count = 5
 # order = "asc"

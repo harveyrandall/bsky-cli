@@ -387,6 +387,91 @@ bsky bookmarks get
 bsky bookmarks get -n 20
 ```
 
+## Direct Messages
+
+### `bsky dm list`
+
+List conversations.
+
+```bash
+bsky dm list
+bsky dm list -n 10
+bsky dm list --unread
+bsky dm list --requests
+bsky dm list --json
+```
+
+| Option | Description |
+|--------|-------------|
+| `-n, --count <number>` | Number of conversations (default: 50) |
+| `--unread` | Only show unread conversations |
+| `--requests` | Show conversation requests |
+
+### `bsky dm read`
+
+Read messages in a conversation. Accepts a handle or conversation ID.
+
+```bash
+bsky dm read alice.bsky.social
+bsky dm read alice.bsky.social -n 10
+bsky dm read convo123 --json
+```
+
+| Option | Description |
+|--------|-------------|
+| `-n, --count <number>` | Number of messages (default: 30) |
+
+### `bsky dm send`
+
+Send a direct message.
+
+```bash
+bsky dm send alice.bsky.social "Hello!"
+echo "Hello!" | bsky dm send alice.bsky.social --stdin
+```
+
+| Option | Description |
+|--------|-------------|
+| `--stdin` | Read message text from stdin |
+
+### `bsky dm delete`
+
+Delete a message (for yourself only).
+
+```bash
+bsky dm delete convo123 msg001
+```
+
+### `bsky dm mute` / `bsky dm unmute`
+
+Mute or unmute a conversation.
+
+```bash
+bsky dm mute convo123
+bsky dm unmute convo123
+```
+
+### `bsky dm accept`
+
+Accept a conversation request.
+
+```bash
+bsky dm accept convo123
+```
+
+### `bsky dm mark-read`
+
+Mark conversation(s) as read.
+
+```bash
+bsky dm mark-read convo123
+bsky dm mark-read --all
+```
+
+| Option | Description |
+|--------|-------------|
+| `--all` | Mark all conversations as read |
+
 ## Social
 
 ### `bsky follow` / `bsky unfollow`

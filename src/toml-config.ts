@@ -12,6 +12,8 @@ const OPTION_KEY_MAP: Record<string, Record<string, string>> = {
   "search-users": { count: "n" },
   "schedule list": { count: "number" },
   "bookmarks get": { count: "count" },
+  "dm list": { count: "count" },
+  "dm read": { count: "count" },
 };
 
 // TOML keys that are negated booleans (no-X = true → X = false in Commander)
@@ -210,5 +212,11 @@ export function generateDefaultConfig(): string {
 
 [schedule.post]
 # stdin = false
+
+[dm.list]
+# count = 50
+
+[dm.read]
+# count = 30
 `;
 }
