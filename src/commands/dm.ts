@@ -7,12 +7,21 @@ import type { AtpAgent } from "@atproto/api";
 const CHAT_PROXY =
   "did:web:api.bsky.chat#bsky_chat" as `did:${string}:${string}#${string}`;
 
-async function getChatClient(program: Command): Promise<AtpAgent> {
-  const agent = await getClient(program);
-  agent.configureProxy(CHAT_PROXY);
-  return agent;
+/** Check if an API error is a "method not implemented" (501) response */
+function isNotImplemented(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    if (msg.includes("not implemented") || msg.includes("methodnotimplemented")) return true;
+    if ("status" in err && (err as { status: number }).status === 501) return true;
+  }
+  return false;
 }
 
+/**
+ * Resolve a handle to a DID using the PDS (before proxy is configured).
+ * Must be called on an agent that has NOT been configured with the chat proxy,
+ * since getProfile routes through the PDS, not the chat service.
+ */
 async function resolveDid(
   agent: AtpAgent,
   handleOrDid: string,
@@ -20,6 +29,15 @@ async function resolveDid(
   if (handleOrDid.startsWith("did:")) return handleOrDid;
   const resp = await agent.getProfile({ actor: handleOrDid });
   return resp.data.did;
+}
+
+/**
+ * Configure the chat proxy on an agent. Call this AFTER any PDS-routed calls
+ * (like getProfile) since configureProxy is agent-wide and would route
+ * non-chat requests through the chat service, causing 501 errors.
+ */
+function enableChatProxy(agent: AtpAgent): void {
+  agent.configureProxy(CHAT_PROXY);
 }
 
 function isHandle(input: string): boolean {
@@ -103,7 +121,8 @@ export function registerDm(program: Command): void {
     .option("--unread", "Only show unread conversations")
     .option("--requests", "Show conversation requests")
     .action(async (opts: { count: string; unread?: boolean; requests?: boolean }) => {
-      const agent = await getChatClient(program);
+      const agent = await getClient(program);
+      enableChatProxy(agent);
       const json = isJson(program);
       const limit = parseInt(opts.count, 10);
 
@@ -141,7 +160,7 @@ export function registerDm(program: Command): void {
     .argument("<handle-or-convo-id>", "Handle or conversation ID")
     .option("-n, --count <number>", "Number of messages", "30")
     .action(async (target: string, opts: { count: string }) => {
-      const agent = await getChatClient(program);
+      const agent = await getClient(program);
       const json = isJson(program);
       const limit = parseInt(opts.count, 10);
 
@@ -149,19 +168,36 @@ export function registerDm(program: Command): void {
       let members: ConvoMember[] = [];
 
       if (isHandle(target)) {
+        // Resolve handle BEFORE enabling chat proxy (getProfile uses PDS)
         const did = await resolveDid(agent, target);
-        const availability =
-          await agent.chat.bsky.convo.getConvoAvailability({
+        enableChatProxy(agent);
+
+        // Prefer getConvoAvailability (safe, no side effects).
+        // Falls back to getConvoForMembers if the server hasn't
+        // deployed the newer endpoint yet.
+        try {
+          const availability =
+            await agent.chat.bsky.convo.getConvoAvailability({
+              members: [agent.session!.did, did],
+            });
+          if (!availability.data.convo) {
+            console.error(`No conversation found with ${target}`);
+            process.exitCode = 1;
+            return;
+          }
+          convoId = availability.data.convo.id;
+          members = availability.data.convo.members as ConvoMember[];
+        } catch (err) {
+          if (!isNotImplemented(err)) throw err;
+          // Fallback: getConvoForMembers (may create an empty convo)
+          const resp = await agent.chat.bsky.convo.getConvoForMembers({
             members: [agent.session!.did, did],
           });
-        if (!availability.data.convo) {
-          console.error(`No conversation found with ${target}`);
-          process.exitCode = 1;
-          return;
+          convoId = resp.data.convo.id;
+          members = resp.data.convo.members as ConvoMember[];
         }
-        convoId = availability.data.convo.id;
-        members = availability.data.convo.members as ConvoMember[];
       } else {
+        enableChatProxy(agent);
         convoId = target;
         const convoResp = await agent.chat.bsky.convo.getConvo({
           convoId,
@@ -197,7 +233,7 @@ export function registerDm(program: Command): void {
         textParts: string[],
         opts: { stdin?: boolean },
       ) => {
-        const agent = await getChatClient(program);
+        const agent = await getClient(program);
         const json = isJson(program);
 
         let text: string;
@@ -217,7 +253,9 @@ export function registerDm(program: Command): void {
           return;
         }
 
+        // Resolve handle BEFORE enabling chat proxy
         const did = await resolveDid(agent, handle);
+        enableChatProxy(agent);
         const convoResp = await agent.chat.bsky.convo.getConvoForMembers({
           members: [agent.session!.did, did],
         });
@@ -241,7 +279,8 @@ export function registerDm(program: Command): void {
     .argument("<convo-id>", "Conversation ID")
     .argument("<message-id>", "Message ID")
     .action(async (convoId: string, messageId: string) => {
-      const agent = await getChatClient(program);
+      const agent = await getClient(program);
+      enableChatProxy(agent);
       await agent.chat.bsky.convo.deleteMessageForSelf({
         convoId,
         messageId,
@@ -254,7 +293,8 @@ export function registerDm(program: Command): void {
     .description("Mute a conversation")
     .argument("<convo-id>", "Conversation ID")
     .action(async (convoId: string) => {
-      const agent = await getChatClient(program);
+      const agent = await getClient(program);
+      enableChatProxy(agent);
       await agent.chat.bsky.convo.muteConvo({ convoId });
       console.log("Muted");
     });
@@ -264,7 +304,8 @@ export function registerDm(program: Command): void {
     .description("Unmute a conversation")
     .argument("<convo-id>", "Conversation ID")
     .action(async (convoId: string) => {
-      const agent = await getChatClient(program);
+      const agent = await getClient(program);
+      enableChatProxy(agent);
       await agent.chat.bsky.convo.unmuteConvo({ convoId });
       console.log("Unmuted");
     });
@@ -274,9 +315,21 @@ export function registerDm(program: Command): void {
     .description("Accept a conversation request")
     .argument("<convo-id>", "Conversation ID")
     .action(async (convoId: string) => {
-      const agent = await getChatClient(program);
-      await agent.chat.bsky.convo.acceptConvo({ convoId });
-      console.log("Accepted");
+      const agent = await getClient(program);
+      enableChatProxy(agent);
+      try {
+        await agent.chat.bsky.convo.acceptConvo({ convoId });
+        console.log("Accepted");
+      } catch (err) {
+        if (!isNotImplemented(err)) throw err;
+        // No fallback — send a message to implicitly accept
+        console.error(
+          "acceptConvo is not yet supported by the server.\n" +
+            "Sending a message to this conversation will implicitly accept it:\n" +
+            `  bsky dm send <handle> "your message"`,
+        );
+        process.exitCode = 1;
+      }
     });
 
   // dm mark-read
@@ -285,10 +338,28 @@ export function registerDm(program: Command): void {
     .argument("[convo-id]", "Conversation ID (omit with --all)")
     .option("--all", "Mark all conversations as read")
     .action(async (convoId: string | undefined, opts: { all?: boolean }) => {
-      const agent = await getChatClient(program);
+      const agent = await getClient(program);
+      enableChatProxy(agent);
 
       if (opts.all) {
-        await agent.chat.bsky.convo.updateAllRead({});
+        try {
+          await agent.chat.bsky.convo.updateAllRead({});
+        } catch (err) {
+          if (!isNotImplemented(err)) throw err;
+          // Fallback: list unread convos and mark each one individually
+          let cursor: string | undefined;
+          do {
+            const resp = await agent.chat.bsky.convo.listConvos({
+              limit: 100,
+              readState: "unread",
+              cursor,
+            } as Parameters<typeof agent.chat.bsky.convo.listConvos>[0]);
+            for (const convo of resp.data.convos) {
+              await agent.chat.bsky.convo.updateRead({ convoId: convo.id });
+            }
+            cursor = resp.data.cursor;
+          } while (cursor);
+        }
         console.log("All conversations marked as read");
       } else if (convoId) {
         await agent.chat.bsky.convo.updateRead({ convoId });

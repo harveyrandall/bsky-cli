@@ -200,6 +200,33 @@ describe("dm read", () => {
     errSpy.mockRestore();
   });
 
+  it("falls back to getConvoForMembers when getConvoAvailability is not implemented", async () => {
+    const notImpl = new Error("method not implemented");
+    (notImpl as any).status = 501;
+
+    mockAgent.getProfile.mockResolvedValue({
+      data: { did: "did:plc:other" },
+    });
+    mockAgent.chat.bsky.convo.getConvoAvailability.mockRejectedValue(notImpl);
+    mockAgent.chat.bsky.convo.getConvoForMembers.mockResolvedValue({
+      data: { convo: mockConvo },
+    });
+    mockAgent.chat.bsky.convo.getMessages.mockResolvedValue({
+      data: { messages: [mockMessage] },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync(["node", "test", "dm", "read", "alice.bsky.social"]);
+
+    expect(mockAgent.chat.bsky.convo.getConvoAvailability).toHaveBeenCalled();
+    expect(mockAgent.chat.bsky.convo.getConvoForMembers).toHaveBeenCalledWith({
+      members: ["did:plc:test123", "did:plc:other"],
+    });
+    expect(mockAgent.chat.bsky.convo.getMessages).toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
   it("outputs JSON when --json flag is set", async () => {
     (isJson as any).mockReturnValue(true);
     mockAgent.chat.bsky.convo.getConvo.mockResolvedValue({
@@ -316,6 +343,21 @@ describe("dm accept", () => {
     });
     logSpy.mockRestore();
   });
+
+  it("shows fallback guidance when acceptConvo is not implemented", async () => {
+    const notImpl = new Error("method not implemented");
+    (notImpl as any).status = 501;
+    mockAgent.chat.bsky.convo.acceptConvo.mockRejectedValue(notImpl);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync(["node", "test", "dm", "accept", "convo123"]);
+
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining("not yet supported"),
+    );
+    errSpy.mockRestore();
+  });
 });
 
 describe("dm mark-read", () => {
@@ -340,6 +382,33 @@ describe("dm mark-read", () => {
     await program.parseAsync(["node", "test", "dm", "mark-read", "--all"]);
 
     expect(mockAgent.chat.bsky.convo.updateAllRead).toHaveBeenCalledWith({});
+    logSpy.mockRestore();
+  });
+
+  it("falls back to per-convo updateRead when updateAllRead is not implemented", async () => {
+    const notImpl = new Error("method not implemented");
+    (notImpl as any).status = 501;
+    mockAgent.chat.bsky.convo.updateAllRead.mockRejectedValue(notImpl);
+    mockAgent.chat.bsky.convo.listConvos.mockResolvedValue({
+      data: {
+        convos: [
+          { id: "convo1" },
+          { id: "convo2" },
+        ],
+        cursor: undefined,
+      },
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const program = createProgram();
+    await program.parseAsync(["node", "test", "dm", "mark-read", "--all"]);
+
+    expect(mockAgent.chat.bsky.convo.updateAllRead).toHaveBeenCalled();
+    expect(mockAgent.chat.bsky.convo.listConvos).toHaveBeenCalledWith(
+      expect.objectContaining({ readState: "unread" }),
+    );
+    expect(mockAgent.chat.bsky.convo.updateRead).toHaveBeenCalledWith({ convoId: "convo1" });
+    expect(mockAgent.chat.bsky.convo.updateRead).toHaveBeenCalledWith({ convoId: "convo2" });
     logSpy.mockRestore();
   });
 
