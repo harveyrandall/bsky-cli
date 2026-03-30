@@ -66,16 +66,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Use Bun for both build and binary compilation
-      # (Yarn 4 PnP zips cause esbuild resolution failures on Windows)
-      - uses: oven-sh/setup-bun@v2
+      # Build dist/index.js with tsup (resolves @/ path aliases)
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
 
-      - run: bun install
+      - run: corepack enable
 
-      # Build dist/index.js with tsup via bun (real node_modules/)
-      - run: bun run build
+      - run: yarn install
+
+      # Unplug rrule + tslib so esbuild can read them from disk
+      # (PnP zip archives cause esbuild resolution failures on Windows)
+      - run: yarn unplug rrule tslib
+
+      - run: yarn build
 
       # Compile standalone binary from the tsup output
+      - uses: oven-sh/setup-bun@v2
+
+      # Bun needs a standard node_modules/ for cross-compilation
+      - run: bun install
+
       - name: Compile binary
         run: bun build --compile --target ${{ matrix.target }} dist/index.js --outfile bsky
 
