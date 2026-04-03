@@ -101,87 +101,134 @@ complete -F _bsky_completions bsky
 `;
 }
 
+// function generateZsh(program: Command): string {
+//   const commands = getCommands(program);
+//   const globalOpts = getGlobalOptions(program);
+
+//   const cmdList = commands
+//     .map((c) => {
+//       const desc = c.description.replace(/'/g, "'\\''");
+//       return `        '${c.name}:${desc}'`;
+//     })
+//     .join("\n");
+
+//   const globalOptsList = globalOpts
+//     .map((o) => {
+//       const desc = o.description.replace(/'/g, "'\\''");
+//       return `        '${optionFlag(o)}[${desc}]'`;
+//     })
+//     .join("\n");
+
+//   const subcmdFunctions = commands
+//     .map((cmd) => {
+//       const opts = cmd.options
+//         .map((o) => {
+//           const desc = o.description.replace(/'/g, "'\\''");
+//           return `            '${optionFlag(o)}[${desc}]'`;
+//         })
+//         .join("\n");
+
+//       // Check for nested subcommands
+//       const programCmd = program.commands.find((c) => c.name() === cmd.name);
+//       const subCommands = programCmd?.commands ?? [];
+
+//       if (subCommands.length > 0) {
+//         const subList = subCommands
+//           .map((sub) => {
+//             const desc = sub.description().replace(/'/g, "'\\''");
+//             return `            '${sub.name()}:${desc}'`;
+//           })
+//           .join("\n");
+//         return `    ${cmd.name})
+//         local -a subcommands
+//         subcommands=(
+// ${subList}
+//         )
+//         _describe 'subcommand' subcommands
+//         ;;`;
+//       }
+
+//       if (!opts) return `    ${cmd.name}) ;;`;
+//       return `    ${cmd.name})
+//         _arguments \\
+// ${opts}
+//         ;;`;
+//     })
+//     .join("\n");
+
+//   return `#compdef bsky
+
+// _bsky() {
+//     local -a commands
+//     commands=(
+// ${cmdList}
+//     )
+
+//     _arguments \\
+// ${globalOptsList} \\
+//         '1:command:->command' \\
+//         '*::arg:->args'
+
+//     case \$state in
+//     command)
+//         _describe 'command' commands
+//         ;;
+//     args)
+//         case \$words[1] in
+// ${subcmdFunctions}
+//         esac
+//         ;;
+//     esac
+// }
+
+// _bsky "$@"
+// `;
+// }
+
 function generateZsh(program: Command): string {
-  const commands = getCommands(program);
-  const globalOpts = getGlobalOptions(program);
+  const name = program.name();
+  const commands = program.commands.map((cmd) => ({
+    name: cmd.name(),
+    description: cmd.description(),
+    options: cmd.options.map((o) => ({
+      flags: o.flags,
+      description: o.description,
+    })),
+  }));
 
   const cmdList = commands
+    .map((c) => `    '${c.name}:${c.description}'`)
+    .join("\n");
+
+  const caseBlocks = commands
     .map((c) => {
-      const desc = c.description.replace(/'/g, "'\\''");
-      return `        '${c.name}:${desc}'`;
-    })
-    .join("\n");
-
-  const globalOptsList = globalOpts
-    .map((o) => {
-      const desc = o.description.replace(/'/g, "'\\''");
-      return `        '${optionFlag(o)}[${desc}]'`;
-    })
-    .join("\n");
-
-  const subcmdFunctions = commands
-    .map((cmd) => {
-      const opts = cmd.options
-        .map((o) => {
-          const desc = o.description.replace(/'/g, "'\\''");
-          return `            '${optionFlag(o)}[${desc}]'`;
-        })
+      const opts = c.options
+        .map((o) => `          '${o.flags}[${o.description}]'`)
         .join("\n");
-
-      // Check for nested subcommands
-      const programCmd = program.commands.find((c) => c.name() === cmd.name);
-      const subCommands = programCmd?.commands ?? [];
-
-      if (subCommands.length > 0) {
-        const subList = subCommands
-          .map((sub) => {
-            const desc = sub.description().replace(/'/g, "'\\''");
-            return `            '${sub.name()}:${desc}'`;
-          })
-          .join("\n");
-        return `    ${cmd.name})
-        local -a subcommands
-        subcommands=(
-${subList}
-        )
-        _describe 'subcommand' subcommands
-        ;;`;
-      }
-
-      if (!opts) return `    ${cmd.name}) ;;`;
-      return `    ${cmd.name})
-        _arguments \\
-${opts}
-        ;;`;
+      return `        ${c.name})\n          _arguments \\\n${opts}\n          ;;`;
     })
     .join("\n");
 
-  return `#compdef bsky
+  return `#compdef ${name}
 
-_bsky() {
-    local -a commands
-    commands=(
+_${name}() {
+  local -a commands=(
 ${cmdList}
-    )
+  )
 
-    _arguments \\
-${globalOptsList} \\
-        '1:command:->command' \\
-        '*::arg:->args'
+  _arguments '1: :->command' '*:: :->args'
 
-    case \$state in
-    command)
-        _describe 'command' commands
-        ;;
+  case $state in
+    command) _describe 'command' commands ;;
     args)
-        case \$words[1] in
-${subcmdFunctions}
-        esac
-        ;;
-    esac
+      case $words[1] in
+${caseBlocks}
+      esac
+      ;;
+  esac
 }
 
-_bsky "$@"
+_${name} "$@"
 `;
 }
 

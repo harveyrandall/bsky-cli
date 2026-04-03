@@ -47,7 +47,7 @@ import { configFilePath, loadTomlConfig, applyConfigToProgram } from "@/toml-con
 import packageJson from "../package.json";
 
 const VERSION = packageJson.version;
-const program = new Command();
+export const program = new Command();
 
 program
   .name("bsky")
