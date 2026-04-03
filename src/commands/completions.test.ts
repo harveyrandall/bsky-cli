@@ -4,6 +4,7 @@ import { registerCompletions } from "./completions";
 
 function makeProgramWithCommands(): Command {
   const program = new Command();
+  program.name("bsky");
   program.exitOverride();
   program.option("--json", "Output as JSON");
   // Register a simple test command so completions have something to work with
