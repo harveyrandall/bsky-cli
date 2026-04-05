@@ -26,7 +26,7 @@ A command-line client for [Bluesky](https://bsky.app), built with TypeScript.
 === "Homebrew"
 
     ```bash
-    brew install harveyrandall/bsky-cli/bsky-cli
+    brew install harveyrandall/tools/bsky-cli
     ```
 
 === "Binary"

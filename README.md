@@ -33,7 +33,7 @@ bun add -g @harveyrandall/bsky-cli
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install harveyrandall/bsky-cli/bsky-cli
+brew install harveyrandall/tools/bsky-cli
 ```
 
 ### Download a binary
