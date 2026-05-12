@@ -149,6 +149,61 @@ describe("timeline command", () => {
     expect(outputJson).toHaveBeenCalledWith(item);
     expect(printPost).not.toHaveBeenCalled();
   });
+
+  it("paginates getTimeline when requesting more than 100 items", async () => {
+    // Prepare page 1 (100 items) with newer timestamps, page 2 (20 items) older
+    const base = Date.parse("2025-01-01T00:00:00Z");
+    const page1 = Array.from({ length: 100 }).map((_, i) =>
+      makeFeedItem(`p1-${i}`, new Date(base + (100 + i) * 1000).toISOString()),
+    );
+    const page2 = Array.from({ length: 20 }).map((_, i) =>
+      makeFeedItem(`p2-${i}`, new Date(base + i * 1000).toISOString()),
+    );
+
+    mockAgent.getTimeline
+      .mockResolvedValueOnce({ data: { feed: page1, cursor: "c1" } })
+      .mockResolvedValueOnce({ data: { feed: page2, cursor: undefined } });
+
+    const program = makeProgram(registerTimeline);
+    await program.parseAsync(["timeline", "-n", "120"], { from: "user" });
+
+    expect(mockAgent.getTimeline).toHaveBeenCalledTimes(2);
+    // First call should request 100, second should request remaining 20
+    expect((mockAgent.getTimeline as any).mock.calls[0][0].limit).toBe(100);
+    expect((mockAgent.getTimeline as any).mock.calls[1][0].limit).toBe(20);
+
+    // Should have printed 120 posts
+    expect(printPost).toHaveBeenCalledTimes(120);
+
+    // Because page2 is older, the first printed post should come from page2
+    const firstPrinted = (printPost as any).mock.calls[0][0];
+    expect(firstPrinted.record.text).toMatch(/^p2-/);
+  });
+
+  it("paginates getAuthorFeed when requesting more than 100 items", async () => {
+    const base = Date.parse("2025-01-01T00:00:00Z");
+    const page1 = Array.from({ length: 100 }).map((_, i) =>
+      makeFeedItem(`a1-${i}`, new Date(base + (100 + i) * 1000).toISOString()),
+    );
+    const page2 = Array.from({ length: 30 }).map((_, i) =>
+      makeFeedItem(`a2-${i}`, new Date(base + i * 1000).toISOString()),
+    );
+
+    mockAgent.getAuthorFeed
+      .mockResolvedValueOnce({ data: { feed: page1, cursor: "c1" } })
+      .mockResolvedValueOnce({ data: { feed: page2, cursor: undefined } });
+
+    const program = makeProgram(registerTimeline);
+    await program.parseAsync(["timeline", "--handle", "alice.bsky.social", "-n", "130"], { from: "user" });
+
+    expect(mockAgent.getAuthorFeed).toHaveBeenCalledTimes(2);
+    expect((mockAgent.getAuthorFeed as any).mock.calls[0][0].limit).toBe(100);
+    expect((mockAgent.getAuthorFeed as any).mock.calls[1][0].limit).toBe(30);
+
+    expect(printPost).toHaveBeenCalledTimes(130);
+    const firstPrinted = (printPost as any).mock.calls[0][0];
+    expect(firstPrinted.record.text).toMatch(/^a2-/);
+  });
 });
 
 // Helper: create a Jetstream commit event for a new post
