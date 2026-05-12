@@ -37,27 +37,32 @@ export function registerTimeline(program: Command): void {
       let feed: AppBskyFeedDefs.FeedViewPost[] = [];
       let cursor: string | undefined;
 
-      while (true) {
+      // Fetch in pages (Bluesky limits `limit` to 100). Loop until we have
+      // requested `n` items or there are no more pages.
+      while (feed.length < n) {
+        const remaining = n - feed.length;
+        const limit = Math.min(100, remaining);
+
         if (opts.handle) {
           const handle =
             opts.handle === "self" ? agent.session!.did : opts.handle;
           const resp = await agent.getAuthorFeed({
             actor: handle,
             cursor,
-            limit: n,
+            limit,
           });
           feed.push(...resp.data.feed);
           cursor = resp.data.cursor;
         } else {
           const resp = await agent.getTimeline({
             cursor,
-            limit: n,
+            limit,
           });
           feed.push(...resp.data.feed);
           cursor = resp.data.cursor;
         }
 
-        if (!cursor || feed.length > n) break;
+        if (!cursor) break;
       }
 
       // Sort by date ascending
