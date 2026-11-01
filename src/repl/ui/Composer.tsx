@@ -28,14 +28,27 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
     rerender();
   };
 
-  const handle = async (input: string, key: Partial<Key>) => {
+  const submitting = useRef(false);
+  const submit = async (text: string) => {
+    if (text.trim() === "" || submitting.current) return;
+    submitting.current = true;
+    try {
+      if ((await onSubmit(text)) === "done") apply({ type: "submitted", text });
+    } catch (err) {
+      onHint(err instanceof Error ? err.message : String(err));
+    } finally {
+      submitting.current = false;
+    }
+  };
+
+  const handle = (input: string, key: Partial<Key>) => {
     const action = keyToAction(input, key, editor.current);
     const { text, cursor } = editor.current;
     switch (action.type) {
       case "ignore":
         return;
       case "submit":
-        if (text.trim() !== "" && (await onSubmit(text)) === "done") apply({ type: "submitted" });
+        void submit(text);
         return;
       case "complete": {
         const completed = completeCommand(text, cursor);
@@ -57,9 +70,9 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
 
   useInput((input, key) => {
     if (input.length > 1 && /[\x00-\x1f]/.test(input)) {
-      for (const [part, partKey] of chunkKeys(input)) void handle(part, partKey);
+      for (const [part, partKey] of chunkKeys(input)) handle(part, partKey);
     } else {
-      void handle(input, key);
+      handle(input, key);
     }
   });
   usePaste((text) => apply({ type: "insert", text }));

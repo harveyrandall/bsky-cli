@@ -50,6 +50,21 @@ describe("App", () => {
     expect(rawFrame()).not.toMatch(/\x1b\[31m|\x07/);
     expect(lastFrame()).toContain("bsky › abc");
   });
+  it("keeps keys typed right after Enter and records what ran", async () => {
+    const { type, lastFrame } = setup();
+    await type("/help");
+    await type("\r\x1b[Dx");
+    expect(lastFrame()).toContain("Leave the REPL");
+    expect(lastFrame()).toContain("bsky › /helxp");
+    await type("\x1b[A");
+    expect(lastFrame()).toMatch(/^bsky › \/help\s*$/m);
+  });
+  it("ignores a second Enter while a submit is running", async () => {
+    const { type, lastFrame } = setup();
+    await type("/help");
+    await type("\r\x1b[C\r");
+    expect(lastFrame().split("Leave the REPL")).toHaveLength(2);
+  });
   it("runs /help and clears the composer", async () => {
     const { type, lastFrame } = setup();
     await type("/help", "\r");

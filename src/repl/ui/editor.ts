@@ -33,7 +33,7 @@ export type EditorAction =
   | { type: "deleteWord" }
   | { type: "deleteToLineStart" }
   | { type: "clear" }
-  | { type: "submitted" };
+  | { type: "submitted"; text: string };
 
 const segmenter = new Intl.Segmenter();
 
@@ -161,9 +161,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "clear":
       return { ...s, text: "", cursor: 0 };
     case "submitted": {
-      // Blank input stays out of history so Up never recalls an empty entry.
-      const keep = text.trim() !== "" && s.history[s.history.length - 1] !== text;
-      return emptyEditor(keep ? [...s.history, text] : s.history);
+      // Record what was sent, never blank. Text typed while it was being
+      // handled stays in the composer.
+      const keep = action.text.trim() !== "" && s.history[s.history.length - 1] !== action.text;
+      const history = keep ? [...s.history, action.text] : s.history;
+      return text === action.text ? emptyEditor(history) : { ...s, history };
     }
   }
 }

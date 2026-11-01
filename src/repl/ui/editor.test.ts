@@ -42,6 +42,13 @@ describe("editorReducer", () => {
     s = r(s, { type: "down" }); expect(s).toMatchObject({ text: "draft", cursor: 5 });
   });
   it("submitted records history and clears", () => {
-    expect(r(at("/help"), { type: "submitted" })).toMatchObject({ text: "", cursor: 0, history: ["/help"] });
+    expect(r(at("/help"), { type: "submitted", text: "/help" })).toMatchObject({ text: "", cursor: 0, history: ["/help"] });
+  });
+  it("submitted records what was sent and keeps text typed since", () => {
+    expect(r(at("/helxp", 5), { type: "submitted", text: "/help" })).toMatchObject({
+      text: "/helxp",
+      cursor: 5,
+      history: ["/help"],
+    });
   });
 });
