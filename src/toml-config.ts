@@ -168,6 +168,22 @@ export function generateDefaultConfig(): string {
 # skip-validation = false
 # media-all = false
 
+[repl]
+# auto-thread = false
+# prefix-thread = false
+# undo and pace: 0, 5, 10 or 15 seconds; leave unset to be asked
+# undo = 5
+# pace = 0
+# force-alt = false
+# thread-label = false
+# prepend-thread-label = false
+# ask-to-save = true
+# resumable = true
+# keep-sessions = 50
+# split-marker = "///"
+# send-marker = "//>"
+# cut-marker = "<//"
+
 [timeline]
 # count = 30
 

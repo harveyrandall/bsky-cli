@@ -41,6 +41,7 @@ import { registerCreateThread } from "@/commands/create-thread";
 import { registerSchedule } from "@/commands/schedule";
 import { registerConfig } from "@/commands/config-cmd";
 import { registerDm } from "@/commands/dm";
+import { registerRepl } from "@/commands/repl";
 import type { SessionConfig } from "@/lib/types";
 import { configFilePath, loadTomlConfig, applyConfigToProgram } from "@/toml-config";
 
@@ -165,6 +166,7 @@ registerCreateThread(program);
 registerSchedule(program);
 registerConfig(program);
 registerDm(program);
+registerRepl(program);
 
 // Pre-parse --config/-c from argv before Commander runs
 function preParseConfigPath(): string | undefined {
