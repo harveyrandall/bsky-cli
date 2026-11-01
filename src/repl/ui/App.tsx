@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { Static, Text } from "ink";
+import { useCallback, useState } from "react";
+import { Static, Text, useApp } from "ink";
 import type { Markers } from "@/repl/core/markers";
 import type { LineStyle } from "@/repl/core/commands";
+import { dispatch } from "@/repl/core/dispatch";
+import { Composer } from "@/repl/ui/Composer";
 
 export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
 export const KITTY_HINT =
@@ -18,11 +20,18 @@ interface LogLine {
   style: LineStyle;
 }
 
-export function App({ kittyHint }: AppProps) {
-  const [log] = useState<LogLine[]>(() => [
+export function App({ markers, kittyHint }: AppProps) {
+  const { exit } = useApp();
+  const [log, setLog] = useState<LogLine[]>(() => [
     { id: 0, text: HEADER, style: "normal" },
     ...(kittyHint ? [{ id: 1, text: KITTY_HINT, style: "dim" as const }] : []),
   ]);
+  const print = useCallback(
+    (text: string, style: LineStyle = "normal") => setLog((l) => [...l, { id: l.length, text, style }]),
+    [],
+  );
+  const leave = useCallback(() => exit(), [exit]);
+
   return (
     <>
       <Static items={log}>
@@ -32,7 +41,12 @@ export function App({ kittyHint }: AppProps) {
           </Text>
         )}
       </Static>
-      <Text>bsky › </Text>
+      <Composer
+        markers={markers}
+        onSubmit={(text) => dispatch(text, { print, exit: leave })}
+        onHint={(text) => print(text, "dim")}
+        onExit={leave}
+      />
     </>
   );
 }
