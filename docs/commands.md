@@ -143,6 +143,12 @@ bsky delete at://did:plc:abc123/app.bsky.feed.post/xyz
 bsky delete <uri1> <uri2> <uri3>
 ```
 
+## REPL
+
+### `bsky repl`
+
+An interactive composer for posts and threads, with multi-line editing, a character ring and slash commands. See [REPL](repl.md) for keys, markers and options.
+
 ## Drafts
 
 Drafts are saved locally when posting fails (network errors, edge cases) or when `--draft` is used. Network drafts are automatically offered for sending next time you run a command while online.

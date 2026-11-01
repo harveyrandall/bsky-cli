@@ -166,6 +166,14 @@ bsky create-thread "Part A --- Part B" --split-on "---"
 bsky create-thread --stdin < essay.txt --thread-label
 ```
 
+### REPL
+
+```
+bsky repl [-t] [-l] [--undo <seconds>] [--pace <seconds>] [-f] [--thread-label] [-r [id]] [-R]
+```
+
+An interactive composer with multi-line editing, a character ring for the post under the cursor, and `/help` and `/exit`. Posting from the REPL arrives in the next release. See [REPL](https://harveyrandall.github.io/bsky-cli/repl/).
+
 ### Drafts
 
 ```

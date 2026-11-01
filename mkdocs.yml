@@ -30,6 +30,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Commands: commands.md
+  - REPL: repl.md
   - Configuration: configuration.md
   - Shell Completions: completions.md
   - Version Issues: version-issues.md
