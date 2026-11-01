@@ -1,5 +1,6 @@
 import { useReducer, useRef } from "react";
-import { Box, Text, useInput, usePaste, type Key } from "ink";
+import { Box, Text, useInput, usePaste, useWindowSize, type Key } from "ink";
+import { graphemeLength } from "@/lib/split-thread";
 import { completeCommand } from "@/repl/core/commands";
 import type { DispatchResult } from "@/repl/core/dispatch";
 import { segmentAt, type Markers } from "@/repl/core/markers";
@@ -11,6 +12,38 @@ const PROMPT = "bsky › ";
 const INDENT = " ".repeat(PROMPT.length);
 const segmenter = new Intl.Segmenter();
 
+/**
+ * Lines [first, last) to draw. Ink clears and redraws the whole screen once a
+ * frame is as tall as the window, so a taller draft shows only the lines
+ * around the cursor, with a marker for how many are hidden above and below.
+ */
+function visibleLines(lines: string[], cursorLine: number, rows: number, columns: number): [number, number] {
+  // ponytail: width is counted in graphemes, so wide characters (CJK, emoji)
+  // undercount and such drafts can still overflow; measure with string-width if that bites.
+  const heights = lines.map((l) => Math.max(1, Math.ceil((PROMPT.length + graphemeLength(l) + 1) / columns)));
+  const room = rows - 2; // the ring, and one spare row
+  if (heights.reduce((a, b) => a + b, 0) <= room) return [0, lines.length];
+  const budget = room - 2; // the ↑ and ↓ markers
+  let first = cursorLine;
+  let last = cursorLine + 1;
+  let used = heights[cursorLine];
+  for (let grew = true; grew; ) {
+    grew = false;
+    if (last < lines.length && used + heights[last] <= budget) {
+      used += heights[last++];
+      grew = true;
+    }
+    if (first > 0 && used + heights[first - 1] <= budget) {
+      used += heights[--first];
+      grew = true;
+    }
+  }
+  return [first, last];
+}
+
+const hidden = (n: number, arrow: string) =>
+  n > 0 && <Text dimColor>{`${INDENT}${arrow} ${n} more line${n === 1 ? "" : "s"}`}</Text>;
+
 export interface ComposerProps {
   markers: Markers;
   onSubmit(text: string): Promise<DispatchResult>;
@@ -19,6 +52,7 @@ export interface ComposerProps {
 }
 
 export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
+  const { rows, columns } = useWindowSize();
   // Editor state lives in a ref so keys that arrive in one stdin chunk (fast
   // typing, slow SSH) each see the text the previous key left behind.
   const editor = useRef(emptyEditor());
@@ -78,10 +112,14 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
   usePaste((text) => apply({ type: "insert", text }));
 
   const { text, cursor } = editor.current;
-  let start = 0;
+  const lines = text.split("\n");
+  const [first, last] = visibleLines(lines, text.slice(0, cursor).split("\n").length - 1, rows, columns);
+  let start = lines.slice(0, first).reduce((n, l) => n + l.length + 1, 0);
   return (
     <Box flexDirection="column">
-      {text.split("\n").map((line, i) => {
+      {hidden(first, "↑")}
+      {lines.slice(first, last).map((line, j) => {
+        const i = first + j;
         const lineStart = start;
         start += line.length + 1;
         const prefix = i === 0 ? PROMPT : INDENT;
@@ -98,6 +136,7 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
           </Text>
         );
       })}
+      {hidden(lines.length - last, "↓")}
       <Ring segment={segmentAt(text, cursor, markers)} />
     </Box>
   );

@@ -65,6 +65,22 @@ describe("App", () => {
     await type("\r\x1b[C\r");
     expect(lastFrame().split("Leave the REPL")).toHaveLength(2);
   });
+  it("shows only the lines around the cursor when the draft is taller than the window", async () => {
+    const app = setup();
+    Object.defineProperty(app.stdout, "rows", { value: 8, configurable: true });
+    app.stdout.emit("resize");
+    await tick();
+    const draft = Array.from({ length: 20 }, (_, i) => `l${i + 1}`).join("\n");
+    await app.type(`\x1b[200~${draft}\x1b[201~`);
+    expect(app.lastFrame()).toContain("↑ 16 more lines");
+    expect(app.lastFrame()).toMatch(/^\s+l20/m);
+    expect(app.lastFrame()).not.toMatch(/^\s+l5\s*$/m);
+    await app.type("\x1b[A".repeat(10));
+    expect(app.lastFrame()).toMatch(/^\s+l10/m);
+    expect(app.lastFrame()).toContain("↑ 8 more lines");
+    expect(app.lastFrame()).toContain("↓ 8 more lines");
+    expect(app.lastFrame()).not.toMatch(/^\s+l20/m);
+  });
   it("runs /help and clears the composer", async () => {
     const { type, lastFrame } = setup();
     await type("/help", "\r");
