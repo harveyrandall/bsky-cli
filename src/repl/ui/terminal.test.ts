@@ -47,6 +47,15 @@ describe("detectKittyKeyboard", () => {
     await detectKittyKeyboard(t.stdin, t.stdout);
     expect(t.input.setRawMode).toHaveBeenLastCalledWith(false);
     expect(t.input.listenerCount("data")).toBe(0);
+    expect(t.input.listenerCount("readable")).toBe(0);
     expect(t.input.isPaused()).toBe(true);
+  });
+  // Bun stops reading stdin for good once a data listener has consumed it and
+  // gone, so Ink's later readable listener gets nothing and the process exits.
+  it("reads the reply the way Ink does, never through a data listener", async () => {
+    const t = fakeTerminal("\x1b[?62c");
+    const on = vi.spyOn(t.input, "on");
+    await detectKittyKeyboard(t.stdin, t.stdout);
+    expect(on.mock.calls.map(([event]) => event)).not.toContain("data");
   });
 });
