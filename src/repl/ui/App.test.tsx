@@ -13,7 +13,7 @@ function setup() {
   };
   // Colour codes depend on the terminal running the tests.
   const lastFrame = () => stripVTControlCharacters(app.lastFrame() ?? "");
-  return { ...app, lastFrame, type };
+  return { ...app, lastFrame, rawFrame: () => app.lastFrame() ?? "", type };
 }
 
 describe("App", () => {
@@ -27,6 +27,28 @@ describe("App", () => {
     const { type, lastFrame } = setup();
     await type("abc\x03");
     expect(lastFrame()).not.toContain("abc");
+  });
+  it("Ctrl+U in the same chunk as typed text deletes it", async () => {
+    const { type, lastFrame } = setup();
+    await type("abc\x15");
+    expect(lastFrame()).not.toContain("abc");
+  });
+  it("Enter at the end of a typed chunk submits", async () => {
+    const { type, lastFrame } = setup();
+    await type("/help\r");
+    expect(lastFrame()).toContain("Leave the REPL");
+  });
+  it("an unbracketed multi-line chunk keeps its newlines", async () => {
+    const { type, lastFrame } = setup();
+    await type("a\rb\r");
+    expect(lastFrame()).toMatch(/bsky › a\n\s+b/);
+    expect(lastFrame()).not.toContain(TEXT_HINT);
+  });
+  it("a paste drops escape sequences and control bytes", async () => {
+    const { type, lastFrame, rawFrame } = setup();
+    await type("\x1b[200~a\x1b[31mb\x1b[0m\x07c\x1b[201~");
+    expect(rawFrame()).not.toMatch(/\x1b\[31m|\x07/);
+    expect(lastFrame()).toContain("bsky › abc");
   });
   it("runs /help and clears the composer", async () => {
     const { type, lastFrame } = setup();

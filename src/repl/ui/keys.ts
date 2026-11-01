@@ -22,7 +22,7 @@ const CTRL = new Map<string, KeyAction>([
  * Map one Ink keypress to an action; first match wins. Shift+Enter only
  * arrives under the kitty protocol, so Alt+Enter and Ctrl+J also add a newline.
  */
-export function keyToAction(input: string, key: Key, s: { text: string; cursor: number }): KeyAction {
+export function keyToAction(input: string, key: Partial<Key>, s: { text: string; cursor: number }): KeyAction {
   if (key.return && (key.shift || key.meta)) return { type: "newline" };
   if (input === "\n" || (key.ctrl && input === "j")) return { type: "newline" };
   if (key.return) {
@@ -44,4 +44,28 @@ export function keyToAction(input: string, key: Key, s: { text: string; cursor: 
   // Esc routing arrives in PR 2.
   if (key.escape || key.meta) return { type: "ignore" };
   return input ? { type: "insert", text: input } : { type: "ignore" };
+}
+
+const CONTROL = /([\x00-\x08\x0b\x0c\x0e-\x1f])/;
+
+/**
+ * Ink 8 passes typed text through as one chunk, splitting out only Ctrl+C,
+ * Backspace and escape sequences, so keys typed faster than they're read
+ * (SSH lag, tmux send-keys) arrive inside text. Split each control byte out as
+ * its Ctrl key. A single \r at the very end is Enter; any other \r is
+ * unbracketed paste, kept as text for the editor to turn into newlines.
+ */
+export function chunkKeys(input: string): [string, Partial<Key>][] {
+  const enter = input.indexOf("\r") === input.length - 1;
+  const keys: [string, Partial<Key>][] = [];
+  for (const part of (enter ? input.slice(0, -1) : input).split(CONTROL)) {
+    if (!CONTROL.test(part)) {
+      if (part) keys.push([part, {}]);
+      continue;
+    }
+    const code = part.charCodeAt(0);
+    if (code >= 1 && code <= 26) keys.push([String.fromCharCode(code + 96), { ctrl: true }]);
+  }
+  if (enter) keys.push(["\r", { return: true }]);
+  return keys;
 }

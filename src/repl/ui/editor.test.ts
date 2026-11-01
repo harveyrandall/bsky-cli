@@ -8,6 +8,9 @@ describe("editorReducer", () => {
     expect(r(at("ac", 1), { type: "insert", text: "b" })).toMatchObject({ text: "abc", cursor: 2 });
     expect(r(at(""), { type: "insert", text: "a\r\nb\rc" })).toMatchObject({ text: "a\nb\nc", cursor: 5 });
   });
+  it("drops escape sequences and control bytes other than newline and tab", () => {
+    expect(r(at(""), { type: "insert", text: "a\x1b[31mb\x1b[0m\x07c\td\x00" })).toMatchObject({ text: "abc\td", cursor: 5 });
+  });
   it("moves and deletes by whole graphemes", () => {
     expect(r(at("a👍🏽"), { type: "backspace" })).toMatchObject({ text: "a", cursor: 1 });
     expect(r(at("👨‍👩‍👧b", 0), { type: "delete" })).toMatchObject({ text: "b", cursor: 0 });

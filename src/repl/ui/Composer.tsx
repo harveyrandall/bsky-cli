@@ -1,10 +1,10 @@
 import { useReducer, useRef } from "react";
-import { Box, Text, useInput, usePaste } from "ink";
+import { Box, Text, useInput, usePaste, type Key } from "ink";
 import { completeCommand } from "@/repl/core/commands";
 import type { DispatchResult } from "@/repl/core/dispatch";
 import { segmentAt, type Markers } from "@/repl/core/markers";
 import { editorReducer, emptyEditor, type EditorAction } from "@/repl/ui/editor";
-import { keyToAction } from "@/repl/ui/keys";
+import { chunkKeys, keyToAction } from "@/repl/ui/keys";
 import { Ring } from "@/repl/ui/Ring";
 
 const PROMPT = "bsky › ";
@@ -28,7 +28,7 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
     rerender();
   };
 
-  useInput(async (input, key) => {
+  const handle = async (input: string, key: Partial<Key>) => {
     const action = keyToAction(input, key, editor.current);
     const { text, cursor } = editor.current;
     switch (action.type) {
@@ -52,6 +52,14 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
         return;
       default:
         apply(action);
+    }
+  };
+
+  useInput((input, key) => {
+    if (input.length > 1 && /[\x00-\x1f]/.test(input)) {
+      for (const [part, partKey] of chunkKeys(input)) void handle(part, partKey);
+    } else {
+      void handle(input, key);
     }
   });
   usePaste((text) => apply({ type: "insert", text }));

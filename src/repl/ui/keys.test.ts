@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Key } from "ink";
-import { keyToAction } from "./keys";
+import { chunkKeys, keyToAction } from "./keys";
 
 const key = (k: Partial<Key> = {}): Key => ({
   upArrow: false, downArrow: false, leftArrow: false, rightArrow: false, pageDown: false, pageUp: false,
@@ -36,5 +36,16 @@ describe("keyToAction", () => {
     ["text", "hé", key(), s(""), { type: "insert", text: "hé" }],
   ])("%s", (_name, input, k, state, action) => {
     expect(keyToAction(input, k, state)).toEqual(action);
+  });
+});
+
+describe("chunkKeys", () => {
+  it("turns control bytes inside typed text into their keys", () => {
+    expect(chunkKeys("abc\x04")).toEqual([["abc", {}], ["d", { ctrl: true }]]);
+    expect(chunkKeys("ab\x15cd")).toEqual([["ab", {}], ["u", { ctrl: true }], ["cd", {}]]);
+  });
+  it("treats one \\r at the end as Enter and any other \\r as pasted text", () => {
+    expect(chunkKeys("/help\r")).toEqual([["/help", {}], ["\r", { return: true }]]);
+    expect(chunkKeys("a\rb\r")).toEqual([["a\rb\r", {}]]);
   });
 });

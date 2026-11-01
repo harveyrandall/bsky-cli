@@ -1,3 +1,5 @@
+import { stripVTControlCharacters } from "node:util";
+
 /** Composer text state. `cursor` is a UTF-16 offset on a grapheme boundary. */
 export interface EditorState {
   text: string;
@@ -34,6 +36,10 @@ export type EditorAction =
   | { type: "submitted" };
 
 const segmenter = new Intl.Segmenter();
+
+/** CR/CRLF become \n; escape sequences and control bytes other than \n and \t go. */
+const clean = (text: string) =>
+  stripVTControlCharacters(text.replace(/\r\n?/g, "\n")).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
 const graphemes = (text: string) => [...segmenter.segment(text)];
 
 function prevBoundary(text: string, i: number): number {
@@ -125,7 +131,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   const { text, cursor } = s;
   switch (action.type) {
     case "insert":
-      return splice(s, cursor, cursor, action.text.replace(/\r\n?/g, "\n"));
+      return splice(s, cursor, cursor, clean(action.text));
     case "set":
       return { ...s, text: action.text, cursor: action.text.length };
     case "newline":
