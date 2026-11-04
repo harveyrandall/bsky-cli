@@ -18,6 +18,13 @@ describe("inspectMedia", () => {
   it("refuses what isn't media", async () => {
     await expect(inspectMedia("/x/a.pdf", fs(10, pdf))).resolves.toEqual({ error: "a.pdf isn't an image or MP4 video" });
   });
+  it.each([
+    ["an iPhone photo", "a.heic", [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]],
+    ["a QuickTime movie", "a.mov", [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x71, 0x74, 0x20, 0x20]],
+    ["a WAV", "a.wav", [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]],
+  ])("doesn't mistake %s for media it can post", async (_, name, head) => {
+    await expect(inspectMedia(`/x/${name}`, fs(10, new Uint8Array(head)))).resolves.toEqual({ error: `${name} isn't an image or MP4 video` });
+  });
   it("holds images and video to their limits", async () => {
     await expect(inspectMedia("/x/a.png", fs(1_000_000))).resolves.toEqual({ kind: "image" });
     await expect(inspectMedia("/x/a.png", fs(1_000_001))).resolves.toEqual({ error: "a.png is over the 1 MB image limit" });

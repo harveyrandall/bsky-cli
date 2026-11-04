@@ -2,7 +2,7 @@ import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { maxImageBytes, maxImages, maxVideoBytes } from "@/lib/limits";
-import { detectMimeType } from "@/lib/media";
+import { detectMimeType, isMp4 } from "@/lib/media";
 import { tokenize } from "./commands";
 
 type MediaKind = "image" | "video";
@@ -36,9 +36,9 @@ export const nodeMediaFs: MediaFs = {
 
 const megabytes = (bytes: number) => `${bytes / 1_000_000} MB`;
 
-function kindOf(mime: string): MediaKind | undefined {
-  if (mime === "video/mp4") return "video";
-  return mime.startsWith("image/") ? "image" : undefined;
+function kindOf(head: Uint8Array): MediaKind | undefined {
+  if (detectMimeType(head).startsWith("image/")) return "image";
+  return isMp4(head) ? "video" : undefined;
 }
 
 /** What a file is, or why it can't be attached. */
@@ -46,7 +46,7 @@ export async function inspectMedia(path: string, fs: MediaFs): Promise<{ kind: M
   const name = basename(path);
   const size = await fs.size(path);
   if (size === undefined) return { error: `${name} not found` };
-  const kind = kindOf(detectMimeType(await fs.head(path)));
+  const kind = kindOf(await fs.head(path));
   if (!kind) return { error: `${name} isn't an image or MP4 video` };
   const limit = kind === "image" ? maxImageBytes() : maxVideoBytes();
   return size > limit ? { error: `${name} is over the ${megabytes(limit)} ${kind} limit` } : { kind };
