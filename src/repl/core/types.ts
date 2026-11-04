@@ -1,4 +1,4 @@
-import { AtUri as ParsedAtUri, isValidDid, isValidHandle, isValidTid } from "@atproto/syntax";
+import { isValidDid, isValidHandle, isValidTid } from "@atproto/syntax";
 
 // Template-literal and branded types give stored strings a checked shape.
 // Neither exists at runtime, so every value from outside (config, user input,
@@ -37,17 +37,16 @@ export const isCid = (v: unknown): v is Cid => isString(v) && /^b[a-z2-7]+$/.tes
 export const isOwnLabel = (v: unknown): v is OwnLabel => isString(v) && /^(\d+|[A-Z]{1,3}\d+)$/.test(v);
 export const isCooldown = (v: unknown): v is Cooldown => v === 0 || v === 5 || v === 10 || v === 15;
 
+// The whole string, canonical form only (no query, fragment or extra
+// segments), so what the guard checks is exactly what callers use.
+const POST_URI = /^at:\/\/([^/?#]+)\/app\.bsky\.feed\.post\/([^/?#]+)$/;
+
 export function isAtUri(v: unknown): v is AtUri {
-  if (!isString(v)) return false;
-  try {
-    const parsed = new ParsedAtUri(v);
-    return isDid(parsed.host) && parsed.collection === "app.bsky.feed.post" && isRkey(parsed.rkey);
-  } catch {
-    return false;
-  }
+  const match = isString(v) ? POST_URI.exec(v) : null;
+  return match !== null && isDid(match[1]) && isRkey(match[2]);
 }
 
-export const rkeyOf = (uri: AtUri): Rkey => uri.slice(uri.lastIndexOf("/") + 1) as Rkey;
+export const rkeyOf = (uri: AtUri): Rkey => POST_URI.exec(uri)![2] as Rkey;
 
 /** createPost's `{ uri, cid }` as a checked StrongRef. */
 export function toStrongRef(res: { uri: string; cid: string }): StrongRef {
