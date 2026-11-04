@@ -555,12 +555,12 @@ describe("media", () => {
     const { repl } = setup();
     await repl.attach(["/x/a.png"]);
     expect(repl.wouldLose("")).toBe(true);
-    expect(repl.composerDraft("")).toMatchObject({ reason: "manual", type: "post", text: "", images: ["/x/a.png"] });
-    expect(repl.composerDraft("hi")).toMatchObject({ text: "hi", images: ["/x/a.png"] });
+    expect(repl.composerDrafts("")).toMatchObject([{ reason: "manual", type: "post", text: "", images: ["/x/a.png"] }]);
+    expect(repl.composerDrafts("hi")).toMatchObject([{ text: "hi", images: ["/x/a.png"] }]);
   });
   it("leaves nothing to save when there's no text or media", () => {
     const { repl } = setup();
-    expect(repl.composerDraft("  ")).toBeUndefined();
+    expect(repl.composerDrafts("  ")).toEqual([]);
   });
 });
 
@@ -589,6 +589,52 @@ describe("a post coming back while you're typing", () => {
     await flush();
     expect(deps.saveDraft).toHaveBeenCalledWith({ reason: "manual", type: "reply", text: "a reply", replyUri: ref(1).uri });
     expect(deps.saveDraft).toHaveBeenCalledWith({ reason: "manual", type: "quote", text: "a quote", quoteUri: ref(1).uri });
+  });
+});
+
+describe("saving the composer as a draft", () => {
+  const withPost = async (settings: Partial<ReplSettings> = {}) => {
+    const s = setup(settings);
+    await s.repl.post("first");
+    await s.flush();
+    return s;
+  };
+  it("keeps the post a once mode was writing to", async () => {
+    const { repl } = await withPost();
+    await repl.reply("1");
+    expect(repl.composerDrafts("hi")).toEqual([{ reason: "manual", type: "reply", text: "hi", replyUri: ref(1).uri }]);
+    repl.escape("");
+    await repl.quote("1");
+    expect(repl.composerDrafts("hi")).toEqual([{ reason: "manual", type: "quote", text: "hi", quoteUri: ref(1).uri }]);
+  });
+  it("keeps the thread it was continuing", async () => {
+    const { repl, flush } = setup();
+    await repl.startThread("one");
+    await flush();
+    expect(repl.composerDrafts("two")).toEqual([{ reason: "manual", type: "reply", text: "two", replyUri: ref(1).uri }]);
+  });
+  it("splits on markers and keeps text marked for later", () => {
+    const { repl } = setup();
+    expect(repl.composerDrafts("a /// b //> c")).toMatchObject([{ type: "thread", posts: [{ text: "a" }, { text: "b" }, { text: "c" }] }]);
+  });
+  it("reads a command that came back to the composer", async () => {
+    const { repl } = await withPost();
+    expect(repl.composerDrafts("/post hi")).toEqual([{ reason: "manual", type: "post", text: "hi" }]);
+    expect(repl.composerDrafts("/thread hi")).toEqual([{ reason: "manual", type: "post", text: "hi" }]);
+    expect(repl.composerDrafts("/reply 1 hi")).toEqual([{ reason: "manual", type: "reply", text: "hi", replyUri: ref(1).uri }]);
+    expect(repl.composerDrafts("/quote 1 hi")).toEqual([{ reason: "manual", type: "quote", text: "hi", quoteUri: ref(1).uri }]);
+  });
+  it("keeps the text as it is if a command's post isn't known", () => {
+    const { repl } = setup();
+    expect(repl.composerDrafts("/reply 9 hi")).toEqual([{ reason: "manual", type: "post", text: "/reply 9 hi" }]);
+  });
+  it("keeps media apart from a quote, which can't carry it", async () => {
+    const { repl } = await withPost();
+    await repl.attach(["/x/a.png"]);
+    expect(repl.composerDrafts("/quote 1 hi")).toEqual([
+      { reason: "manual", type: "quote", text: "hi", quoteUri: ref(1).uri },
+      { reason: "manual", type: "post", text: "", images: ["/x/a.png"], imageAlts: ["a.png"] },
+    ]);
   });
 });
 

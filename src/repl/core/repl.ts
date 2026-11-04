@@ -169,10 +169,37 @@ export class Repl {
     return c?.phase === "counting" ? this.join(c.item.posts) : undefined;
   }
 
-  /** The composer's text and whatever's staged, as a draft; undefined if there's neither. */
-  composerDraft(text: string): Omit<Draft, "id" | "createdAt"> | undefined {
-    if (text.trim() === "" && this.media.length === 0) return undefined;
-    return draftOf("manual", [text], { media: this.media });
+  /** The composer's text and whatever's staged, as drafts that send them where Enter would. */
+  composerDrafts(text: string): Omit<Draft, "id" | "createdAt">[] {
+    const media = this.media;
+    if (text.trim() === "") return media.length > 0 ? [draftOf("manual", [""], { media })] : [];
+    const { words, target, quote } = this.destination(text);
+    if (quote) {
+      // A quote can't carry media, or be a thread.
+      return [draftOf("manual", [words], { quote }), ...(media.length > 0 ? [draftOf("manual", [""], { media })] : [])];
+    }
+    const plan = parseSubmit(words, this.markers, 300);
+    const posts = [...plan.posts, ...(plan.keep ? [plan.keep] : [])];
+    return [draftOf("manual", posts.length > 0 ? posts : [words], { target, media })];
+  }
+
+  /** Where composer text would go: a command that came back says, or else the mode does. */
+  private destination(text: string): { words: string; target?: SendTarget; quote?: StrongRef } {
+    const command = /^\/(post|thread|reply|quote)\s+([\s\S]*)$/.exec(text.trim());
+    if (command?.[1] === "post" || command?.[1] === "thread") return { words: command[2] };
+    if (command) {
+      const [, label = "", words = ""] = /^(\S+)\s*([\s\S]*)$/.exec(command[2]) ?? [];
+      const entry = this.registry.byLabel(label);
+      if (entry) {
+        const ref = { uri: entry.uri, cid: entry.cid };
+        return command[1] === "quote" ? { words, quote: ref } : { words, target: { parent: ref, root: entry.root } };
+      }
+    }
+    const m = this.current;
+    if (m.kind === "reply-once") return { words: text, target: { parent: m.target.ref, root: m.target.root } };
+    if (m.kind === "quote-once") return { words: text, quote: m.target.ref };
+    const t = this.threadState;
+    return { words: text, ...(m.kind === "thread" && t && { target: { parent: t.cursor, root: t.root } }) };
   }
 
   /** What paused the queue, while it's paused. */

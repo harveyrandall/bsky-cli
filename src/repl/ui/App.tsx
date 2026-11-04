@@ -167,15 +167,14 @@ export function App(props: AppProps) {
         return;
       }
       // Sending what's queued; unsent composer text is kept as a draft rather than posted mid-exit.
-      const unsent = repl.composerDraft(text);
-      if (unsent) {
-        try {
-          const d = await props.drafts.save(unsent);
+      try {
+        for (const draft of repl.composerDrafts(text)) {
+          const d = await props.drafts.save(draft);
           print(`Saved as draft ${d.id}`, "dim");
-        } catch (err) {
-          print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
-          return;
         }
+      } catch (err) {
+        print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
+        return;
       }
       repl.sendNow();
       setExitWhenSent(true);
@@ -183,11 +182,8 @@ export function App(props: AppProps) {
     }
     if (choice === "draft") {
       // Save first; only leave (which cancels the queue) once everything is safe.
-      const drafts = repl.draftItems();
-      const unsent = repl.composerDraft(text);
-      if (unsent) drafts.push(unsent);
       try {
-        for (const draft of drafts) {
+        for (const draft of [...repl.draftItems(), ...repl.composerDrafts(text)]) {
           const d = await props.drafts.save(draft);
           print(`Saved as draft ${d.id}`, "dim");
         }
