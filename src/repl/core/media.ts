@@ -60,7 +60,8 @@ export function canStage(staged: readonly StagedMedia[], kind: MediaKind): strin
   return undefined;
 }
 
-const PATH_LIKE = /^(\/|~\/|\.\.?\/)/;
+// Not //host/…: on Windows, checking a pasted network path would connect to it.
+const PATH_LIKE = /^(\/(?!\/)|~\/|\.\.?\/)/;
 
 /** The paths in a drag-and-drop paste; undefined if it's anything else. */
 export function parseDroppedPaths(text: string): string[] | undefined {

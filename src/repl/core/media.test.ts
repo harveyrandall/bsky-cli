@@ -52,6 +52,10 @@ describe("parseDroppedPaths", () => {
     expect(parseDroppedPaths("/a.png and more")).toBeUndefined();
     expect(parseDroppedPaths("'/unclosed.png")).toBeUndefined();
   });
+  it("won't touch a network path just because it was pasted", () => {
+    expect(parseDroppedPaths("//server/share/a.png")).toBeUndefined();
+    expect(parseDroppedPaths("'\\\\server\\share\\a.png'")).toBeUndefined();
+  });
 });
 
 describe("chips", () => {
