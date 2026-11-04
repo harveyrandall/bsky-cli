@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Repl, IDLE_HINT, type ReplAsk, type ReplSettings } from "./repl";
 import { DEFAULT_MARKERS } from "./markers";
@@ -414,6 +415,11 @@ describe("once modes", () => {
 });
 
 describe("media", () => {
+  it("is stored by absolute path, so drafts and scheduled posts work from anywhere", async () => {
+    const { repl } = setup();
+    await repl.attach(["chart.png", "./sub/b.png", "/x/c.png"]);
+    expect(repl.staged().map((m) => m.path)).toEqual([resolve("chart.png"), resolve("sub/b.png"), "/x/c.png"]);
+  });
   const INTRO = "Alt text tells people using screen readers what's in your image — without it, they're left out of the post.";
   it("asks for alt text per file, explaining why once", async () => {
     const alt = vi.fn(async (file: string) => `about ${file}`);

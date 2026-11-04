@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { formatLocalDateTime, parseDate, parseTime, resolveAmPm, toUtcIso } from "@/lib/date-prompt";
 import { graphemeLength } from "@/lib/split-thread";
 import type { Draft, ScheduledPost } from "@/lib/types";
@@ -406,7 +406,8 @@ export class Repl {
   async attach(paths: readonly string[], alt?: string): Promise<void> {
     let explained = false;
     for (const raw of paths) {
-      const path = expandHome(raw);
+      // Absolute, because drafts and scheduled posts are sent from somewhere else.
+      const path = resolve(expandHome(raw));
       const found = await inspectMedia(path, this.deps.fs ?? nodeMediaFs);
       if ("error" in found) {
         this.deps.print(found.error, "error");
