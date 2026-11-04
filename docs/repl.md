@@ -28,7 +28,7 @@ The REPL needs an interactive terminal. If stdin or stdout isn't a terminal (for
 | Ctrl+C | Clear the text (on an empty composer, a reminder that Ctrl+D exits) |
 | Ctrl+D | Exit; with a draft in the composer, press it twice |
 
-Pasted text is inserted as-is, newlines included, and never submits.
+Pasted text is inserted with its newlines; escape sequences and other control characters are dropped. In terminals with bracketed paste (almost all of them), a paste never submits. Without it, a one-line paste that ends in a newline submits, as it would in a shell.
 
 !!! note "Shift+Enter"
     Shift+Enter needs a terminal that speaks the kitty keyboard protocol, such as iTerm2, Ghostty, kitty or WezTerm. Elsewhere the REPL says so once at start; use Alt+Enter or Ctrl+J instead. In macOS Terminal.app, Alt+Enter needs **Use Option as Meta key** (Settings → Profiles → Keyboard).
