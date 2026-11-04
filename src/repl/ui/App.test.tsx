@@ -195,8 +195,8 @@ describe("App", () => {
   });
   it("lists the candidates when Tab can't extend the name", async () => {
     const { type, lastFrame } = setup();
-    await type("/", "\t");
-    expect(lastFrame()).toContain("/auto-thread  /exit  /help  /history  /post");
+    await type("/re", "\t");
+    expect(lastFrame()).toContain("/reply  /reply-from  /retry");
   });
 });
 

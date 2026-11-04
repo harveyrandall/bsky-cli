@@ -8,6 +8,8 @@ export interface CommandContext {
   print(text: string, style?: LineStyle): void;
   exit(): void;
   repl: Repl;
+  /** Open text in $EDITOR, handing it the terminal. */
+  edit(text: string): Promise<string>;
 }
 
 export interface ReplCommand {
@@ -98,6 +100,60 @@ export const COMMANDS: readonly ReplCommand[] = [
     summary: "Post on its own",
     run(_args, ctx, rest) {
       return ctx.repl.post(rest.trim() === "" ? undefined : rest);
+    },
+  },
+  {
+    name: "quote",
+    aliases: [],
+    raw: true,
+    usage: "/quote <ref> [text]",
+    summary: "Quote a post",
+    run(_args, ctx, rest) {
+      const m = /^\s*(\S+)\s*([\s\S]*)$/.exec(rest);
+      if (!m) throw new Error("Usage: /quote <ref> [text]");
+      return ctx.repl.quote(m[1], m[2] === "" ? undefined : m[2]);
+    },
+  },
+  {
+    name: "new",
+    aliases: [],
+    usage: "/new",
+    summary: "Stop the thread and pick what to write next",
+    run(_args, ctx) {
+      return ctx.repl.newMenu();
+    },
+  },
+  {
+    name: "attach",
+    aliases: [],
+    usage: '/attach <path…> [--alt "…"]',
+    summary: "Stage images or a video for the next post",
+    async run(args, ctx) {
+      const at = args.indexOf("--alt");
+      const paths = at === -1 ? args : args.filter((_, i) => i !== at && i !== at + 1);
+      if (paths.length === 0 || (at !== -1 && args[at + 1] === undefined)) throw new Error('Usage: /attach <path…> [--alt "…"]');
+      await ctx.repl.attach(paths, at === -1 ? undefined : args[at + 1]);
+    },
+  },
+  {
+    name: "detach",
+    aliases: [],
+    usage: "/detach [n|all]",
+    summary: "Unstage one file, or all of them",
+    run([which = "all"], ctx) {
+      const n = Number(which);
+      if (which !== "all" && !(Number.isInteger(n) && n > 0)) throw new Error("Usage: /detach [n|all]");
+      ctx.repl.detach(which === "all" ? "all" : n);
+    },
+  },
+  {
+    name: "edit",
+    aliases: [],
+    raw: true,
+    usage: "/edit [text]",
+    summary: "Write in $EDITOR (Ctrl+G)",
+    async run(_args, ctx, rest) {
+      return { restore: await ctx.edit(rest) };
     },
   },
   {

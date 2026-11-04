@@ -3,6 +3,7 @@ import { Static, Text, useApp } from "ink";
 import type { Markers, SubmitPlan } from "@/repl/core/markers";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
+import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
@@ -45,7 +46,7 @@ type Overlay =
 
 export function App(props: AppProps) {
   const { markers, kittyHint } = props;
-  const { exit } = useApp();
+  const { exit, suspendTerminal } = useApp();
   const [log, setLog] = useState<LogLine[]>(() => [
     { id: 0, text: HEADER, style: "normal" },
     ...(kittyHint ? [{ id: 1, text: KITTY_HINT, style: "dim" as const }] : []),
@@ -105,6 +106,15 @@ export function App(props: AppProps) {
   }, [exitWhenSent, pendingCount]);
 
   const close = () => setOverlay(undefined);
+
+  // The editor gets the terminal to itself; Ink restores its modes afterwards.
+  const edit = async (text: string) => {
+    let edited = text;
+    await suspendTerminal(async () => {
+      edited = await editInEditor(text);
+    });
+    return edited;
+  };
 
   // Text that came back while the composer was busy: keep both.
   const keepAsDraft = async (text: string) => {
@@ -226,7 +236,7 @@ export function App(props: AppProps) {
         active={!overlay}
         restore={restore}
         onRestoreBusy={(text) => void keepAsDraft(text)}
-        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), repl })}
+        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
         onEscape={(text) => {
           setExitWhenSent(false);
           return repl.escape(text);

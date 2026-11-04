@@ -14,13 +14,17 @@ function fakeRepl() {
     askSettings: vi.fn(async () => {}),
     settingsLine: vi.fn(() => "undo 5s · pace off · auto-thread off"),
     retry: vi.fn(async () => {}),
+    attach: vi.fn(async () => {}),
+    detach: vi.fn(),
+    quote: vi.fn(async () => "done" as const),
+    newMenu: vi.fn(async () => "done" as const),
     settings: () => ({ verbose: false }),
     registry: { entries: () => [{ excerpt: "hello" }], format: () => "(1) 3lbx7kt5def2a" },
   };
 }
 const ctx = () => {
   const repl = fakeRepl();
-  return { print: vi.fn(), exit: vi.fn(), repl: repl as unknown as Repl, fake: repl };
+  return { print: vi.fn(), exit: vi.fn(), edit: vi.fn(async (text: string) => `${text}!`), repl: repl as unknown as Repl, fake: repl };
 };
 const printed = (c: ReturnType<typeof ctx>) => c.print.mock.calls.map((call) => call[0]).join("\n");
 
@@ -32,6 +36,53 @@ describe("parseInput", () => {
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
     expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
+  });
+});
+
+describe("media commands", () => {
+  it("/attach takes shell-style paths and --alt anywhere", async () => {
+    const c = ctx();
+    await dispatch(`/attach "/a b.png" /c.png --alt "Two charts"`, c);
+    expect(c.fake.attach).toHaveBeenLastCalledWith(["/a b.png", "/c.png"], "Two charts");
+    await dispatch("/attach /a.png", c);
+    expect(c.fake.attach).toHaveBeenLastCalledWith(["/a.png"], undefined);
+  });
+  it("/attach needs a path, and --alt its text", async () => {
+    const c = ctx();
+    expect(await dispatch("/attach", c)).toBe("keep");
+    expect(printed(c)).toContain("Usage: /attach");
+    expect(await dispatch("/attach /a.png --alt", c)).toBe("keep");
+    expect(c.fake.attach).not.toHaveBeenCalled();
+  });
+  it("/detach takes a number or all, and defaults to all", async () => {
+    const c = ctx();
+    await dispatch("/detach 2", c);
+    expect(c.fake.detach).toHaveBeenLastCalledWith(2);
+    await dispatch("/detach all", c);
+    expect(c.fake.detach).toHaveBeenLastCalledWith("all");
+    await dispatch("/detach", c);
+    expect(c.fake.detach).toHaveBeenLastCalledWith("all");
+    expect(await dispatch("/detach 0", c)).toBe("keep");
+    expect(await dispatch("/detach x", c)).toBe("keep");
+    expect(c.fake.detach).toHaveBeenCalledTimes(3);
+  });
+  it("/quote takes a ref and optional text", async () => {
+    const c = ctx();
+    await dispatch("/quote 2 look at\nthis", c);
+    expect(c.fake.quote).toHaveBeenLastCalledWith("2", "look at\nthis");
+    await dispatch("/quote 2", c);
+    expect(c.fake.quote).toHaveBeenLastCalledWith("2", undefined);
+    expect(await dispatch("/quote", c)).toBe("keep");
+  });
+  it("/new opens the menu", async () => {
+    const c = ctx();
+    expect(await dispatch("/new", c)).toBe("done");
+    expect(c.fake.newMenu).toHaveBeenCalledOnce();
+  });
+  it("/edit puts what the editor saved in the composer", async () => {
+    const c = ctx();
+    expect(await dispatch("/edit some text", c)).toEqual({ restore: "some text!" });
+    expect(await dispatch("/edit", c)).toEqual({ restore: "!" });
   });
 });
 
