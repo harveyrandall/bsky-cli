@@ -471,6 +471,26 @@ describe("App media", () => {
     expect(lastFrame()).toContain("bsky › ");
     expect(lastFrame().replace(/\s/g, "")).toContain(notes.replace(/\s/g, ""));
   });
+  it("queues a question behind an open one rather than replacing it", async () => {
+    const s = setup();
+    let finish = (_: boolean) => {};
+    vi.spyOn(s.repl(), "areMedia").mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    await s.type(paste(image));
+    await s.type("/new", "\r");
+    await tick();
+    finish(true);
+    await tick();
+    expect(s.lastFrame()).toContain("New:");
+    expect(s.lastFrame()).not.toContain("Attach chart.png");
+    await s.type("\x1b");
+    await tick();
+    expect(s.lastFrame()).toContain("Attach chart.png? [Y/n]");
+    await s.type("n");
+    await tick();
+    await s.type("\x15", "/exit", "\r");
+    await tick();
+    expect(exit).toHaveBeenCalledOnce();
+  });
   it("hands the composer's text to $EDITOR on Ctrl+G and puts the result back", async () => {
     const { type, lastFrame } = setup();
     await type("draft", "\x07");

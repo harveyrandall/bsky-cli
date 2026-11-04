@@ -63,7 +63,10 @@ export function App(props: AppProps) {
     else setLog((l) => [...l, { id: l.length, text, style }]);
   }, []);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const [overlay, setOverlay] = useState<Overlay>();
+  // Questions wait their turn: replacing an open one would leave it unanswered for good.
+  const [overlays, setOverlays] = useState<Overlay[]>([]);
+  const overlay = overlays[0];
+  const ask = (next: Overlay) => setOverlays((open) => [...open, next]);
   const [restore, setRestore] = useState<{ id: number; text: string }>();
   const [exitWhenSent, setExitWhenSent] = useState(false);
   const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
@@ -74,19 +77,19 @@ export function App(props: AppProps) {
       new Repl(props.settings, markers, {
         agent: props.agent,
         ask: {
-          cooldown: (which) => new Promise((resolve) => setOverlay({ kind: "cooldown", which, resolve })),
-          saveOffer: (values) => new Promise((resolve) => setOverlay({ kind: "save", values, resolve })),
-          confirm: (plan, labelled, media) => new Promise((resolve) => setOverlay({ kind: "preview", plan, labelled, media, resolve })),
+          cooldown: (which) => new Promise((resolve) => ask({ kind: "cooldown", which, resolve })),
+          saveOffer: (values) => new Promise((resolve) => ask({ kind: "save", values, resolve })),
+          confirm: (plan, labelled, media) => new Promise((resolve) => ask({ kind: "preview", plan, labelled, media, resolve })),
           alt: (file, required) =>
             new Promise((resolve) =>
-              setOverlay({
+              ask({
                 kind: "text",
                 label: `Alt text for ${file} (${required ? "required; Esc drops the file" : "Enter to skip"}):`,
                 resolve: (text) => resolve(text === undefined ? null : text.trim() === "" ? undefined : text),
               }),
             ),
-          choose: (label, options) => new Promise((resolve) => setOverlay({ kind: "choice", label, options, resolve })),
-          text: (label) => new Promise((resolve) => setOverlay({ kind: "text", label, resolve })),
+          choose: (label, options) => new Promise((resolve) => ask({ kind: "choice", label, options, resolve })),
+          text: (label) => new Promise((resolve) => ask({ kind: "text", label, resolve })),
         },
         print,
         onChange: rerender,
@@ -109,7 +112,7 @@ export function App(props: AppProps) {
     exit(LEFT);
   }, [exit, repl]);
   // Ctrl+D on an empty composer and /exit: ask first if posts are still waiting.
-  const requestExit = (text: string) => (repl.wouldLose(text) ? setOverlay({ kind: "exit", text }) : leave());
+  const requestExit = (text: string) => (repl.wouldLose(text) ? ask({ kind: "exit", text }) : leave());
 
   const pendingCount = repl.pendingCount();
   // Tick the countdown while anything is queued.
@@ -122,7 +125,7 @@ export function App(props: AppProps) {
     if (exitWhenSent && pendingCount === 0) leave();
   }, [exitWhenSent, pendingCount]);
 
-  const close = () => setOverlay(undefined);
+  const close = () => setOverlays((open) => open.slice(1));
 
   // The editor gets the terminal to itself; Ink restores its modes afterwards.
   const edit = async (text: string) => {
@@ -144,7 +147,7 @@ export function App(props: AppProps) {
   const offerDrop = async (paths: readonly string[], text: string) => {
     try {
       const attach =
-        (await repl.areMedia(paths)) && (await new Promise<boolean>((resolve) => setOverlay({ kind: "drop", paths, resolve })));
+        (await repl.areMedia(paths)) && (await new Promise<boolean>((resolve) => ask({ kind: "drop", paths, resolve })));
       if (attach) await repl.attach(paths);
       else fillComposer(text);
     } catch (err) {
