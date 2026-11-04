@@ -81,6 +81,16 @@ describe("App", () => {
     expect(app.lastFrame()).toContain("↓ 8 more lines");
     expect(app.lastFrame()).not.toMatch(/^\s+l20/m);
   });
+  it("keeps a long wrapped paragraph inside the window", async () => {
+    const app = setup();
+    Object.defineProperty(app.stdout, "rows", { value: 8, configurable: true });
+    app.stdout.emit("resize");
+    await tick();
+    await app.type(`\x1b[200~${"word ".repeat(500)}\x1b[201~`);
+    const belowHeader = app.lastFrame().split("\n").slice(1);
+    expect(belowHeader.length).toBeLessThan(8);
+    expect(app.lastFrame()).toContain("more lines");
+  });
   it("runs /help and clears the composer", async () => {
     const { type, lastFrame } = setup();
     await type("/help", "\r");
