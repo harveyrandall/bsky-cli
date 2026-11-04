@@ -82,7 +82,14 @@ export function registerRepl(program: Command): void {
     .option("-r, --resume [id]", 'Resume a saved session (id, prefix or "last")')
     .option("--resumable", "Save this session so it can be resumed (default)")
     .option("-R, --no-resumable", "Don't save this session")
+    .allowExcessArguments()
     .action(async (opts, cmd: Command) => {
+      // Being the default command, this also receives mistyped commands. Commander
+      // keeps its suggestions in unknownCommand(), which its types leave out.
+      if (cmd.args.length > 0) {
+        const owner = program.args[0] === "repl" ? cmd : program;
+        (owner as Command & { unknownCommand(): never }).unknownCommand();
+      }
       // Config is checked first so the smoke run catches a broken [repl] section too.
       const markers = resolveMarkers(opts);
       checkCooldowns(opts);

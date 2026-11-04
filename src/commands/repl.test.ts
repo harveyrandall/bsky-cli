@@ -45,6 +45,24 @@ describe("bsky repl", () => {
     expect(startRepl).toHaveBeenCalledWith(expect.objectContaining({ markers: DEFAULT_MARKERS, handle: "me.bsky.social" }));
   });
 
+  it("treats a mistyped command as unknown, with a suggestion, instead of opening the REPL", async () => {
+    setTTY(true, true);
+    const errors: string[] = [];
+    const p = makeProgram().configureOutput({ writeErr: (text) => void errors.push(text) });
+    await expect(p.parseAsync(["rpel"], { from: "user" })).rejects.toMatchObject({ code: "commander.unknownCommand" });
+    expect(errors.join("")).toContain("unknown command 'rpel'");
+    expect(errors.join("")).toContain("Did you mean repl");
+    expect(startRepl).not.toHaveBeenCalled();
+  });
+
+  it("refuses arguments after repl itself", async () => {
+    setTTY(true, true);
+    await expect(makeProgram().parseAsync(["repl", "extra"], { from: "user" })).rejects.toMatchObject({
+      code: "commander.unknownCommand",
+    });
+    expect(startRepl).not.toHaveBeenCalled();
+  });
+
   it.each([[false, true], [true, false]])(
     "prints help to stderr and exits 1 when stdin.isTTY=%s, stdout.isTTY=%s",
     async (stdin, stdout) => {
