@@ -91,6 +91,11 @@ describe("App", () => {
     expect(belowHeader.length).toBeLessThan(8);
     expect(app.lastFrame()).toContain("more lines");
   });
+  it("submits again once the first submit has finished", async () => {
+    const { type, lastFrame } = setup();
+    await type("/hlp", "\r", "\x15", "/help", "\r");
+    expect(lastFrame()).toContain("Leave the REPL");
+  });
   it("runs /help and clears the composer", async () => {
     const { type, lastFrame } = setup();
     await type("/help", "\r");
