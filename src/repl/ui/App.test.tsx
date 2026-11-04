@@ -336,6 +336,63 @@ describe("App threads", () => {
     ]);
     expect(exit).toHaveBeenCalledOnce();
   });
+  describe("while a post is in flight", () => {
+    const inFlight = async (s: ReturnType<typeof setup>) => {
+      const post: { finish(ref: StrongRef): void; fail(err: Error): void } = { finish() {}, fail() {} };
+      s.agent.post.mockImplementationOnce(() => new Promise((resolve, reject) => Object.assign(post, { finish: resolve, fail: reject })));
+      await s.type("/post hello", "\r");
+      await tick();
+      return post;
+    };
+    it("saves what's in the composer when you answer, not when you were asked", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type("\x04");
+      post.fail(Object.assign(new Error("Invalid record"), { status: 400 }));
+      await tick();
+      await s.type("d");
+      await tick();
+      expect(s.drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "hello" });
+      expect(exit).toHaveBeenCalledOnce();
+    });
+    it("asks again if you typed something after choosing send now", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type("\x04", "s", "more");
+      post.finish(ref(1));
+      await tick();
+      await tick();
+      expect(exit).not.toHaveBeenCalled();
+      expect(s.lastFrame()).toContain("save [d]raft");
+    });
+    it("doesn't leave under an open question", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type("\x04", "s", `/attach ${image}`, "\r");
+      await tick();
+      post.finish(ref(1));
+      await tick();
+      await tick();
+      expect(exit).not.toHaveBeenCalled();
+      expect(s.lastFrame()).toContain("Alt text for chart.png");
+    });
+    it("moves staged media into the draft on send now, so it isn't in both places", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type(`/attach ${image}`, "\r");
+      await tick();
+      await s.type("\r");
+      await tick();
+      await s.type("\x04", "s");
+      await tick();
+      expect(s.drafts.save).toHaveBeenCalledWith(expect.objectContaining({ images: [image] }));
+      expect(s.repl().staged()).toEqual([]);
+      post.finish(ref(1));
+      await tick();
+      await tick();
+      expect(exit).toHaveBeenCalledOnce();
+    });
+  });
   it("send now saves unsent composer text as a draft before leaving", async () => {
     const { type, drafts } = setup();
     await type("unsent", "\x04", "s");

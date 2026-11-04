@@ -47,7 +47,7 @@ type Overlay =
   | { kind: "choice"; label: string; options: readonly string[]; resolve(i: number | undefined): void }
   | { kind: "text"; label: string; resolve(text: string | undefined): void }
   | { kind: "drop"; paths: readonly string[]; resolve(ok: boolean): void }
-  | { kind: "exit"; text: string };
+  | { kind: "exit" };
 
 export function App(props: AppProps) {
   const { markers, kittyHint } = props;
@@ -71,6 +71,8 @@ export function App(props: AppProps) {
   const [exitWhenSent, setExitWhenSent] = useState(false);
   const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
   const composerText = useRef("");
+  /** What send now has already saved, so leaving needn't ask about it again. */
+  const savedText = useRef<string | undefined>(undefined);
 
   const [repl] = useState(
     () =>
@@ -112,7 +114,7 @@ export function App(props: AppProps) {
     exit(LEFT);
   }, [exit, repl]);
   // Ctrl+D on an empty composer and /exit: ask first if posts are still waiting.
-  const requestExit = (text: string) => (repl.wouldLose(text) ? ask({ kind: "exit", text }) : leave());
+  const requestExit = (text: string) => (repl.wouldLose(text) ? ask({ kind: "exit" }) : leave());
 
   const pendingCount = repl.pendingCount();
   // Tick the countdown while anything is queued.
@@ -122,8 +124,10 @@ export function App(props: AppProps) {
     return () => clearInterval(timer);
   }, [pendingCount > 0]);
   useEffect(() => {
-    if (exitWhenSent && pendingCount === 0) leave();
-  }, [exitWhenSent, pendingCount]);
+    if (!exitWhenSent || pendingCount > 0 || overlay) return;
+    setExitWhenSent(false);
+    requestExit(composerText.current === savedText.current ? "" : composerText.current);
+  }, [exitWhenSent, pendingCount, overlay]);
 
   const close = () => setOverlays((open) => open.slice(1));
 
@@ -161,9 +165,11 @@ export function App(props: AppProps) {
     return paths !== undefined;
   };
 
-  const chooseExit = async (choice: ExitChoice, text: string) => {
+  const chooseExit = async (choice: ExitChoice) => {
     close();
     if (choice === "stay") return;
+    // Read now, not when the prompt opened: a post may have come back since.
+    const text = composerText.current;
     if (choice === "send") {
       if (repl.pausedBy()) {
         print("Can't send now: the queue is paused after an error — /retry first, or choose save [d]raft.", "error");
@@ -179,6 +185,8 @@ export function App(props: AppProps) {
         print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
         return;
       }
+      savedText.current = text;
+      repl.detach("all");
       repl.sendNow();
       setExitWhenSent(true);
       return;
@@ -277,7 +285,7 @@ export function App(props: AppProps) {
         );
       }
       case "exit":
-        return <ExitPrompt onChoose={(c) => void chooseExit(c, overlay.text)} />;
+        return <ExitPrompt onChoose={(c) => void chooseExit(c)} />;
     }
   })();
 
