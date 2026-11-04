@@ -713,6 +713,32 @@ describe("saving the composer as a draft", () => {
   });
 });
 
+describe("printed posts", () => {
+  it("say how many images went with them", async () => {
+    const { repl, flush, printed } = setup();
+    await repl.attach(["/x/a.png", "/x/b.png"]);
+    await repl.post("one /// two");
+    await flush();
+    expect(printed()).toMatch(/\(1\) \S+ 📷 2$/m);
+    expect(printed()).toMatch(/\(2\) \S+$/m);
+  });
+  it("mark a video", async () => {
+    const { repl, flush, printed } = setup();
+    await repl.attach(["/x/a.mp4"]);
+    await repl.post("one");
+    await flush();
+    expect(printed()).toMatch(/\(1\) \S+ 🎞$/m);
+  });
+  it("say what they quote", async () => {
+    const { repl, flush, printed } = setup();
+    await repl.post("one");
+    await flush();
+    await repl.quote("1", "look");
+    await flush();
+    expect(printed()).toMatch(/\(2\) \S+ ❝ 1$/m);
+  });
+});
+
 describe("/quote", () => {
   const withPost = async (s: ReturnType<typeof setup>) => {
     await s.repl.post("first");

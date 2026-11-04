@@ -782,6 +782,14 @@ export class Repl {
     return this.registry.newLetter();
   }
 
+  private notesFor(item: QueueItem, index: number): string | undefined {
+    const quoted = quoteOf(item.intent);
+    if (quoted) return `❝ ${this.registry.byUri(quoted.uri)?.label ?? "?"}`;
+    const media = index === 0 ? item.media : undefined;
+    if (!media?.length) return undefined;
+    return media[0].kind === "video" ? "🎞" : `📷 ${media.length}`;
+  }
+
   private onSent(item: QueueItem, index: number, ref: StrongRef, target: SendTarget | undefined): void {
     const root = target?.root ?? ref;
     const entry = this.registry.addOwn(ref, {
@@ -789,6 +797,7 @@ export class Repl {
       parent: target?.parent.uri,
       text: stripLabel(item.posts[index]),
       letter: this.letters.get(item.id),
+      notes: this.notesFor(item, index),
     });
     if (item.intent.kind === "thread") {
       this.threadState = {
