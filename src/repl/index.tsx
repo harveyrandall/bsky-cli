@@ -18,13 +18,20 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   });
   // Ink restores the terminal on an uncaught error under Node but not under
   // Bun, which left the shell in kitty and bracketed-paste mode. Unmounting
-  // restores it everywhere and rejects waitUntilExit with the error.
-  const crash = (err: unknown) => app.unmount(err instanceof Error ? err : new Error(String(err)));
+  // restores it everywhere; the error is rethrown once Ink has exited, since
+  // the instance's unmount() takes no error.
+  let crashed: Error | undefined;
+  const crash = (err: unknown) => {
+    crashed ??= err instanceof Error ? err : new Error(String(err));
+    app.unmount();
+  };
   process.on("uncaughtException", crash);
   process.on("unhandledRejection", crash);
   try {
     // Ink also stops by itself when stdin closes; say so rather than exit as if asked to.
-    if ((await app.waitUntilExit()) !== LEFT) {
+    const result = await app.waitUntilExit();
+    if (crashed) throw crashed;
+    if (result !== LEFT) {
       process.stderr.write("bsky repl stopped because its input closed.\n");
       process.exitCode = 1;
     }

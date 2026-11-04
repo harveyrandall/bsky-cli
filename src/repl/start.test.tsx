@@ -7,7 +7,7 @@ vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof impo
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
 const { startRepl } = await import("@/repl");
 
-/** An Ink instance whose exit promise settles when unmounted. */
+/** An Ink instance whose exit promise settles when unmounted; like Ink's, unmount takes no error. */
 function fakeInstance() {
   let settle: (err?: Error) => void = () => {};
   let finish: (value: unknown) => void = () => {};
@@ -15,7 +15,7 @@ function fakeInstance() {
     settle = (err) => (err ? reject(err) : resolve(undefined));
     finish = resolve;
   });
-  return { unmount: vi.fn((err?: Error) => settle(err)), exit: (value: unknown) => finish(value), waitUntilExit: () => exited };
+  return { unmount: vi.fn(() => settle()), exit: (value: unknown) => finish(value), waitUntilExit: () => exited };
 }
 
 const added = (event: "uncaughtException" | "unhandledRejection", before: Function[]) =>
@@ -54,7 +54,7 @@ describe("startRepl", () => {
     const boom = new Error("boom");
     crash(boom);
 
-    expect(app.unmount).toHaveBeenCalledWith(boom);
+    expect(app.unmount).toHaveBeenCalled();
     await expect(running).rejects.toThrow("boom");
     expect(added("uncaughtException", before)).toHaveLength(0);
   });
