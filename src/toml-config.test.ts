@@ -278,6 +278,7 @@ describe("generateDefaultConfig", () => {
       "[reply]",
       "[quote]",
       "[create-thread]",
+      "[repl]",
       "[timeline]",
       "[stream]",
       "[search]",

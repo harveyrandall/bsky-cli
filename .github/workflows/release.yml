@@ -35,6 +35,11 @@ jobs:
       - name: Smoke test (Node ESM)
         run: yarn node dist/index.js --help
 
+      - name: Smoke test (REPL, Node)
+        env:
+          BSKY_REPL_SMOKE: "1"
+        run: yarn node dist/index.js repl
+
   build-binaries:
     needs: test
     strategy:
@@ -44,6 +49,7 @@ jobs:
           - os: macos-latest
             target: bun-darwin-arm64
             artifact: bsky-macos-arm64
+            smoke: true
             archive: tar.gz
           - os: macos-latest
             target: bun-darwin-x64
@@ -52,6 +58,7 @@ jobs:
           - os: ubuntu-latest
             target: bun-linux-x64
             artifact: bsky-linux-x64
+            smoke: true
             archive: tar.gz
           - os: ubuntu-latest
             target: bun-linux-arm64
@@ -60,6 +67,7 @@ jobs:
           - os: windows-latest
             target: bun-windows-x64
             artifact: bsky-windows-x64
+            smoke: true
             archive: zip
 
     runs-on: ${{ matrix.os }}
@@ -87,8 +95,27 @@ jobs:
       # Bun needs a standard node_modules/ for cross-compilation
       - run: bun install
 
+      # Ink imports react-devtools-core (an optional peer we don't install) only
+      # when DEV=true and the package resolves. Bun bundles that import anyway,
+      # and the binary then fails at startup for every command, so blank the
+      # hook before compiling. Fail loudly if an Ink release moves it.
+      - name: Drop Ink's devtools hook
+        shell: bash
+        run: |
+          grep -q "react-devtools-core" node_modules/ink/build/devtools.js \
+            && grep -q "./devtools.js" node_modules/ink/build/reconciler.js \
+            || { echo "::error::Ink's devtools hook has moved; update this step"; exit 1; }
+          echo "export {};" > node_modules/ink/build/devtools.js
+
       - name: Compile binary
         run: bun build --compile --target ${{ matrix.target }} dist/index.js --outfile bsky
+
+      # Only targets native to their runner are smoke-tested; the others embed the same JS.
+      - name: Smoke test (REPL, binary)
+        if: matrix.smoke
+        env:
+          BSKY_REPL_SMOKE: "1"
+        run: ./bsky repl
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar.gz'
@@ -225,7 +252,8 @@ jobs:
           git push
 
   npm-publish:
-    needs: test
+    # Wait for the binaries so a Bun-only break can't publish to npm alone.
+    needs: [test, build-binaries]
     runs-on: ubuntu-latest
     environment: release
     steps:

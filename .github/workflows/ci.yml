@@ -32,3 +32,8 @@ jobs:
 
       - name: Smoke test (Node ESM)
         run: yarn node dist/index.js --help
+
+      - name: Smoke test (REPL, Node)
+        env:
+          BSKY_REPL_SMOKE: "1"
+        run: yarn node dist/index.js repl

@@ -111,6 +111,22 @@ Below is the complete config file with all available options and their defaults.
 # skip-validation = false
 # media-all = false
 
+[repl]
+# auto-thread = false
+# prefix-thread = false
+# undo and pace take 0, 5, 10 or 15 (seconds); the values below are examples, not defaults
+# undo = 5
+# pace = 0
+# force-alt = false
+# thread-label = false
+# prepend-thread-label = false
+# ask-to-save = true
+# resumable = true
+# keep-sessions = 50
+# split-marker = "///"
+# send-marker = "//>"
+# cut-marker = "<//"
+
 [timeline]
 # count = 30
 
