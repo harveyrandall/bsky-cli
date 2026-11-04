@@ -96,6 +96,10 @@ describe("Linux (crontab)", () => {
       expect(input).toContain("/usr/local/bin/bsky schedule run # bsky-cli-scheduler");
     });
 
+    it("refuses a profile that would change the scheduled command", () => {
+      expect(() => enableScheduler(1, "x'; touch /tmp/pwned; '")).toThrow("Can't schedule for profile");
+    });
+
     it("includes profile flag when set", () => {
       vi.mocked(execFileSync).mockReturnValueOnce("" as never);
 
