@@ -20,6 +20,19 @@ describe("editInEditor", () => {
     editor(`printf ' more\\n\\n' >> "$1"`);
     await expect(editInEditor("text")).resolves.toBe("text more");
   });
+  it("passes on arguments in $EDITOR, as in `code --wait`", async () => {
+    editor(`printf '%s' " $1" >> "$2"`);
+    process.env.EDITOR += " --wait";
+    await expect(editInEditor("text")).resolves.toBe("text --wait");
+  });
+  it("won't trust an editor that failed", async () => {
+    editor(`printf 'half writ' > "$1"; exit 3`);
+    await expect(editInEditor("text")).rejects.toThrow("exited with status 3");
+  });
+  it("won't trust an editor that was killed", async () => {
+    editor(`printf 'half writ' > "$1"; kill -9 $$`);
+    await expect(editInEditor("text")).rejects.toThrow("SIGKILL");
+  });
   it("says so when the editor won't start", async () => {
     process.env.EDITOR = join(dir, "missing");
     await expect(editInEditor("text")).rejects.toThrow("missing");

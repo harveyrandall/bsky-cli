@@ -174,7 +174,11 @@ async function interactivePreview(
         console.error(chalk.red(`Invalid post number: ${n}`));
         continue;
       }
-      current[n - 1] = await editPost(current[n - 1]);
+      try {
+        current[n - 1] = await editPost(current[n - 1]);
+      } catch (err) {
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      }
       continue;
     }
 
