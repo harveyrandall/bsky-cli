@@ -455,7 +455,10 @@ export class Repl {
         if (answer === null) continue;
         text = answer;
       }
-      this.media.push({ path, kind: found.kind, ...(text !== undefined && { alt: text }) });
+      // Checked again: a post coming back during the prompt can stage media of its own.
+      const late = canStage(this.media, found.kind);
+      if (late) this.deps.print(late, "error");
+      else this.media.push({ path, kind: found.kind, ...(text !== undefined && { alt: text }) });
       this.deps.onChange();
     }
   }
@@ -485,6 +488,11 @@ export class Repl {
     }
     this.media = which === "all" ? [] : this.media.filter((_, i) => i !== which - 1);
     this.deps.onChange();
+  }
+
+  /** Leaves anything staged since these were saved. */
+  private unstage(saved: readonly StagedMedia[]): void {
+    this.media = this.media.filter((m) => !saved.includes(m));
   }
 
   /** Media coming back with its text; what's been staged since can get in the way. */
@@ -587,8 +595,9 @@ export class Repl {
     }
     const scheduledAt = await this.askDateTime();
     if (scheduledAt === undefined) return "keep";
-    const saved = await this.deps.saveScheduled({ scheduledAt, text: plan.posts[0], ...mediaOptions(this.media) });
-    this.media = [];
+    const media = [...this.media];
+    const saved = await this.deps.saveScheduled({ scheduledAt, text: plan.posts[0], ...mediaOptions(media) });
+    this.unstage(media);
     this.deps.print(`Scheduled for ${formatLocalDateTime(scheduledAt)} (${saved.id})`, "dim");
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
@@ -597,8 +606,9 @@ export class Repl {
   private async saveAsDraft(text: string): Promise<SubmitOutcome> {
     const plan = parseSubmit(text, this.markers, 300);
     if (plan.posts.length === 0 || this.overLimit(plan, 300)) return "keep";
-    const saved = await this.deps.saveDraft(draftOf("manual", plan.posts, { media: this.media }));
-    this.media = [];
+    const media = [...this.media];
+    const saved = await this.deps.saveDraft(draftOf("manual", plan.posts, { media }));
+    this.unstage(media);
     this.deps.print(`Saved as draft ${saved.id}`, "dim");
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";

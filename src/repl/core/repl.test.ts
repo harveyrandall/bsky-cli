@@ -541,6 +541,30 @@ describe("media", () => {
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.mp4"]);
     expect(printed()).toContain("Couldn't keep a.png: A post can have images or one video, not both");
   });
+  it("checks the limits again after the alt prompt, in case something came back meanwhile", async () => {
+    const s = setup({ undo: 5 });
+    await s.repl.attach(["/x/clip.mp4"]);
+    await s.repl.post("waiting");
+    s.ask.alt = vi.fn(async () => {
+      s.repl.escape("");
+      return undefined;
+    });
+    await s.repl.attach(["/x/a.png"]);
+    expect(s.repl.staged().map((m) => m.path)).toEqual(["/x/clip.mp4"]);
+    expect(s.printed()).toContain("A post can have images or one video, not both");
+  });
+  it("keeps what's staged while a draft saves, if it wasn't part of the draft", async () => {
+    const choose = vi.fn(async (_: string, options: readonly string[]) => options.indexOf("Draft"));
+    const s = setup({}, { choose });
+    await s.repl.newMenu();
+    await s.repl.attach(["/x/a.png"]);
+    s.deps.saveDraft.mockImplementationOnce(async () => {
+      await s.repl.attach(["/x/b.png"]);
+      return { id: "d1" };
+    });
+    await s.repl.submitText("later");
+    expect(s.repl.staged().map((m) => m.path)).toEqual(["/x/b.png"]);
+  });
   it("detaches one file or all of them", async () => {
     const { repl, printed } = setup();
     await repl.attach(["/x/a.png", "/x/b.png", "/x/c.png"]);
