@@ -1,4 +1,6 @@
-import { isAbsolute } from "node:path";
+import { randomBytes } from "node:crypto";
+import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { canStage, type StagedMedia } from "./media";
 import type { Markers } from "./markers";
 import type { Unsent } from "./pipeline";
@@ -171,4 +173,137 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   need(isObject(n), "counters");
   for (const key of ["nextLabel", "nextViewed", "nextLetter"]) need(isCount(n[key]), `counters.${key}`);
   return raw as unknown as ReplSessionFile;
+}
+
+export interface SessionListing {
+  id: string;
+  updatedAt?: string;
+  summary: string;
+  state: "ok" | "in use" | "unreadable";
+}
+
+const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
+
+export function newSessionId(): SessionId {
+  return [...randomBytes(6)].map((b) => BASE32[b % 32]).join("") as SessionId;
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function summaryOf(f: ReplSessionFile): string {
+  const own = f.posts.filter((p) => !p.external);
+  const threads = new Set(own.filter((p) => p.root.uri !== p.uri).map((p) => p.root.uri));
+  const parts = [`@${f.handle}`, `${plural(threads.size, "thread")}, ${plural(own.length, "post")}`];
+  return [...parts, ...(own[0] ? [`"${own[0].excerpt}"`] : [])].join(" · ");
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Session files: atomic writes, one REPL per session, oldest pruned first. */
+export class SessionStore {
+  private saving: Promise<void> = Promise.resolve();
+
+  constructor(private readonly dir: string) {}
+
+  private path(id: string, ext = "json"): string {
+    return join(this.dir, `${id}.${ext}`);
+  }
+
+  /** One at a time, as the temp file is shared; a kill mid-write leaves the old file whole. */
+  save(file: ReplSessionFile): Promise<void> {
+    const write = async () => {
+      await mkdir(this.dir, { recursive: true, mode: 0o700 });
+      const tmp = this.path(`${file.id}.${process.pid}`, "tmp");
+      try {
+        await writeFile(tmp, JSON.stringify(file), { mode: 0o600 });
+        await rename(tmp, this.path(file.id));
+      } catch (err) {
+        await rm(tmp, { force: true });
+        throw err;
+      }
+    };
+    this.saving = this.saving.then(write, write);
+    return this.saving;
+  }
+
+  async load(id: SessionId): Promise<ReplSessionFile> {
+    return parseSessionFile(JSON.parse(await readFile(this.path(id), "utf-8")));
+  }
+
+  /** Newest first; a file that won't parse sorts last, listed so it can be deleted. */
+  async list(): Promise<SessionListing[]> {
+    const names = await readdir(this.dir).catch(() => [] as string[]);
+    const ids = names.filter((n) => n.endsWith(".json")).map((n) => n.slice(0, -".json".length));
+    const listings = await Promise.all(ids.map((id) => this.listing(id)));
+    return listings.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  }
+
+  private async listing(id: string): Promise<SessionListing> {
+    try {
+      const file = await this.load(id as SessionId);
+      const state = (await this.lockHolder(id)) === undefined ? "ok" : "in use";
+      return { id, updatedAt: file.updatedAt, summary: summaryOf(file), state };
+    } catch {
+      return { id, summary: "", state: "unreadable" };
+    }
+  }
+
+  async delete(id: string): Promise<void> {
+    await rm(this.path(id), { force: true });
+    await rm(this.path(id, "lock"), { force: true });
+  }
+
+  /** The PID holding a lock, clearing it if that process has died. */
+  private async lockHolder(id: string): Promise<number | undefined> {
+    const pid = await readFile(this.path(id, "lock"), "utf-8").then(Number, () => undefined);
+    if (pid === undefined) return undefined;
+    if (isRunning(pid)) return pid;
+    await rm(this.path(id, "lock"), { force: true });
+    return undefined;
+  }
+
+  /** False if another REPL has it. */
+  async lock(id: SessionId): Promise<boolean> {
+    if ((await this.lockHolder(id)) !== undefined) return false;
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
+    try {
+      const file = await open(this.path(id, "lock"), "wx", 0o600);
+      await file.writeFile(String(process.pid));
+      await file.close();
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw err;
+    }
+  }
+
+  async unlock(id: SessionId): Promise<void> {
+    await rm(this.path(id, "lock"), { force: true });
+  }
+
+  /** Keeps the newest `keep`, and anything in use. */
+  async prune(keep: number): Promise<void> {
+    const stale = (await this.list()).slice(keep).filter((l) => l.state !== "in use");
+    await Promise.all(stale.map((l) => this.delete(l.id)));
+  }
+}
+
+/** An id, a unique prefix of one, or `last`. */
+export function resolveId(input: string, listings: readonly SessionListing[]): SessionId {
+  if (input === "last") {
+    const newest = listings.find((l) => l.state === "ok");
+    if (!newest) throw new Error("No saved sessions to resume");
+    return newest.id as SessionId;
+  }
+  const matches = listings.filter((l) => l.id.startsWith(input));
+  if (matches.length === 0) throw new Error(`No saved session "${input}"`);
+  if (matches.length > 1) throw new Error(`"${input}" could be ${matches.map((l) => l.id).join(" or ")}`);
+  return matches[0].id as SessionId;
 }

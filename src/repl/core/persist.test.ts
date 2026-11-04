@@ -1,6 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { parseSessionFile, type ReplSessionFile } from "./persist";
-import { isIsoUtc, isMarker, isSessionId } from "./types";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { rename } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SessionStore, newSessionId, parseSessionFile, resolveId, type ReplSessionFile, type SessionListing } from "./persist";
+import { isIsoUtc, isMarker, isSessionId, type SessionId } from "./types";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, rename: vi.fn(fs.rename) };
+});
 
 const did = "did:plc:me";
 const uri = (rkey: string) => `at://${did}/app.bsky.feed.post/${rkey}`;
@@ -137,5 +147,111 @@ describe("guards", () => {
     expect(isMarker("///")).toBe(true);
     expect(isMarker("")).toBe(false);
     expect(isMarker("a b")).toBe(false);
+  });
+});
+
+describe("newSessionId", () => {
+  it("makes a valid id", () => {
+    expect(isSessionId(newSessionId())).toBe(true);
+  });
+});
+
+describe("SessionStore", () => {
+  let dir: string;
+  let store: SessionStore;
+  const id = (s: string) => s as SessionId;
+  const session = (s: string, updatedAt = "2026-11-04T10:05:00.000Z") => ({ ...good(), id: id(s), updatedAt }) as ReplSessionFile;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "bsky-sessions-"));
+    store = new SessionStore(join(dir, "repl", "sessions"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const path = (s: string, ext = "json") => join(dir, "repl", "sessions", `${s}.${ext}`);
+
+  it("saves a file only you can read, and loads it back", async () => {
+    await store.save(session("aaaaaa"));
+    expect(statSync(path("aaaaaa")).mode & 0o777).toBe(0o600);
+    await expect(store.load(id("aaaaaa"))).resolves.toEqual(session("aaaaaa"));
+  });
+  it("keeps the old file when the write dies", async () => {
+    await store.save(session("aaaaaa"));
+    vi.mocked(rename).mockRejectedValueOnce(new Error("ENOSPC"));
+    await expect(store.save({ ...session("aaaaaa"), history: ["newer"] })).rejects.toThrow("ENOSPC");
+    expect((await store.load(id("aaaaaa"))).history).toEqual(good().history);
+    expect(readdirSync(join(dir, "repl", "sessions"))).toEqual(["aaaaaa.json"]);
+  });
+  it("ignores a temp file a kill left behind", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("aaaaaa.123", "tmp"), "{ half a fi");
+    await expect(store.list()).resolves.toHaveLength(1);
+  });
+  it("takes saves one at a time, so the last one wins", async () => {
+    await Promise.all([1, 2, 3].map((n) => store.save({ ...session("aaaaaa"), history: [`${n}`] })));
+    expect((await store.load(id("aaaaaa"))).history).toEqual(["3"]);
+  });
+  it("lists newest first, with a summary", async () => {
+    await store.save(session("aaaaaa", "2026-11-03T10:00:00.000Z"));
+    await store.save(session("bbbbbb", "2026-11-04T10:00:00.000Z"));
+    const list = await store.list();
+    expect(list.map((l) => l.id)).toEqual(["bbbbbb", "aaaaaa"]);
+    expect(list[0]).toMatchObject({ state: "ok", updatedAt: "2026-11-04T10:00:00.000Z", summary: '@me.bsky.social · 1 thread, 2 posts · "Launch day"' });
+  });
+  it("lists a bad file as unreadable, and can delete it", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("bbbbbb"), "{ not json");
+    writeFileSync(path("cccccc"), JSON.stringify({ ...good(), version: 9 }));
+    const list = await store.list();
+    expect(list.filter((l) => l.state === "unreadable").map((l) => l.id).sort()).toEqual(["bbbbbb", "cccccc"]);
+    await store.delete(id("bbbbbb"));
+    expect(existsSync(path("bbbbbb"))).toBe(false);
+  });
+  it("won't load a bad file", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("aaaaaa"), JSON.stringify({ ...good(), id: "aaaaaa", did: "nope" }));
+    await expect(store.load(id("aaaaaa"))).rejects.toThrow("Session file: bad did");
+  });
+  it("has nothing to list before anything is saved", async () => {
+    await expect(store.list()).resolves.toEqual([]);
+  });
+  it("locks a session against a second REPL, and shows it as in use", async () => {
+    await store.save(session("aaaaaa"));
+    await expect(store.lock(id("aaaaaa"))).resolves.toBe(true);
+    expect(readFileSync(path("aaaaaa", "lock"), "utf-8")).toBe(String(process.pid));
+    await expect(store.lock(id("aaaaaa"))).resolves.toBe(false);
+    await expect(store.list()).resolves.toMatchObject([{ state: "in use" }]);
+    await store.unlock(id("aaaaaa"));
+    await expect(store.lock(id("aaaaaa"))).resolves.toBe(true);
+  });
+  it("clears a lock whose process has died", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("aaaaaa", "lock"), String(spawnSync("true").pid));
+    await expect(store.list()).resolves.toMatchObject([{ state: "ok" }]);
+    await expect(store.lock(id("aaaaaa"))).resolves.toBe(true);
+  });
+  it("prunes the oldest, but never one in use", async () => {
+    await store.save(session("aaaaaa", "2026-11-01T10:00:00.000Z"));
+    await store.save(session("bbbbbb", "2026-11-02T10:00:00.000Z"));
+    await store.save(session("cccccc", "2026-11-03T10:00:00.000Z"));
+    await store.lock(id("aaaaaa"));
+    await store.prune(1);
+    expect((await store.list()).map((l) => l.id).sort()).toEqual(["aaaaaa", "cccccc"]);
+  });
+});
+
+describe("resolveId", () => {
+  const listing = (id: string, state: SessionListing["state"] = "ok"): SessionListing => ({ id, state, summary: "", updatedAt: "2026-11-04T10:00:00.000Z" });
+  const list = [listing("k3f7xq"), listing("k3a2bc"), listing("p2m2wd")];
+  it("takes last, an id or a unique prefix", () => {
+    expect(resolveId("last", list)).toBe("k3f7xq");
+    expect(resolveId("p2m2wd", list)).toBe("p2m2wd");
+    expect(resolveId("k3f", list)).toBe("k3f7xq");
+  });
+  it("skips sessions it can't open when asked for the last one", () => {
+    expect(resolveId("last", [listing("k3f7xq", "unreadable"), listing("k3a2bc", "in use"), listing("p2m2wd")])).toBe("p2m2wd");
+  });
+  it("says when a prefix is ambiguous, or nothing matches", () => {
+    expect(() => resolveId("k3", list)).toThrow('"k3" could be k3f7xq or k3a2bc');
+    expect(() => resolveId("zz", list)).toThrow('No saved session "zz"');
+    expect(() => resolveId("last", [])).toThrow("No saved sessions");
   });
 });
