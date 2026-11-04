@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, unlinkSync, mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Command } from "commander";
 
 vi.mock("@/config", () => ({
@@ -7,6 +9,8 @@ vi.mock("@/config", () => ({
 }));
 
 import {
+  activeConfigPath,
+  setConfigValues,
   configFilePath,
   loadTomlConfig,
   applyConfigToProgram,
@@ -312,5 +316,63 @@ describe("generateDefaultConfig", () => {
     expect(config).toContain("# json = false");
     expect(config).toContain("# profile =");
     expect(config).toContain("# verbose = false");
+  });
+});
+
+// ── activeConfigPath / setConfigValues ──────────────────────────────
+
+describe("activeConfigPath", () => {
+  it("prefers -c and --config", () => {
+    expect(activeConfigPath(["node", "bsky", "-c", "/x.toml"])).toBe("/x.toml");
+    expect(activeConfigPath(["node", "bsky", "--config", "/y.toml", "repl"])).toBe("/y.toml");
+  });
+  it("otherwise uses the usual lookup", () => {
+    expect(activeConfigPath(["node", "bsky", "repl"])).toBe(configFilePath());
+  });
+});
+
+describe("setConfigValues", () => {
+  let dir: string;
+  const file = () => join(dir, "config.toml");
+  const read = () => readFileSync(file(), "utf-8");
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "bsky-config-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("replaces a value and leaves everything else alone", async () => {
+    writeFileSync(file(), "# mine\n[repl]\nundo = 5\n\n[post]\n# draft = false\n");
+    await setConfigValues(file(), "repl", { undo: 10 });
+    expect(read()).toBe("# mine\n[repl]\nundo = 10\n\n[post]\n# draft = false\n");
+  });
+  it("uncomments a documented key", async () => {
+    writeFileSync(file(), "[repl]\n# undo = 5\n# pace = 0\n");
+    await setConfigValues(file(), "repl", { undo: 10 });
+    expect(read()).toBe("[repl]\nundo = 10\n# pace = 0\n");
+  });
+  it("inserts a missing key after the section header", async () => {
+    writeFileSync(file(), "[repl]\n# notes\n[post]\n");
+    await setConfigValues(file(), "repl", { pace: 5 });
+    expect(read()).toBe("[repl]\npace = 5\n# notes\n[post]\n");
+  });
+  it("only touches keys inside the section", async () => {
+    writeFileSync(file(), "[post]\n# undo = 1\n[repl]\n");
+    await setConfigValues(file(), "repl", { undo: 5 });
+    expect(read()).toBe("[post]\n# undo = 1\n[repl]\nundo = 5\n");
+  });
+  it("appends a missing section", async () => {
+    writeFileSync(file(), "[post]\n# draft = false\n");
+    await setConfigValues(file(), "repl", { undo: 5, "ask-to-save": false, "split-marker": "~~" });
+    expect(read()).toBe('[post]\n# draft = false\n\n[repl]\nsplit-marker = "~~"\nask-to-save = false\nundo = 5\n');
+  });
+  it("creates the file from the default config", async () => {
+    await setConfigValues(file(), "repl", { undo: 10 });
+    expect(read()).toBe(generateDefaultConfig().replace("# undo = 5\n", "undo = 10\n"));
+  });
+  it("refuses to write a file that wouldn't parse, leaving the old one", async () => {
+    writeFileSync(file(), "[repl\nundo = 5\n");
+    await expect(setConfigValues(file(), "repl", { pace: 5 })).rejects.toThrow();
+    expect(read()).toBe("[repl\nundo = 5\n");
+    expect(existsSync(`${file()}.tmp`)).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { parse } from "smol-toml";
 import { Command } from "commander";
 import { bskyDir } from "@/config";
@@ -32,6 +32,55 @@ export function configFilePath(overridePath?: string): string {
   if (overridePath) return overridePath;
   if (process.env.BSKY_CONFIG) return process.env.BSKY_CONFIG;
   return join(bskyDir(), "config.toml");
+}
+
+/** The config file this run uses: -c/--config from argv, then the usual lookup. */
+export function activeConfigPath(argv: string[] = process.argv): string {
+  const i = argv.findIndex((a) => a === "--config" || a === "-c");
+  return configFilePath(i === -1 ? undefined : argv[i + 1]);
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Set keys in one section of a TOML file without disturbing anything else.
+ * Line-based on purpose: a parse-and-stringify round trip would delete every
+ * comment, including the documentation `bsky config init` writes. Inside the
+ * section it replaces `key = …` or uncomments `# key = …`, else inserts after
+ * the header; a missing section is appended and a missing file starts from the
+ * default config. The result must parse before it replaces the file.
+ */
+export async function setConfigValues(
+  path: string,
+  section: string,
+  values: Record<string, string | number | boolean>,
+): Promise<void> {
+  const lines = (existsSync(path) ? readFileSync(path, "utf-8") : generateDefaultConfig()).split("\n");
+  for (const [key, value] of Object.entries(values)) {
+    const line = `${key} = ${typeof value === "string" ? JSON.stringify(value) : String(value)}`;
+    const header = lines.findIndex((l) => l.trim() === `[${section}]`);
+    if (header === -1) {
+      if (lines[lines.length - 1] === "") lines.pop();
+      lines.push("", `[${section}]`, line, "");
+      continue;
+    }
+    const next = lines.findIndex((l, i) => i > header && /^\s*\[/.test(l));
+    const end = next === -1 ? lines.length : next;
+    const isKey = new RegExp(`^\\s*(#\\s*)?${escapeRegExp(key)}\\s*=`);
+    const inSection = (want: "set" | "commented") => (l: string, i: number) =>
+      i > header && i < end && isKey.test(l) && (want === "commented") === /^\s*#/.test(l);
+    const at = lines.findIndex(inSection("set"));
+    const commented = lines.findIndex(inSection("commented"));
+    if (at !== -1) lines[at] = line;
+    else if (commented !== -1) lines[commented] = line;
+    else lines.splice(header + 1, 0, line);
+  }
+  const text = lines.join("\n");
+  parse(text); // throws, leaving the file untouched
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, path);
 }
 
 /**
