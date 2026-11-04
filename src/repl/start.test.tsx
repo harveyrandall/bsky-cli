@@ -3,7 +3,15 @@ import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import { LEFT } from "@/repl/ui/App";
 import { Registry } from "@/repl/core/refs";
 
-const { render, detectKittyKeyboard } = vi.hoisted(() => ({ render: vi.fn(), detectKittyKeyboard: vi.fn() }));
+const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues } = vi.hoisted(() => ({
+  render: vi.fn(),
+  detectKittyKeyboard: vi.fn(),
+  saveDraft: vi.fn(),
+  deleteDraft: vi.fn(),
+  setConfigValues: vi.fn(),
+}));
+vi.mock("@/drafts", () => ({ saveDraft, deleteDraft }));
+vi.mock("@/toml-config", () => ({ setConfigValues }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
 const { startRepl, offlineProps } = await import("@/repl");
@@ -47,6 +55,24 @@ describe("startRepl", () => {
     const [element, renderOptions] = render.mock.calls[0];
     expect(element.props).toMatchObject({ markers: DEFAULT_MARKERS, kittyHint: hint });
     expect(renderOptions).toMatchObject({ exitOnCtrlC: false, kittyKeyboard: { mode } });
+    app.unmount();
+    await running;
+  });
+
+  it("saves drafts to the profile and answers to the [repl] section of the active config", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl({ ...options, profile: "work" });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const { drafts, saveConfig, configName } = render.mock.calls[0][0].props;
+    const draft = { reason: "manual", type: "post", text: "hi" };
+    await drafts.save(draft);
+    await drafts.delete("d1");
+    await saveConfig({ undo: 5 });
+    expect(saveDraft).toHaveBeenCalledWith(draft, "work");
+    expect(deleteDraft).toHaveBeenCalledWith("d1", "work");
+    expect(setConfigValues).toHaveBeenCalledWith("/tmp/config.toml", "repl", { undo: 5 });
+    expect(configName).toBe("config.toml");
     app.unmount();
     await running;
   });

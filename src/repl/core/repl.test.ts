@@ -220,6 +220,20 @@ describe("puts text back", () => {
     await flush();
     expect(deps.restore).toHaveBeenCalledWith("/thread bad");
   });
+  it("without its label, along with the posts after it, when part of a thread batch is rejected", async () => {
+    const { repl, agent, deps, flush } = setup({ threadLabel: "append" });
+    agent.post.mockResolvedValueOnce(ref(1)).mockRejectedValueOnce(rejected());
+    await repl.startThread();
+    await repl.submitText("one /// bad /// three");
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("bad /// three");
+  });
+  it("joined with the split marker when several items are cancelled", async () => {
+    const { repl } = setup({ undo: 5 });
+    await repl.post("a");
+    await repl.post("b");
+    expect(repl.escape("")).toEqual({ restore: "a /// b" });
+  });
   it("as what you typed when pending posts are cancelled with an empty composer", async () => {
     const { repl } = setup({ undo: 5 });
     await repl.post("waiting");
@@ -471,6 +485,11 @@ describe("cooldowns", () => {
     expect(ask.saveOffer).toHaveBeenCalledWith({ pace: 0 });
     expect(deps.saveConfig).toHaveBeenCalledWith({ "ask-to-save": false });
   });
+  it("saves only what it asked about", async () => {
+    const { repl, deps } = setup({ undo: 5, pace: undefined }, { saveOffer: vi.fn(async () => "yes" as const) });
+    await repl.startThread();
+    expect(deps.saveConfig).toHaveBeenCalledExactlyOnceWith({ pace: 0 });
+  });
   it("doesn't offer to save when ask-to-save is off", async () => {
     const { repl, ask } = setup({ undo: undefined, pace: undefined, askToSave: false });
     await repl.startThread();
@@ -484,12 +503,28 @@ describe("cooldowns", () => {
 });
 
 describe("pending posts", () => {
-  it("block commands that move the cursor", async () => {
+  it("block /thread, which would move the cursor", async () => {
     const { repl, printed } = setup({ undo: 5 });
-    await repl.startThread("one");
+    await repl.post("one");
     expect(await repl.startThread()).toBe("keep");
-    await repl.replyFrom("1");
     expect(printed()).toContain("Wait for pending posts, or Esc to cancel them");
+  });
+  it("block /reply-from too", async () => {
+    const { repl, printed } = setup({ undo: 5 });
+    await repl.post("one");
+    expect(await repl.replyFrom("1")).toBe("keep");
+    expect(printed()).toContain("Wait for pending posts, or Esc to cancel them");
+  });
+  it("chain in order when typed faster than the pace allows", async () => {
+    const { repl, posted } = setup({ pace: 10 });
+    await repl.startThread();
+    for (const text of ["a", "b", "c"]) await repl.submitText(text);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(posted.map((p) => [p.text, p.reply?.parent.uri, p.reply?.root.uri])).toEqual([
+      ["a", undefined, undefined],
+      ["b", ref(1).uri, ref(1).uri],
+      ["c", ref(2).uri, ref(1).uri],
+    ]);
   });
   it("include a paused failure, even once its posts are in a draft", async () => {
     const { repl, agent, flush, printed } = setup();

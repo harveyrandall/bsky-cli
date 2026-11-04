@@ -73,6 +73,21 @@ describe("an empty marker", () => {
   });
 });
 
+describe("segmentAt with cut text", () => {
+  it("doesn't count split markers in what's cut", () => {
+    expect(segmentAt("a /// b <// c /// d", 0, m)).toMatchObject({ region: "send", total: 2 });
+  });
+});
+
+describe("parseSubmit with cut text", () => {
+  it("ignores split markers in what's cut", () => {
+    const plan = parseSubmit("a /// b <// c /// d //> e", m, 300);
+    expect(plan.posts).toEqual(["a", "b"]);
+    expect(plan.discard).toBe("c /// d");
+    expect(plan.keep).toBe("e");
+  });
+});
+
 describe("escapeMarkers", () => {
   it("makes every marker plain, so the text parses back to itself", () => {
     const text = "a /// b //> c <// d";

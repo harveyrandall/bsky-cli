@@ -20,6 +20,7 @@ function agent(posts: PostLookup[] = []): RefAgent & { getPosts: ReturnType<type
     getPosts: vi.fn(async (uris: AtUri[]) => posts.filter((p) => uris.includes(p.uri))),
   };
 }
+const aliceRoot = ref(alice, "3lbx7kt5def2r");
 const alicePost: PostLookup = {
   ...ext,
   authorDid: alice,
@@ -128,5 +129,15 @@ describe("Registry.format", () => {
     expect(reg.format(reg.addExternal(alicePost, {}), false)).toBe("(1) 3lbx7kt5def2x ext @alice.bsky.social");
     const yours = new Registry(false, alice);
     expect(yours.format(yours.addExternal(alicePost, {}), false)).toBe("(1) 3lbx7kt5def2x");
+  });
+});
+
+describe("an external reply", () => {
+  const reply: PostLookup = { ...alicePost, root: aliceRoot, parent: aliceRoot };
+  it("keeps its own thread's root, so a reply to it stays in that thread", async () => {
+    const r = await resolveRef(ext.uri, { registry: new Registry(false), agent: agent([reply]) });
+    expect(r.ref).toEqual(ext);
+    expect(r.root).toEqual(aliceRoot);
+    expect(new Registry(false).addExternal(reply, {}).root).toEqual(aliceRoot);
   });
 });

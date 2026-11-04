@@ -199,6 +199,18 @@ describe("replAgent", () => {
   it("drops a post whose reply refs can't be trusted, rather than calling it a thread root", async () => {
     await expect(lookup({ text: "hi", reply: { root: { uri: "nonsense", cid: "x" }, parent: { uri, cid: "bafyabc" } } })).resolves.toEqual([]);
   });
+  it("hands createPost the parent and root the right way round", async () => {
+    const { createPost } = await import("@/commands/post");
+    vi.mocked(createPost).mockResolvedValueOnce({ uri, cid: "bafyabc" } as never);
+    const agent = { session: { did: "did:plc:me" } } as never;
+    const parent = { uri: `${uri}p`, cid: "bafyp" } as never;
+    const root = { uri: `${uri}r`, cid: "bafyr" } as never;
+    await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
+    expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
+  });
+  it("won't start without a session", () => {
+    expect(() => replAgent({} as never)).toThrow("Not logged in");
+  });
   it("keeps a post with no reply as its own root", async () => {
     await expect(lookup({ text: "hi" })).resolves.toMatchObject([{ uri, text: "hi", root: undefined }]);
   });
