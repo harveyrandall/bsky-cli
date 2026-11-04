@@ -325,6 +325,6 @@ describe("App threads", () => {
     await tick();
     await tick();
     expect(exit).not.toHaveBeenCalled();
-    expect(lastFrame()).toContain("bsky › bad");
+    expect(lastFrame()).toContain("bsky › /post bad");
   });
 });

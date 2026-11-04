@@ -11,6 +11,8 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
+const rejected = () => Object.assign(new Error("Invalid record"), { status: 400 });
+
 function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> = {}) {
   let n = 0;
   const posted: { text: string; reply?: SendTarget }[] = [];
@@ -158,15 +160,65 @@ describe("puts text back", () => {
   it("when the preview is declined", async () => {
     const { repl, agent } = setup({}, { confirm: vi.fn(async () => false) });
     await repl.startThread();
-    expect(await repl.submitText("a /// b")).toEqual({ restore: "a /// b" });
+    expect(await repl.submitText("a /// b")).toBe("keep");
     expect(agent.post).not.toHaveBeenCalled();
   });
-  it("when the server rejects a post", async () => {
+  it("keeps the whole command, not just its text, when a preview is declined", async () => {
+    const { repl } = setup({}, { confirm: vi.fn(async () => false) });
+    expect(await repl.post("a /// b")).toBe("keep");
+    expect(await repl.reply(ref(0).uri, "a /// b")).toBe("keep");
+  });
+  it("stays in reply-once mode when the preview is declined", async () => {
+    const { repl, flush } = setup({}, { confirm: vi.fn(async () => false) });
+    await repl.post("first");
+    await flush();
+    await repl.reply("1");
+    expect(await repl.submitText("a /// b")).toBe("keep");
+    expect(repl.mode().kind).toBe("reply-once");
+  });
+  it("as a /post when the server rejects a post on its own", async () => {
     const { repl, agent, deps, flush } = setup();
-    agent.post.mockRejectedValueOnce(Object.assign(new Error("Invalid record"), { status: 400 }));
+    agent.post.mockRejectedValueOnce(rejected());
     await repl.post("bad");
     await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/post bad");
+  });
+  it("as a /reply when the server rejects a reply", async () => {
+    const { repl, agent, deps, flush } = setup();
+    await repl.post("first");
+    await flush();
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.reply("1", "bad");
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/reply 1 bad");
+  });
+  it("as a reply to the last post sent when a later post of a batch is rejected", async () => {
+    const { repl, agent, deps, flush } = setup();
+    agent.post.mockResolvedValueOnce(ref(1)).mockRejectedValueOnce(rejected());
+    await repl.post("one /// bad /// three");
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/reply 1 bad /// three");
+  });
+  it("as plain text when a thread post is rejected in that thread", async () => {
+    const { repl, agent, deps, flush } = setup();
+    await repl.startThread();
+    await repl.submitText("first");
+    await flush();
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.submitText("bad");
+    await flush();
     expect(deps.restore).toHaveBeenCalledWith("bad");
+  });
+  it("as a /thread when the first post is rejected after you've moved on", async () => {
+    const { repl, agent, deps, flush } = setup();
+    let reject = (_: Error) => {};
+    agent.post.mockImplementationOnce(() => new Promise((_, r) => (reject = r)));
+    await repl.startThread("bad");
+    await flush();
+    await repl.post();
+    reject(rejected());
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/thread bad");
   });
   it("when pending posts are cancelled with an empty composer", async () => {
     const { repl } = setup({ undo: 5 });
@@ -214,7 +266,7 @@ describe("submit", () => {
     const { repl, ask, printed } = setup();
     await repl.startThread();
     const text = `short /// ${"y".repeat(320)}`;
-    expect(await repl.submitText(text)).toEqual({ restore: text });
+    expect(await repl.submitText(text)).toBe("keep");
     expect(ask.confirm).not.toHaveBeenCalled();
     expect(printed()).toContain("Post 2 is 320/300");
   });
@@ -266,7 +318,7 @@ describe("cooldowns", () => {
   });
   it("cancels the thread when a question is dismissed", async () => {
     const { repl } = setup({ undo: undefined }, { cooldown: vi.fn(async () => undefined) });
-    expect(await repl.startThread("hello")).toEqual({ restore: "hello" });
+    expect(await repl.startThread("hello")).toBe("keep");
     expect(repl.mode().kind).toBe("idle");
   });
 });

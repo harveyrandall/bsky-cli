@@ -30,6 +30,8 @@ export interface Failure {
   item: QueueItem;
   /** Index of the post that failed; earlier posts were sent. */
   from: number;
+  /** Where that post was going. */
+  target?: SendTarget;
   message: string;
   draftId?: string;
 }
@@ -81,8 +83,6 @@ export class Pipeline {
   private sending = false;
   private paused = false;
   private failure?: Failure;
-  /** Where the failed post was going, so a retry lands in the same place. */
-  private failedTarget?: SendTarget;
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -153,9 +153,8 @@ export class Pipeline {
       return true;
     }
     const item = { ...f.item, posts: f.item.posts.slice(f.from) };
-    this.queue.unshift({ item, index: 0, last: this.failedTarget, draftId: f.draftId, immediate: true });
+    this.queue.unshift({ item, index: 0, last: f.target, draftId: f.draftId, immediate: true });
     this.failure = undefined;
-    this.failedTarget = undefined;
     this.paused = false;
     this.schedule();
     return true;
@@ -259,7 +258,7 @@ export class Pipeline {
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
-    const failure: Failure = { kind: c.kind, item: a.item, from: a.index, message };
+    const failure: Failure = { kind: c.kind, item: a.item, from: a.index, target, message };
     if (c.kind === "rejected") {
       if (this.queue[0] === a) this.queue.shift();
       this.deps.onFailed(failure);
@@ -279,7 +278,6 @@ export class Pipeline {
       });
       failure.draftId = draft.id;
       if (this.queue[0] === a) this.queue.shift();
-      this.failedTarget = target;
       await this.dropDraft(a);
     } catch (saveErr) {
       // No draft, so the posts stay queued (paused) for /retry or Esc.

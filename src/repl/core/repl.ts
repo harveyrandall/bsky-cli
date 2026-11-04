@@ -167,12 +167,12 @@ export class Repl {
         return this.write({ kind: "thread" }, text);
       case "reply-once": {
         const out = await this.write({ kind: "reply", target: mode.target.ref, root: mode.target.root }, text);
-        if (!(typeof out === "object" && out.restore === text)) this.current = { kind: mode.returnTo };
+        if (out !== "keep") this.current = { kind: mode.returnTo };
         return out;
       }
       case "post-once": {
         const out = await this.write({ kind: "standalone" }, text);
-        if (!(typeof out === "object" && out.restore === text)) this.current = { kind: mode.returnTo };
+        if (out !== "keep") this.current = { kind: mode.returnTo };
         return out;
       }
     }
@@ -253,7 +253,7 @@ export class Repl {
     const resolved = asRef ? await this.resolve(arg) : undefined;
     if (asRef && !resolved) return "keep";
     const firstPost = asRef ? undefined : arg;
-    if (!(await this.settleCooldowns())) return firstPost !== undefined ? { restore: firstPost } : "keep";
+    if (!(await this.settleCooldowns())) return "keep";
 
     if (this.current.kind === "thread" && this.threadState) this.stopThread();
     this.current = { kind: "thread" };
@@ -400,15 +400,15 @@ export class Repl {
     const labelled = this.labelled(kind, root);
     const limit = labelled ? 298 : 300;
     const plan = parseSubmit(text, this.markers, limit);
-    if (plan.posts.length === 0) return plan.keep ? { restore: plan.keep } : "keep";
+    if (plan.posts.length === 0) return "keep";
     if (plan.overLimit.length) {
       for (const i of plan.overLimit) {
         this.deps.print(`Post ${i + 1} is ${graphemeLength(plan.posts[i])}/${limit} — shorten it or split it`, "error");
       }
-      return { restore: text };
+      return "keep";
     }
     const direct = plan.posts.length === 1 && !plan.markersUsed && !plan.autoSplit;
-    if (!direct && !(await this.deps.ask.confirm(plan, labelled))) return { restore: text };
+    if (!direct && !(await this.deps.ask.confirm(plan, labelled))) return "keep";
 
     const posts = labelled ? this.labelPosts(plan.posts) : plan.posts;
     // A question may have been answered after the REPL started closing.
@@ -462,8 +462,18 @@ export class Repl {
       this.deps.print(`Unsent posts are saved as draft ${f.draftId}.`, "dim");
     } else {
       this.deps.print(f.message, "error");
-      this.deps.restore(f.item.posts.slice(f.from).map(stripLabel).join(` ${this.markers.split} `));
+      this.deps.restore(this.asResend(f));
     }
     this.deps.onChange();
+  }
+
+  /** A rejected post as what Enter needs to send it to the same place. */
+  private asResend(f: Failure): string {
+    const text = f.item.posts.slice(f.from).map(stripLabel).join(` ${this.markers.split} `);
+    const { kind } = f.item.intent;
+    if (kind === "thread" && this.current.kind === "thread") return text;
+    const parent = f.target && this.registry.byUri(f.target.parent.uri);
+    if (parent) return `/reply ${parent.label} ${text}`;
+    return `/${kind === "thread" ? "thread" : "post"} ${text}`;
   }
 }
