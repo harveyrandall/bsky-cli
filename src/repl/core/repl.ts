@@ -1,7 +1,9 @@
+import { basename } from "node:path";
 import { graphemeLength } from "@/lib/split-thread";
 import type { Draft } from "@/lib/types";
 import type { LineStyle } from "./commands";
 import { escapeMarkers, parseSubmit, type Markers, type SubmitPlan } from "./markers";
+import { canStage, expandHome, inspectMedia, nodeMediaFs, type MediaFs, type StagedMedia } from "./media";
 import { Pipeline, draftOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
 import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
 import type { Cooldown, StrongRef, ThreadLetter } from "./types";
@@ -10,6 +12,7 @@ export const IDLE_HINT =
   "Plain text needs a thread: /thread to start one, /post for a single post, or -t to do this automatically.";
 const WAIT = "Wait for pending posts, or Esc to cancel them";
 const LABEL = "🧵";
+const ALT_INTRO = "Alt text tells people using screen readers what's in your image — without it, they're left out of the post.";
 
 export type ReplMode =
   | { kind: "idle" }
@@ -26,6 +29,8 @@ export interface ReplSettings {
   pace?: Cooldown;
   askToSave: boolean;
   verbose: boolean;
+  /** Attaching needs alt text. */
+  forceAlt: boolean;
 }
 
 /** Questions the REPL asks the person at the keyboard. */
@@ -34,11 +39,13 @@ export interface ReplAsk {
   cooldown(kind: "undo" | "pace"): Promise<Cooldown | undefined>;
   saveOffer(values: { undo?: Cooldown; pace?: Cooldown }): Promise<"yes" | "no" | "never">;
   /** The split preview; defaults to No. */
-  confirm(plan: SubmitPlan, labelled: boolean): Promise<boolean>;
+  confirm(plan: SubmitPlan, labelled: boolean, media: readonly StagedMedia[]): Promise<boolean>;
+  /** Alt text for a file: undefined when skipped, null on Esc. */
+  alt(file: string, required: boolean): Promise<string | undefined | null>;
 }
 
 export interface ReplAgent extends RefAgent {
-  post(text: string, reply?: SendTarget): Promise<StrongRef>;
+  post(text: string, reply?: SendTarget, media?: readonly StagedMedia[]): Promise<StrongRef>;
 }
 
 export interface ReplDeps {
@@ -52,6 +59,7 @@ export interface ReplDeps {
   deleteDraft(id: string): Promise<void>;
   saveConfig(values: Record<string, string | number | boolean>): Promise<void>;
   timers?: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
+  fs?: MediaFs;
 }
 
 /** "done" clears the composer, "keep" leaves it, `restore` replaces it. */
@@ -69,7 +77,7 @@ export interface ThreadState {
 type WriteKind = "thread" | "reply" | "standalone";
 
 const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
-const manualDraft = (item: Unsent) => draftOf("manual", item.posts.map(stripLabel), item.target);
+const manualDraft = (item: Unsent) => draftOf("manual", item.posts.map(stripLabel), item.target, item.media);
 
 /**
  * The session: mode, active thread, settings, the post registry and the send
@@ -89,6 +97,7 @@ export class Repl {
   private cooldownsSettled = false;
   private closed = false;
   private readonly failed: Failure[] = [];
+  private media: StagedMedia[] = [];
   private readonly letters = new Map<number, ThreadLetter | undefined>();
 
   constructor(
@@ -105,7 +114,7 @@ export class Repl {
     };
     this.pipeline = new Pipeline({
       ...timers,
-      send: (text, reply) => deps.agent.post(text, reply),
+      send: (text, reply, media) => deps.agent.post(text, reply, media),
       threadTarget: () => this.threadState && { parent: this.threadState.cursor, root: this.threadState.root },
       saveDraft: deps.saveDraft,
       deleteDraft: deps.deleteDraft,
@@ -147,6 +156,12 @@ export class Repl {
     return c?.phase === "counting" ? this.join(c.item.posts) : undefined;
   }
 
+  /** The composer's text and whatever's staged, as a draft; undefined if there's neither. */
+  composerDraft(text: string): Omit<Draft, "id" | "createdAt"> | undefined {
+    if (text.trim() === "" && this.media.length === 0) return undefined;
+    return draftOf("manual", [text], undefined, this.media);
+  }
+
   /** What paused the queue, while it's paused. */
   pausedBy(): Failure | undefined {
     return this.pipeline.lastFailure();
@@ -154,6 +169,11 @@ export class Repl {
 
   sendNow(): void {
     this.pipeline.sendNow();
+  }
+
+  /** Media waiting for the next post. */
+  staged(): readonly StagedMedia[] {
+    return this.media;
   }
 
   /** What's queued, as drafts that send it to the same places. */
@@ -354,6 +374,64 @@ export class Repl {
     return "done";
   }
 
+  /** `/attach`: check each file, ask for its alt text and stage it for the next post. */
+  async attach(paths: readonly string[], alt?: string): Promise<void> {
+    let explained = false;
+    for (const raw of paths) {
+      const path = expandHome(raw);
+      const found = await inspectMedia(path, this.deps.fs ?? nodeMediaFs);
+      if ("error" in found) {
+        this.deps.print(found.error, "error");
+        continue;
+      }
+      const refused = canStage(this.media, found.kind);
+      if (refused) {
+        this.deps.print(refused, "error");
+        continue;
+      }
+      let text = alt?.trim() || undefined;
+      if (text === undefined) {
+        if (!explained) this.deps.print(ALT_INTRO, "dim");
+        explained = true;
+        const answer = await this.askAlt(basename(path));
+        if (answer === null) continue;
+        text = answer;
+      }
+      this.media.push({ path, kind: found.kind, ...(text !== undefined && { alt: text }) });
+      this.deps.onChange();
+    }
+  }
+
+  // TODO(alt-text-ai): offer a description from a local model here.
+  private async askAlt(file: string): Promise<string | undefined | null> {
+    for (;;) {
+      const answer = await this.deps.ask.alt(file, this.s.forceAlt);
+      if (answer === null) return null;
+      const text = answer?.trim();
+      if (text) return text;
+      if (!this.s.forceAlt) return undefined;
+    }
+  }
+
+  /** `/detach [n|all]`: unstage one file (from 1) or all of them. */
+  detach(which: number | "all" = "all"): void {
+    if (which !== "all" && !this.media[which - 1]) {
+      this.deps.print(`No attachment ${which}`, "error");
+      return;
+    }
+    this.media = which === "all" ? [] : this.media.filter((_, i) => i !== which - 1);
+    this.deps.onChange();
+  }
+
+  /** Media coming back with its text; what's been staged since can get in the way. */
+  private restage(media: readonly StagedMedia[] = []): void {
+    for (const m of media) {
+      const refused = canStage(this.media, m.kind);
+      if (refused) this.deps.print(`Couldn't keep ${basename(m.path)}: ${refused}`, "error");
+      else this.media.push(m);
+    }
+  }
+
   setAutoThread(on = !this.s.autoThread): void {
     this.s.autoThread = on;
     this.deps.print(`Auto-thread ${on ? "on" : "off"}`, "dim");
@@ -426,7 +504,7 @@ export class Repl {
   }
 
   wouldLose(composerText: string): boolean {
-    return composerText.trim() !== "" || this.pipeline.pending().length > 0;
+    return composerText.trim() !== "" || this.media.length > 0 || this.pipeline.pending().length > 0;
   }
 
   private cancelPending(composerText: string): EscapeResult {
@@ -438,6 +516,7 @@ export class Repl {
       void this.saveCancelled(items);
       return "handled";
     }
+    for (const item of items) this.restage(item.media);
     return { restore: items.length === 1 ? this.asResend(items[0]) : this.join(items.flatMap((i) => i.posts)) };
   }
 
@@ -474,12 +553,14 @@ export class Repl {
       return "keep";
     }
     const direct = plan.posts.length === 1 && !plan.markersUsed && !plan.autoSplit;
-    if (!direct && !(await this.deps.ask.confirm(plan, labelled))) return "keep";
+    if (!direct && !(await this.deps.ask.confirm(plan, labelled, this.media))) return "keep";
 
     const posts = labelled ? this.labelPosts(plan.posts) : plan.posts;
     // A question may have been answered after the REPL started closing.
     if (this.closed) return "keep";
-    const item = this.pipeline.enqueue(intent, posts);
+    const media = this.media;
+    this.media = [];
+    const item = this.pipeline.enqueue(intent, posts, media.length > 0 ? media : undefined);
     this.letters.set(item.id, this.letterFor(intent));
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
@@ -531,6 +612,7 @@ export class Repl {
     } else {
       const n = f.item.posts.length;
       this.deps.print(n > 1 ? `Post ${f.from + 1} of ${n} wasn't sent: ${f.message}` : f.message, "error");
+      if (f.from === 0) this.restage(f.item.media);
       this.deps.restore(this.asResend({ ...f.item, posts: f.item.posts.slice(f.from), target: f.target }));
     }
     this.deps.onChange();

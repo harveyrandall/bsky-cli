@@ -209,7 +209,7 @@ describe("App threads", () => {
     expect(lastFrame()).toMatch(/^thread \(1\) ›\s*$/m);
     await type("two", "\r");
     await tick();
-    expect(agent.post).toHaveBeenLastCalledWith("two", { parent: ref(1), root: ref(1) });
+    expect(agent.post).toHaveBeenLastCalledWith("two", { parent: ref(1), root: ref(1) }, undefined);
   });
   it("previews a split and posts it on y", async () => {
     const { type, lastFrame, agent } = setup();

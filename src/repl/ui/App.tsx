@@ -66,6 +66,7 @@ export function App(props: AppProps) {
           cooldown: (which) => new Promise((resolve) => setOverlay({ kind: "cooldown", which, resolve })),
           saveOffer: (values) => new Promise((resolve) => setOverlay({ kind: "save", values, resolve })),
           confirm: (plan, labelled) => new Promise((resolve) => setOverlay({ kind: "preview", plan, labelled, resolve })),
+          alt: async () => undefined,
         },
         print,
         onChange: rerender,
@@ -121,9 +122,10 @@ export function App(props: AppProps) {
         return;
       }
       // Sending what's queued; unsent composer text is kept as a draft rather than posted mid-exit.
-      if (text.trim() !== "") {
+      const unsent = repl.composerDraft(text);
+      if (unsent) {
         try {
-          const d = await props.drafts.save({ reason: "manual", type: "post", text });
+          const d = await props.drafts.save(unsent);
           print(`Saved as draft ${d.id}`, "dim");
         } catch (err) {
           print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
@@ -137,7 +139,8 @@ export function App(props: AppProps) {
     if (choice === "draft") {
       // Save first; only leave (which cancels the queue) once everything is safe.
       const drafts = repl.draftItems();
-      if (text.trim() !== "") drafts.push({ reason: "manual", type: "post", text });
+      const unsent = repl.composerDraft(text);
+      if (unsent) drafts.push(unsent);
       try {
         for (const draft of drafts) {
           const d = await props.drafts.save(draft);

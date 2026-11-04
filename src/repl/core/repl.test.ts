@@ -4,6 +4,7 @@ import { DEFAULT_MARKERS } from "./markers";
 import type { AtUri, Cid, Did, StrongRef } from "./types";
 import type { SendTarget } from "./pipeline";
 import type { LineStyle } from "./commands";
+import type { MediaFs, StagedMedia } from "./media";
 
 const me = "did:plc:me" as Did;
 const ref = (n: number): StrongRef => ({
@@ -12,16 +13,20 @@ const ref = (n: number): StrongRef => ({
 });
 
 const rejected = () => Object.assign(new Error("Invalid record"), { status: 400 });
+const fs: MediaFs = {
+  size: async (path) => (path.includes("missing") ? undefined : 10),
+  head: async (path) => new Uint8Array(path.endsWith(".mp4") ? [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70] : [0x89, 0x50, 0x4e, 0x47]),
+};
 
 function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> = {}) {
   let n = 0;
-  const posted: { text: string; reply?: SendTarget }[] = [];
+  const posted: { text: string; reply?: SendTarget; media?: readonly StagedMedia[] }[] = [];
   const agent = {
     selfDid: me,
     resolveHandle: vi.fn(async () => me),
     getPosts: vi.fn(async () => []),
-    post: vi.fn(async (text: string, reply?: SendTarget) => {
-      posted.push({ text, reply });
+    post: vi.fn(async (text: string, reply?: SendTarget, media?: readonly StagedMedia[]) => {
+      posted.push({ text, reply, media });
       return ref(++n);
     }),
   };
@@ -29,6 +34,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     cooldown: vi.fn(async () => 0 as const),
     saveOffer: vi.fn(async () => "no" as const),
     confirm: vi.fn(async () => true),
+    alt: vi.fn(async () => undefined),
     ...answers,
   };
   const lines: [string, LineStyle | undefined][] = [];
@@ -41,9 +47,10 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     saveDraft: vi.fn(async () => ({ id: "d1" })),
     deleteDraft: vi.fn(async () => {}),
     saveConfig: vi.fn(async () => {}),
+    fs,
   };
   const repl = new Repl(
-    { autoThread: false, prefixThread: false, threadLabel: false, undo: 0, pace: 0, askToSave: true, verbose: false, ...settings },
+    { autoThread: false, prefixThread: false, threadLabel: false, undo: 0, pace: 0, askToSave: true, verbose: false, forceAlt: false, ...settings },
     DEFAULT_MARKERS,
     deps,
   );
@@ -327,7 +334,7 @@ describe("submit", () => {
     const { repl, ask, flush, posted } = setup();
     await repl.startThread();
     await repl.submitText("a /// b //> later");
-    expect(ask.confirm).toHaveBeenCalledWith(expect.objectContaining({ posts: ["a", "b"], keep: "later" }), false);
+    expect(ask.confirm).toHaveBeenCalledWith(expect.objectContaining({ posts: ["a", "b"], keep: "later" }), false, []);
     await flush();
     expect(posted.map((p) => p.text)).toEqual(["a", "b"]);
   });
@@ -400,6 +407,150 @@ describe("once modes", () => {
     await repl.post();
     expect(repl.escape("")).toBe("handled");
     expect(repl.mode().kind).toBe("thread");
+  });
+});
+
+describe("media", () => {
+  const INTRO = "Alt text tells people using screen readers what's in your image — without it, they're left out of the post.";
+  it("asks for alt text per file, explaining why once", async () => {
+    const alt = vi.fn(async (file: string) => `about ${file}`);
+    const { repl, lines } = setup({}, { alt });
+    await repl.attach(["/x/a.png", "/x/b.png"]);
+    expect(alt.mock.calls).toEqual([["a.png", false], ["b.png", false]]);
+    expect(lines.filter(([t]) => t === INTRO)).toHaveLength(1);
+    expect(repl.staged()).toEqual([
+      { path: "/x/a.png", kind: "image", alt: "about a.png" },
+      { path: "/x/b.png", kind: "image", alt: "about b.png" },
+    ]);
+  });
+  it("skips alt text on a blank answer", async () => {
+    const { repl } = setup({}, { alt: vi.fn(async () => "  ") });
+    await repl.attach(["/x/a.png"]);
+    expect(repl.staged()).toEqual([{ path: "/x/a.png", kind: "image" }]);
+  });
+  it("uses --alt for every file without asking", async () => {
+    const { repl, ask } = setup();
+    await repl.attach(["/x/a.png", "/x/b.png"], "Two charts");
+    expect(ask.alt).not.toHaveBeenCalled();
+    expect(repl.staged().map((m) => m.alt)).toEqual(["Two charts", "Two charts"]);
+  });
+  it("asks again on a blank answer with --force-alt", async () => {
+    const answers = ["", "  ", "A chart"];
+    const alt = vi.fn(async () => answers.shift());
+    const { repl } = setup({ forceAlt: true }, { alt });
+    await repl.attach(["/x/a.png"]);
+    expect(alt).toHaveBeenCalledTimes(3);
+    expect(alt).toHaveBeenCalledWith("a.png", true);
+    expect(repl.staged()[0].alt).toBe("A chart");
+  });
+  it("drops just that file on Esc", async () => {
+    const answers = [null, "B"];
+    const { repl } = setup({ forceAlt: true }, { alt: vi.fn(async () => answers.shift()) });
+    await repl.attach(["/x/a.png", "/x/b.png"]);
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.png"]);
+  });
+  it("says why a file can't be attached and carries on", async () => {
+    const { repl, printed } = setup();
+    await repl.attach(["/x/missing.png", "/x/b.png", "/x/c.mp4"]);
+    expect(printed()).toContain("missing.png not found");
+    expect(printed()).toContain("A post can have images or one video, not both");
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.png"]);
+  });
+  it("goes on the first post of the next batch only", async () => {
+    const { repl, posted, flush } = setup();
+    await repl.attach(["/x/a.png"]);
+    await repl.startThread();
+    await repl.submitText("one /// two");
+    expect(repl.staged()).toEqual([]);
+    await flush();
+    await repl.submitText("three");
+    await flush();
+    expect(posted.map((p) => p.media?.length)).toEqual([1, undefined, undefined]);
+  });
+  it("shows in the preview", async () => {
+    const { repl, ask } = setup();
+    await repl.attach(["/x/a.png"]);
+    await repl.post("one /// two");
+    expect(ask.confirm).toHaveBeenCalledWith(expect.anything(), false, [{ path: "/x/a.png", kind: "image" }]);
+  });
+  it("stays staged when the preview is declined", async () => {
+    const { repl } = setup({}, { confirm: vi.fn(async () => false) });
+    await repl.attach(["/x/a.png"]);
+    await repl.post("one /// two");
+    expect(repl.staged()).toHaveLength(1);
+  });
+  it("returns media with the text when the server rejects the post", async () => {
+    const { repl, agent, deps, flush } = setup();
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.attach(["/x/a.png"]);
+    await repl.post("bad");
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/post bad");
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/a.png"]);
+  });
+  it("doesn't return media already sent when a later post is rejected", async () => {
+    const { repl, agent, flush } = setup();
+    agent.post.mockResolvedValueOnce(ref(1)).mockRejectedValueOnce(rejected());
+    await repl.attach(["/x/a.png"]);
+    await repl.post("one /// bad");
+    await flush();
+    expect(repl.staged()).toEqual([]);
+  });
+  it("keeps media in the draft on a network failure", async () => {
+    const { repl, agent, deps, flush } = setup();
+    agent.post.mockRejectedValueOnce(new Error("fetch failed"));
+    await repl.attach(["/x/a.png"]);
+    await repl.post("hello");
+    await flush();
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ images: ["/x/a.png"], imageAlts: ["a.png"] }));
+    expect(repl.staged()).toEqual([]);
+  });
+  it("comes back when a queued post is cancelled", async () => {
+    const { repl } = setup({ undo: 5 });
+    await repl.attach(["/x/a.png"]);
+    await repl.post("waiting");
+    expect(repl.staged()).toEqual([]);
+    repl.escape("");
+    expect(repl.staged()).toHaveLength(1);
+  });
+  it("goes into the draft when a cancelled post can't return to the composer", async () => {
+    const { repl, deps, flush } = setup({ undo: 5 });
+    await repl.attach(["/x/a.png"]);
+    await repl.post("waiting");
+    repl.escape("typing");
+    await flush();
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ images: ["/x/a.png"] }));
+    expect(repl.staged()).toEqual([]);
+  });
+  it("won't return more than a post can hold", async () => {
+    const { repl, printed } = setup({ undo: 5 });
+    await repl.attach(["/x/a.png"]);
+    await repl.post("waiting");
+    await repl.attach(["/x/b.mp4"]);
+    repl.escape("");
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.mp4"]);
+    expect(printed()).toContain("Couldn't keep a.png: A post can have images or one video, not both");
+  });
+  it("detaches one file or all of them", async () => {
+    const { repl, printed } = setup();
+    await repl.attach(["/x/a.png", "/x/b.png", "/x/c.png"]);
+    repl.detach(2);
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/a.png", "/x/c.png"]);
+    repl.detach(9);
+    expect(printed()).toContain("No attachment 9");
+    repl.detach("all");
+    expect(repl.staged()).toEqual([]);
+  });
+  it("counts as something to lose on exit, and can be saved as a draft", async () => {
+    const { repl } = setup();
+    await repl.attach(["/x/a.png"]);
+    expect(repl.wouldLose("")).toBe(true);
+    expect(repl.composerDraft("")).toMatchObject({ reason: "manual", type: "post", text: "", images: ["/x/a.png"] });
+    expect(repl.composerDraft("hi")).toMatchObject({ text: "hi", images: ["/x/a.png"] });
+  });
+  it("leaves nothing to save when there's no text or media", () => {
+    const { repl } = setup();
+    expect(repl.composerDraft("  ")).toBeUndefined();
   });
 });
 

@@ -1,5 +1,6 @@
 import { isNetworkError } from "@/lib/errors";
 import type { Draft } from "@/lib/types";
+import { mediaOptions, type StagedMedia } from "./media";
 import type { StrongRef } from "./types";
 
 export type Intent = { kind: "thread" } | { kind: "reply"; target: StrongRef; root: StrongRef } | { kind: "standalone" };
@@ -8,6 +9,8 @@ export interface QueueItem {
   id: number;
   intent: Intent;
   posts: string[];
+  /** Goes with the first post. */
+  media?: readonly StagedMedia[];
   createdAt: number;
 }
 
@@ -45,7 +48,7 @@ export interface PipelineDeps {
   now(): number;
   setTimer(fn: () => void, ms: number): unknown;
   clearTimer(handle: unknown): void;
-  send(text: string, reply?: SendTarget): Promise<StrongRef>;
+  send(text: string, reply?: SendTarget, media?: readonly StagedMedia[]): Promise<StrongRef>;
   /** Where the next thread post goes, read at send time. */
   threadTarget(): SendTarget | undefined;
   saveDraft(d: Omit<Draft, "id" | "createdAt">): Promise<{ id: string }>;
@@ -58,16 +61,25 @@ export interface PipelineDeps {
   onWarning(message: string): void;
 }
 
-/** The draft that sends `posts` to `target`. */
-export function draftOf(reason: Draft["reason"], posts: readonly string[], target?: SendTarget): Omit<Draft, "id" | "createdAt"> {
+/** The draft that sends `posts`, with `media` on the first, to `target`. */
+export function draftOf(
+  reason: Draft["reason"],
+  posts: readonly string[],
+  target?: SendTarget,
+  media?: readonly StagedMedia[],
+): Omit<Draft, "id" | "createdAt"> {
+  const thread = posts.length > 1;
   return {
     reason,
-    type: posts.length > 1 ? "thread" : target ? "reply" : "post",
+    type: thread ? "thread" : target ? "reply" : "post",
     text: posts[0],
     ...(target && { replyUri: target.parent.uri }),
-    ...(posts.length > 1 && { posts: posts.map((text) => ({ text })) }),
+    ...(thread ? { posts: posts.map((text, i) => ({ text, ...(i === 0 && mediaOptions(media)) })) } : mediaOptions(media)),
   };
 }
+
+/** An item's media, if its first post is among those from `from`. */
+const mediaFrom = (item: QueueItem, from: number) => (from === 0 ? item.media : undefined);
 
 interface Active {
   item: QueueItem;
@@ -104,8 +116,8 @@ export class Pipeline {
 
   constructor(private readonly deps: PipelineDeps) {}
 
-  enqueue(intent: Intent, posts: string[]): QueueItem {
-    const item = { id: this.nextId++, intent, posts, createdAt: this.deps.now() };
+  enqueue(intent: Intent, posts: string[], media?: readonly StagedMedia[]): QueueItem {
+    const item = { id: this.nextId++, intent, posts, media, createdAt: this.deps.now() };
     this.queue.push({ item, index: 0 });
     this.schedule();
     return item;
@@ -116,7 +128,7 @@ export class Pipeline {
   }
 
   private unsent(a: Active, from: number): Unsent {
-    return { ...a.item, posts: a.item.posts.slice(from), target: this.target(a) };
+    return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a) };
   }
 
   isPaused(): boolean {
@@ -173,7 +185,7 @@ export class Pipeline {
     if (!f) return false;
     // Without a draft, the failed posts never left the queue.
     if (f.draftId !== undefined) {
-      const item = { ...f.item, posts: f.item.posts.slice(f.from) };
+      const item = { ...f.item, posts: f.item.posts.slice(f.from), media: mediaFrom(f.item, f.from) };
       this.queue.unshift({ item, index: 0, last: f.target, draftId: f.draftId, immediate: true });
     }
     this.failure = undefined;
@@ -225,7 +237,7 @@ export class Pipeline {
     let ref: StrongRef;
     // Only the send itself can fail a post; what happens after it is bookkeeping.
     try {
-      ref = await this.deps.send(a.item.posts[a.index], target);
+      ref = await this.deps.send(a.item.posts[a.index], target, mediaFrom(a.item, a.index));
     } catch (err) {
       await this.fail(a, target, err);
       this.sending = false;
@@ -287,7 +299,7 @@ export class Pipeline {
     this.failure = failure;
     const rest = a.item.posts.slice(a.index);
     try {
-      const draft = await this.deps.saveDraft(draftOf("network", rest, target));
+      const draft = await this.deps.saveDraft(draftOf("network", rest, target, mediaFrom(a.item, a.index)));
       failure.draftId = draft.id;
       if (this.queue[0] === a) this.queue.shift();
       await this.dropDraft(a);

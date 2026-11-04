@@ -1,3 +1,4 @@
+import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { maxImageBytes, maxImages, maxVideoBytes } from "@/lib/limits";
@@ -19,6 +20,19 @@ export interface MediaFs {
   /** The file's first bytes. */
   head(path: string): Promise<Uint8Array>;
 }
+
+export const nodeMediaFs: MediaFs = {
+  size: (path) => stat(path).then((s) => (s.isFile() ? s.size : undefined), () => undefined),
+  async head(path) {
+    const file = await open(path);
+    try {
+      const { buffer } = await file.read(Buffer.alloc(12), 0, 12, 0);
+      return buffer;
+    } finally {
+      await file.close();
+    }
+  },
+};
 
 const megabytes = (bytes: number) => `${bytes / 1_000_000} MB`;
 
@@ -60,6 +74,16 @@ export function parseDroppedPaths(text: string): string[] | undefined {
 
 export function chips(staged: readonly StagedMedia[]): string {
   return `📎 ${staged.map((m) => basename(m.path)).join(" · ")}`;
+}
+
+/** Media as `createPost` and drafts take it; no alt text falls back to the file name, as `createPost` does. */
+export function mediaOptions(media: readonly StagedMedia[] = []) {
+  const images = media.filter((m) => m.kind === "image");
+  const video = media.find((m) => m.kind === "video");
+  return {
+    ...(images.length > 0 && { images: images.map((m) => m.path), imageAlts: images.map((m) => m.alt ?? basename(m.path)) }),
+    ...(video && { video: video.path, videoAlt: video.alt ?? basename(video.path) }),
+  };
 }
 
 export const expandHome = (path: string) => (path.startsWith("~/") ? join(homedir(), path.slice(2)) : path);

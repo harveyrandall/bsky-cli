@@ -4,6 +4,7 @@ import { getClient } from "@/index";
 import { createPost } from "@/commands/post";
 import { activeConfigPath } from "@/toml-config";
 import { resolveMarkers } from "@/repl/core/markers";
+import { mediaOptions } from "@/repl/core/media";
 import type { PostLookup } from "@/repl/core/refs";
 import type { ReplAgent, ReplSettings } from "@/repl/core/repl";
 import { isAtUri, isCid, isDid, isHandle, toStrongRef, type StrongRef } from "@/repl/core/types";
@@ -62,14 +63,15 @@ export function replAgent(agent: AtpAgent): ReplAgent {
       const res = await agent.getPosts({ uris });
       return res.data.posts.flatMap((p) => toLookup(p) ?? []);
     },
-    async post(text, reply) {
-      return toStrongRef(await createPost(agent, text, reply ? { reply: reply.parent, replyRoot: reply.root } : {}));
+    async post(text, reply, media) {
+      const target = reply ? { reply: reply.parent, replyRoot: reply.root } : {};
+      return toStrongRef(await createPost(agent, text, { ...target, ...mediaOptions(media) }));
     },
   };
 }
 
 // Flags whose features land in later releases; the rest are read now.
-const NOT_YET = new Set(["forceAlt", "resume", "resumable"]);
+const NOT_YET = new Set(["resume", "resumable"]);
 
 export function registerRepl(program: Command): void {
   program
@@ -126,6 +128,7 @@ export function registerRepl(program: Command): void {
         pace: opts.pace,
         askToSave: opts.askToSave !== false,
         verbose: program.opts().verbose === true,
+        forceAlt: opts.forceAlt === true,
       };
       const { startRepl } = await import("@/repl");
       await startRepl({
