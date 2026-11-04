@@ -2,7 +2,7 @@ import { graphemeLength } from "@/lib/split-thread";
 import type { Draft } from "@/lib/types";
 import type { LineStyle } from "./commands";
 import { parseSubmit, type Markers, type SubmitPlan } from "./markers";
-import { Pipeline, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget } from "./pipeline";
+import { Pipeline, draftOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
 import { Registry, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
 import type { Cooldown, StrongRef, ThreadLetter } from "./types";
 
@@ -70,6 +70,7 @@ type WriteKind = "thread" | "reply" | "standalone";
 
 const REF_SHAPE = /^(\d+|[A-Za-z]{1,3}\d+|#\d+|at:\/\/\S+|https:\/\/bsky\.app\/profile\/\S+|[2-7a-z]{13})$/;
 const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
+const manualDraft = (item: Unsent) => draftOf("manual", item.posts.map(stripLabel), item.target);
 
 /**
  * The session (spec §5): mode, active thread, settings, the post registry and
@@ -78,7 +79,7 @@ const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
  */
 export class Repl {
   readonly registry: Registry;
-  readonly pipeline: Pipeline;
+  private readonly pipeline: Pipeline;
   private current: ReplMode = { kind: "idle" };
   private threadState?: ThreadState;
   private threadLetter?: ThreadLetter;
@@ -128,6 +129,28 @@ export class Repl {
 
   failures(): readonly Failure[] {
     return this.failed;
+  }
+
+  pendingCount(): number {
+    return this.pipeline.pending().length;
+  }
+
+  countdown(): Countdown | undefined {
+    return this.pipeline.countdown();
+  }
+
+  /** What paused the queue, while it's paused. */
+  pausedBy(): Failure | undefined {
+    return this.pipeline.lastFailure();
+  }
+
+  sendNow(): void {
+    this.pipeline.sendNow();
+  }
+
+  /** What's queued, as drafts that send it to the same places. */
+  draftItems(): Omit<Draft, "id" | "createdAt">[] {
+    return this.pipeline.pending().map(manualDraft);
   }
 
   prompt(): string {
@@ -382,7 +405,7 @@ export class Repl {
   /** The REPL is going away: stop sending and refuse new posts. Returns what was still queued. */
   close(): QueueItem[] {
     this.closed = true;
-    return this.pipeline.cancelAll();
+    return this.pipeline.cancelAll({ keepDrafts: true });
   }
 
   wouldLose(composerText: string): boolean {
@@ -392,21 +415,31 @@ export class Repl {
   private cancelPending(composerText: string): EscapeResult {
     const draftId = this.pipeline.lastFailure()?.draftId;
     if (draftId) this.deps.print(`Left in draft ${draftId}`, "dim");
-    const texts = this.pipeline.cancelAll().flatMap((i) => i.posts.map(stripLabel));
-    if (texts.length === 0) return "handled";
-    const joined = texts.join(` ${this.markers.split} `);
-    if (composerText.trim() === "") return { restore: joined };
-    void this.deps
-      .saveDraft({ reason: "manual", type: texts.length > 1 ? "thread" : "post", text: texts[0], ...(texts.length > 1 && { posts: texts.map((text) => ({ text })) }) })
-      .then(
-        (d) => this.deps.print(`Saved as draft ${d.id}`, "dim"),
-        (err) => {
-          // Never lose it: show the text so it can be copied.
-          this.deps.print(`Couldn't save the cancelled posts as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
-          this.deps.print(joined);
-        },
-      );
-    return "handled";
+    const items = this.pipeline.cancelAll();
+    if (items.length === 0) return "handled";
+    if (composerText.trim() !== "") {
+      void this.saveCancelled(items);
+      return "handled";
+    }
+    return { restore: items.length === 1 ? this.asResend(items[0]) : this.join(items.flatMap((i) => i.posts)) };
+  }
+
+  private async saveCancelled(items: readonly Unsent[]): Promise<void> {
+    for (const item of items) {
+      try {
+        const d = await this.deps.saveDraft(manualDraft(item));
+        this.deps.print(`Saved as draft ${d.id}`, "dim");
+      } catch (err) {
+        // Never lose it: show the text so it can be copied.
+        this.deps.print(`Couldn't save the cancelled posts as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
+        this.deps.print(this.join(item.posts));
+      }
+    }
+  }
+
+  /** Posts as one text for the composer. */
+  private join(posts: readonly string[]): string {
+    return posts.map(stripLabel).join(` ${this.markers.split} `);
   }
 
   private async write(intent: Intent, text: string): Promise<SubmitOutcome> {
@@ -479,17 +512,17 @@ export class Repl {
       else this.deps.print(f.message, "error");
     } else {
       this.deps.print(f.message, "error");
-      this.deps.restore(this.asResend(f));
+      this.deps.restore(this.asResend({ ...f.item, posts: f.item.posts.slice(f.from), target: f.target }));
     }
     this.deps.onChange();
   }
 
-  /** A rejected post as what Enter needs to send it to the same place. */
-  private asResend(f: Failure): string {
-    const text = f.item.posts.slice(f.from).map(stripLabel).join(` ${this.markers.split} `);
-    const { kind } = f.item.intent;
+  /** Posts coming back, as what Enter needs to send them to the same place. */
+  private asResend(item: Unsent): string {
+    const text = this.join(item.posts);
+    const { kind } = item.intent;
     if (kind === "thread" && this.current.kind === "thread") return text;
-    const parent = f.target && this.registry.byUri(f.target.parent.uri);
+    const parent = item.target && this.registry.byUri(item.target.parent.uri);
     if (parent) return `/reply ${parent.label} ${text}`;
     return `/${kind === "thread" ? "thread" : "post"} ${text}`;
   }

@@ -237,7 +237,7 @@ describe("App threads", () => {
     await type("\x1b");
     await tick();
     expect(lastFrame()).not.toContain("Sending in");
-    expect(lastFrame()).toContain("bsky › hello");
+    expect(lastFrame()).toContain("bsky › /post hello");
     expect(agent.post).not.toHaveBeenCalled();
   });
   it("asks for undo and pace on the first thread, then saves them on Yes", async () => {
@@ -270,7 +270,7 @@ describe("App threads", () => {
     const { type, repl } = setup({ settings: { undo: 5 } });
     await type("/post hello", "\r", "\x04", "x");
     expect(exit).toHaveBeenCalledOnce();
-    expect(repl().pipeline.pending()).toEqual([]);
+    expect(repl().pendingCount()).toBe(0);
   });
   it("asks before /exit leaves posts unsent", async () => {
     const { type, lastFrame } = setup({ settings: { pace: 10 } });
@@ -300,7 +300,18 @@ describe("App threads", () => {
     await tick();
     expect(exit).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("Couldn't save drafts (EACCES); still here");
-    expect(repl().pipeline.pending()).toHaveLength(1);
+    expect(repl().pendingCount()).toBe(1);
+  });
+  it("save draft keeps a queued thread a thread", async () => {
+    const { type, drafts } = setup({ settings: { undo: 5 } });
+    await type("/thread", "\r", "one /// two", "\r", "y");
+    await tick();
+    await type("\x04", "d");
+    await tick();
+    expect(drafts.save.mock.calls).toEqual([
+      [{ reason: "manual", type: "thread", text: "one", posts: [{ text: "one" }, { text: "two" }] }],
+    ]);
+    expect(exit).toHaveBeenCalledOnce();
   });
   it("send now saves unsent composer text as a draft before leaving", async () => {
     const { type, drafts } = setup();

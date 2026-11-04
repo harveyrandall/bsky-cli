@@ -220,10 +220,10 @@ describe("puts text back", () => {
     await flush();
     expect(deps.restore).toHaveBeenCalledWith("/thread bad");
   });
-  it("when pending posts are cancelled with an empty composer", async () => {
+  it("as what you typed when pending posts are cancelled with an empty composer", async () => {
     const { repl } = setup({ undo: 5 });
     await repl.post("waiting");
-    expect(repl.escape("")).toEqual({ restore: "waiting" });
+    expect(repl.escape("")).toEqual({ restore: "/post waiting" });
   });
   it("saves cancelled posts as a draft when the composer has text", async () => {
     const { repl, deps, flush, printed } = setup({ undo: 5 });
@@ -232,6 +232,67 @@ describe("puts text back", () => {
     await flush();
     expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ reason: "manual", text: "waiting" }));
     expect(printed()).toContain("Saved as draft d1");
+  });
+});
+
+describe("drafts of what's queued", () => {
+  it("keep each item's shape and leave the thread label out", async () => {
+    const { repl, flush } = setup({ threadLabel: "append" });
+    await repl.post("first");
+    await flush();
+    repl.setCooldown("undo", 5);
+    await repl.startThread();
+    await repl.submitText("one /// two");
+    await repl.reply("1", "hi");
+    await repl.post("solo");
+    expect(repl.draftItems()).toEqual([
+      { reason: "manual", type: "thread", text: "one", posts: [{ text: "one" }, { text: "two" }] },
+      { reason: "manual", type: "reply", text: "hi", replyUri: ref(1).uri },
+      { reason: "manual", type: "post", text: "solo" },
+    ]);
+  });
+  it("reply to the last post sent when part of a batch has gone", async () => {
+    const { repl, flush } = setup({ pace: 5 });
+    await repl.post("one /// two");
+    await flush();
+    expect(repl.draftItems()).toEqual([{ reason: "manual", type: "reply", text: "two", replyUri: ref(1).uri }]);
+  });
+  it("are saved one per item when Esc can't put them back in the composer", async () => {
+    const { repl, deps, flush } = setup({ undo: 5 });
+    await repl.post("a");
+    await repl.post("b");
+    expect(repl.escape("typing")).toBe("handled");
+    await flush();
+    expect(deps.saveDraft).toHaveBeenCalledTimes(2);
+    expect(deps.saveDraft).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: "a" }));
+    expect(deps.saveDraft).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "b" }));
+  });
+});
+
+describe("cancelling a retry", () => {
+  it("deletes its old draft, which still holds the posts already sent", async () => {
+    const { repl, agent, deps, flush, printed } = setup({ pace: 5 });
+    agent.post.mockRejectedValueOnce(new Error("fetch failed"));
+    await repl.post("one /// two");
+    await flush();
+    await repl.retry();
+    await flush();
+    expect(repl.escape("")).toEqual({ restore: "/reply 1 two" });
+    await flush();
+    expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
+    expect(printed()).not.toContain("Left in draft");
+  });
+  it("warns if that draft can't be deleted", async () => {
+    const { repl, agent, deps, flush, printed } = setup({ pace: 5 });
+    agent.post.mockRejectedValueOnce(new Error("fetch failed"));
+    deps.deleteDraft.mockRejectedValueOnce(new Error("ENOENT"));
+    await repl.post("one /// two");
+    await flush();
+    await repl.retry();
+    await flush();
+    repl.escape("");
+    await flush();
+    expect(printed()).toContain("Couldn't delete draft d1");
   });
 });
 

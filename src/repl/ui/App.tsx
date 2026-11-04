@@ -88,7 +88,7 @@ export function App(props: AppProps) {
   // Ctrl+D on an empty composer and /exit: ask first if posts are still waiting.
   const requestExit = (text: string) => (repl.wouldLose(text) ? setOverlay({ kind: "exit", text }) : leave());
 
-  const pendingCount = repl.pipeline.pending().length;
+  const pendingCount = repl.pendingCount();
   // Tick the countdown while anything is queued.
   useEffect(() => {
     if (pendingCount === 0) return;
@@ -116,7 +116,7 @@ export function App(props: AppProps) {
     close();
     if (choice === "stay") return;
     if (choice === "send") {
-      if (repl.pipeline.isPaused()) {
+      if (repl.pausedBy()) {
         print("Can't send now: the queue is paused after an error — /retry first, or choose save [d]raft.", "error");
         return;
       }
@@ -130,18 +130,17 @@ export function App(props: AppProps) {
           return;
         }
       }
-      repl.pipeline.sendNow();
+      repl.sendNow();
       setExitWhenSent(true);
       return;
     }
     if (choice === "draft") {
       // Save first; only leave (which cancels the queue) once everything is safe.
-      const texts = [...repl.pipeline.pending().map((i) => i.posts.join(` ${markers.split} `)), text].filter(
-        (t) => t.trim() !== "",
-      );
+      const drafts = repl.draftItems();
+      if (text.trim() !== "") drafts.push({ reason: "manual", type: "post", text });
       try {
-        for (const t of texts) {
-          const d = await props.drafts.save({ reason: "manual", type: "post", text: t });
+        for (const draft of drafts) {
+          const d = await props.drafts.save(draft);
           print(`Saved as draft ${d.id}`, "dim");
         }
       } catch (err) {
@@ -199,8 +198,8 @@ export function App(props: AppProps) {
     }
   })();
 
-  const countdown = repl.pipeline.countdown();
-  const failure = repl.pipeline.lastFailure();
+  const countdown = repl.countdown();
+  const failure = repl.pausedBy();
   const pending = countdown?.phase === "counting" ? countdown.item.posts.join(` ${markers.split} `) : undefined;
 
   return (
@@ -228,7 +227,7 @@ export function App(props: AppProps) {
         }}
         onInterrupt={(text) => repl.interrupt(text)}
         onEof={requestExit}
-        onSendNow={() => repl.pipeline.sendNow()}
+        onSendNow={() => repl.sendNow()}
         onHint={(text) => print(text, "dim")}
         onError={(text) => print(text, "error")}
       />
