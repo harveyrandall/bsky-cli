@@ -222,12 +222,26 @@ describe("applyConfigToProgram", () => {
     expect(cmd.opts().preview).toBe(true);
   });
 
-  it("skips profile when BSKY_PROFILE env var is set", () => {
+  it("uses BSKY_PROFILE over the config, for every command that reads the option", () => {
     process.env.BSKY_PROFILE = "env-profile";
     const program = buildTestProgram();
     applyConfigToProgram(program, { profile: "config-profile" });
-    // Config value should NOT be applied when env var exists
-    expect(program.opts().profile).toBeUndefined();
+    expect(program.opts().profile).toBe("env-profile");
+  });
+
+  it("uses BSKY_PROFILE with no config at all", () => {
+    process.env.BSKY_PROFILE = "env-profile";
+    const program = buildTestProgram();
+    applyConfigToProgram(program, {});
+    expect(program.opts().profile).toBe("env-profile");
+  });
+
+  it("lets --profile beat BSKY_PROFILE", () => {
+    process.env.BSKY_PROFILE = "env-profile";
+    const program = buildTestProgram();
+    applyConfigToProgram(program, {});
+    program.parse(["-p", "flag-profile", "timeline"], { from: "user" });
+    expect(program.opts().profile).toBe("flag-profile");
   });
 
   it("applies profile when BSKY_PROFILE is not set", () => {

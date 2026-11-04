@@ -137,7 +137,7 @@ export function registerRepl(program: Command): void {
         agent: replAgent(agent),
         handle: agent.session?.handle ?? "",
         configPath: activeConfigPath(),
-        profile: program.opts().profile ?? process.env.BSKY_PROFILE,
+        profile: program.opts().profile,
       });
     });
 }

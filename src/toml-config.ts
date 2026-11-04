@@ -133,6 +133,12 @@ export function applyConfigToProgram(
   program: Command,
   config: Record<string, unknown>,
 ): void {
+  // So every command that reads the option sees it; a flag still beats it when Commander parses.
+  for (const [envKey, configKey] of Object.entries(ENV_OVERRIDES)) {
+    const value = process.env[envKey];
+    if (value) program.setOptionValueWithSource(camelCase(configKey), value, "env");
+  }
+
   // Apply top-level keys as global options
   for (const [key, value] of Object.entries(config)) {
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
