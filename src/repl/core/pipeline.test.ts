@@ -159,6 +159,31 @@ describe("Pipeline errors", () => {
     expect(sent.map((s) => s.text)).toEqual(["a", "b"]);
     expect(deps.deleteDraft).toHaveBeenCalledWith("d1");
   });
+  it("keeps a retried thread a thread, so its posts still move the cursor", async () => {
+    const { pipeline, deps, sent } = setup();
+    deps.send.mockResolvedValueOnce(ref(9)).mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "thread" }, ["one", "two", "three"]);
+    await vi.advanceTimersByTimeAsync(0);
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map((s) => [s.text, s.target?.parent.uri])).toEqual([
+      ["two", ref(9).uri],
+      ["three", ref(1).uri],
+    ]);
+    expect(deps.onSent.mock.calls.map(([item]) => item.intent.kind)).toEqual(["thread", "thread", "thread"]);
+  });
+  it("retries to the parent the post failed on, even if the thread has moved since", async () => {
+    const { pipeline, deps, sent } = setup();
+    const parent = { parent: ref(7), root: ref(6) };
+    const threadTarget = vi.spyOn(deps, "threadTarget").mockReturnValue(parent);
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "thread" }, ["one"]);
+    await vi.advanceTimersByTimeAsync(0);
+    threadTarget.mockReturnValue({ parent: ref(8), root: ref(8) });
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map((s) => s.target)).toEqual([parent]);
+  });
   it("keeps a post it couldn't save as a draft at the head of the paused queue", async () => {
     const { pipeline, deps, sent } = setup();
     deps.send.mockRejectedValueOnce(fetchFailed());

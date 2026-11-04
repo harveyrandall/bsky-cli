@@ -81,8 +81,8 @@ export class Pipeline {
   private sending = false;
   private paused = false;
   private failure?: Failure;
-  /** The last post sent before the failure, so a retry chains from it. */
-  private failedLast?: SendTarget;
+  /** Where the failed post was going, so a retry lands in the same place. */
+  private failedTarget?: SendTarget;
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -152,12 +152,10 @@ export class Pipeline {
       this.schedule();
       return true;
     }
-    const last = this.failedLast;
-    const intent: Intent = last ? { kind: "reply", target: last.parent, root: last.root } : f.item.intent;
-    const item = { ...f.item, intent, posts: f.item.posts.slice(f.from) };
-    this.queue.unshift({ item, index: 0, draftId: f.draftId, immediate: true });
+    const item = { ...f.item, posts: f.item.posts.slice(f.from) };
+    this.queue.unshift({ item, index: 0, last: this.failedTarget, draftId: f.draftId, immediate: true });
     this.failure = undefined;
-    this.failedLast = undefined;
+    this.failedTarget = undefined;
     this.paused = false;
     this.schedule();
     return true;
@@ -274,7 +272,7 @@ export class Pipeline {
       });
       failure.draftId = draft.id;
       if (this.queue[0] === a) this.queue.shift();
-      this.failedLast = a.last;
+      this.failedTarget = target;
     } catch (saveErr) {
       // No draft, so the posts stay queued (paused) for /retry or Esc.
       failure.message = `${message}; couldn't save a draft either: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`;
