@@ -56,10 +56,12 @@ export function App(props: AppProps) {
     { id: 0, text: HEADER, style: "normal" },
     ...(kittyHint ? [{ id: 1, text: KITTY_HINT, style: "dim" as const }] : []),
   ]);
-  const print = useCallback(
-    (text: string, style: LineStyle = "normal") => setLog((l) => [...l, { id: l.length, text, style }]),
-    [],
-  );
+  // Set while $EDITOR has the terminal: Ink drops anything printed then, so lines wait here.
+  const held = useRef<[string, LineStyle][] | undefined>(undefined);
+  const print = useCallback((text: string, style: LineStyle = "normal") => {
+    if (held.current) held.current.push([text, style]);
+    else setLog((l) => [...l, { id: l.length, text, style }]);
+  }, []);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const [overlay, setOverlay] = useState<Overlay>();
   const [restore, setRestore] = useState<{ id: number; text: string }>();
@@ -97,7 +99,7 @@ export function App(props: AppProps) {
         deleteDraft: props.drafts.delete,
         saveConfig: props.saveConfig,
         saveScheduled: props.saveScheduled,
-        composerBusy: () => composerText.current.trim() !== "",
+        composerBusy: () => held.current !== undefined || composerText.current.trim() !== "",
       }),
   );
   useEffect(() => props.onReady?.(repl), [repl]);
@@ -125,9 +127,16 @@ export function App(props: AppProps) {
   // The editor gets the terminal to itself; Ink restores its modes afterwards.
   const edit = async (text: string) => {
     let edited = text;
-    await suspendTerminal(async () => {
-      edited = await editInEditor(text);
-    });
+    held.current = [];
+    try {
+      await suspendTerminal(async () => {
+        edited = await editInEditor(text);
+      });
+    } finally {
+      const lines = held.current;
+      held.current = undefined;
+      for (const [line, style] of lines) print(line, style);
+    }
     return edited;
   };
 

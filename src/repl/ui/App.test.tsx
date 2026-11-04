@@ -487,6 +487,26 @@ describe("App media", () => {
     expect(lastFrame()).toContain("bsky › draft edited");
     expect(lastFrame()).not.toContain("/edit");
   });
+  it("holds back what happens while $EDITOR is open, and keeps a post that comes back", async () => {
+    let closeEditor = (_: string) => {};
+    editInEditor.mockImplementationOnce(() => new Promise((resolve) => (closeEditor = resolve)));
+    let reject = (_: Error) => {};
+    const { type, lastFrame, agent, drafts } = setup();
+    agent.post.mockImplementationOnce(() => new Promise((_, r) => (reject = r)));
+    await type("/post bad", "\r");
+    await tick();
+    await type("\x07");
+    await tick();
+    reject(Object.assign(new Error("Invalid record"), { status: 400 }));
+    await tick();
+    expect(lastFrame()).not.toContain("Invalid record");
+    closeEditor("my words");
+    await tick();
+    expect(lastFrame()).toContain("Invalid record");
+    expect(lastFrame()).toContain("bsky › my words");
+    expect(lastFrame()).toContain("A post came back while you were typing; saved it as draft d1");
+    expect(drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "bad" });
+  });
   it("reports an editor that won't start and keeps the text", async () => {
     editInEditor.mockRejectedValueOnce(new Error("Couldn't open nano: ENOENT"));
     const { type, lastFrame } = setup();
