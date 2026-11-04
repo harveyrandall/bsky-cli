@@ -76,7 +76,7 @@ const NOT_YET = new Set(["resume", "resumable"]);
 export function registerRepl(program: Command): void {
   program
     .command("repl", { isDefault: true })
-    .description("Interactive REPL for writing threads")
+    .description("Interactive composer for posts, threads, quotes, scheduled posts and drafts")
     .option("-t, --auto-thread", "Start a thread when you type plain text")
     .option("--no-auto-thread", "Don't start a thread from plain text")
     .option("-l, --prefix-thread", "Label posts per thread (A1, B2…)")

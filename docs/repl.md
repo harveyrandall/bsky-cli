@@ -1,6 +1,6 @@
 # REPL
 
-`bsky repl` opens an interactive composer for writing posts and threads. In a terminal, plain `bsky` with no command opens it too.
+`bsky repl` opens an interactive composer for posts, threads, quotes, scheduled posts and drafts. In a terminal, plain `bsky` with no command opens it too.
 
 ```bash
 bsky repl
@@ -31,9 +31,9 @@ The prompt shows what Enter will do with plain text:
 | `/reply-from <ref>` | Continue the thread from another post |
 | `/post [text]` | Post on its own |
 | `/quote <ref> [text]` | Quote a post — now with text, or whatever you type next. A quote is one post, and can't have media |
-| `/new` | Pick what to write next: `Post · Thread · Image post · Video post · Quote post · Scheduled post · Draft`. Picking one stops the thread |
+| `/new` | Pick what to write next: `Post · Thread · Image post · Video post · Quote post · Scheduled post · Draft`. Picking one stops the thread. Like `/thread` and `/reply-from`, it waits until nothing is queued |
 | `/attach <path…> [--alt "…"]` | Stage images or a video for the next post |
-| `/detach [n\|all]` | Unstage one file, or all of them |
+| `/detach [n\|all]` | Unstage one file (counting from 1, in the order shown above the composer), or all of them, which is what `/detach` alone does |
 | `/edit [text]` | Write in `$EDITOR` (same as Ctrl+G) |
 | `/auto-thread [on\|off]` | Toggle starting a thread from plain text |
 | `/settings [undo\|pace N]` | Change the undo window or pace, then show the settings; with no arguments it asks for each |
@@ -42,7 +42,7 @@ The prompt shows what Enter will do with plain text:
 | `/help [command]` | List commands, or show help for one |
 | `/exit` (`/quit`) | Leave the REPL (same as Ctrl+D) |
 
-Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it replies to something other than the post before it, and the full `at://` URI with `-v`.
+Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it replies to something other than the post before it, `📷 2` or `🎞` for media, `❝ 2` for a quote, and the full `at://` URI with `-v`.
 
 **Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
 
@@ -55,11 +55,11 @@ A name that isn't a command gets a suggestion and your text stays. Command names
 - `<//` cuts the text after it (up to `//>` if there is one); it isn't posted.
 - A `\` right before a marker makes it plain text: `\///` is the text `///`, and the backslash isn't counted.
 
-One post within the limit (300, or 298 with the thread label), with no markers, skips the preview and goes straight to the queue. Anything else is previewed first: every post with its count, what is kept for next time and what is cut, then `Post 3? [y/N]`. Only `y` or `Y` posts; any other key leaves what you typed in the composer, command included. Long text without `///` is split for you, and when it is only a little over (301–375) the preview also suggests where to trim it to fit one post. A `///` piece that is still over the limit is refused, and what you typed stays for you to fix.
+One post within the limit (300, or 298 with the thread label), with no markers, skips the preview and goes straight to the queue. Anything else is previewed first: every post with its count, any staged files, what is kept for next time and what is cut, then `Post 3? [y/N]`. Only `y` or `Y` posts; any other key leaves what you typed in the composer, command included. Long text without `///` is split for you, and when it is only a little over (301–375) the preview also suggests where to trim it to fit one post. A `///` piece that is still over the limit is refused, and what you typed stays for you to fix. The `scheduled ›` and `draft ›` prompts skip the preview, but refuse anything over the limit in the same way.
 
 ## Undo window and pacing
 
-- **Undo window:** what you submit waits this long before its first post is sent. Meanwhile the composer shows it dimmed and read-only, with `Sending in 7s… [Esc] cancel  [Enter] send now`. Esc returns it to the composer as you typed it, or saves it as a draft if the composer already had text.
+- **Undo window:** what you submit waits this long before its first post is sent. Meanwhile the composer shows it dimmed and read-only, with `Sending in 7s… [Esc] cancel  [Enter] send now`. Esc returns it, with any media, to the composer as you typed it, or saves it as a draft if the composer already had text.
 - **Pace:** the minimum time between posts, so a thread doesn't arrive all at once.
 
 Each is none, 5, 10 or 15 seconds. If you haven't set them (`--undo`, `--pace` or the config file), the first thread of a session asks for each, then offers to save your answers: `Yes`, `No`, or `No, don't ask again`.
@@ -70,19 +70,21 @@ With `--thread-label` (or `thread-label = true`), every post in the active threa
 
 ## Media
 
-`/attach` checks each file, asks for its alt text and stages it. Staged files show above the composer (`📎 chart.png · photo.jpg`) and go on the first post of the next batch, wherever it's going. A post can have up to 4 images of 1 MB each, or one MP4 video of up to 100 MB, never both. These limits come from the `@atproto/api` lexicons, so they rise when it does.
+`/attach` checks each file, asks for its alt text and stages it. `/new` → **Image post** or **Video post** does the same from a path, then opens a `post ›` prompt. Staged files show above the composer (`📎 chart.png · photo.jpg`) and go on the first post of the next batch, wherever it's going. The exception is a quote, which can't carry media: it goes without, and the files stay staged for the next post. Posts need text, so Enter with only a file staged does nothing but say so.
 
-**Alt text** tells people using screen readers what's in your image. Enter skips it, and the file name is used instead. `--alt "…"` uses that text for every file and doesn't ask. With `-f` (or `force-alt = true`) it's required: the prompt asks until it gets some. Esc drops that file.
+A post can have up to 4 JPEG, PNG, GIF or WebP images of 1 MB each, or one MP4 video of up to 100 MB, never both. These limits come from the `@atproto/api` lexicons, so they rise when it does. Paths are stored in full, but the file must still be there when a draft or scheduled post goes out.
 
-**Drag and drop:** dropping files on an empty composer asks `Attach chart.png? [Y/n]`. Dropped on text, or if any path isn't a media file, the paths are pasted as text.
+**Alt text** tells people using screen readers what's in your image. Enter skips it, and the file name is used instead. `--alt "…"` uses that text for every file and doesn't ask. With `-f` (or `force-alt = true`) it's required: the prompt asks until it gets some. With or without `-f`, Esc leaves that file out.
 
-If a post with media is rejected, the media is staged again along with the text. If it can't reach Bluesky, the media goes in the draft.
+**Drag and drop:** in terminals with bracketed paste, dropping files on an empty composer asks `Attach chart.png? [Y/n]`, and a file that's too big says so when you answer. Any answer but Enter or `y` pastes the paths as text. So does dropping on text, or dropping anything that isn't an image or MP4 video.
+
+If the first post of a batch is rejected, its media is staged again and the text comes back to the composer. If you've started typing, or the media can't join what's staged since, they go to a draft together. If it can't reach Bluesky, the media goes in the draft.
 
 ## Scheduled posts and drafts
 
-`/new` → **Scheduled post** gives you a `scheduled ›` prompt. After Enter it asks for a date, a time and, if the hour could be either, AM or PM, then saves the post with any staged media. It goes out through `bsky schedule`, like any other scheduled post, and is a single post of up to 300 characters.
+`/new` → **Scheduled post** gives you a `scheduled ›` prompt. After Enter it asks for a date, a time and, if the hour could be either, AM or PM, then saves the post with any staged media. It's a single post of up to 300 characters, saved for `bsky schedule`. Nothing sends it until `bsky schedule run` runs, so use [`bsky schedule enable`](commands.md#bsky-schedule-enable) or keep `bsky schedule watch` open; the REPL says so if the scheduler isn't enabled.
 
-`/new` → **Draft** gives you a `draft ›` prompt and saves what you type, with any staged media, to `bsky drafts`. Long text and `///` make a thread draft.
+`/new` → **Draft** gives you a `draft ›` prompt and saves what you type, with any staged media, as a draft. Long text and `///` make a thread draft. Send it later with `bsky drafts send <id>`.
 
 ## When something goes wrong
 
@@ -90,7 +92,7 @@ The REPL never exits on an error.
 
 - **Can't reach Bluesky, or a server error:** the failed post and the rest of its batch are saved as a draft, and the queue pauses. `/retry` sends them now and deletes the draft once they have all gone. Esc clears the pause and leaves the draft; the CLI's usual draft sync offers to send it on your next run.
 - **Rate limited:** waited out once if the limit resets within a minute, otherwise as above.
-- **Post rejected:** the error is shown, and the failed post and any after it come back as the command that sends them to the same place (`/post …`, `/reply 3 …`). If you've started typing, they're saved as a draft instead.
+- **Post rejected:** the error is shown, and the failed post and any after it come back as the command that sends them to the same place (`/post …`, `/reply 3 …`, `/quote 3 …`). If you've started typing, they're saved as a draft instead.
 - **Session expired:** run `bsky login`; unsent posts are saved as a draft.
 - **A draft can't be saved:** the posts stay queued for `/retry` or Esc, and nothing is lost.
 
@@ -107,7 +109,7 @@ The REPL never exits on an error.
 | Ctrl+W, Ctrl+U | Delete word, delete to line start |
 | Backspace, Delete | Delete one character |
 | Tab | Complete command names |
-| Ctrl+G | Open the draft in `$EDITOR` (or `vi`); what you save comes back to the composer |
+| Ctrl+G | Open the draft in `$EDITOR` (or `vi`); what you save comes back to the composer. Use a waiting form for a GUI editor (`code --wait`). If the editor fails, your text stays as it was. Nothing is sent until it closes |
 
 Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
 
@@ -121,7 +123,7 @@ Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
 | Idle | — | Reminds you Ctrl+D exits | — |
 | Otherwise | | | Exit; if anything would be lost: `[s]end now · save [d]raft · discard [x] · [Esc] stay` |
 
-`[s]end now` sends what's queued, saves any composer text as a draft, and leaves once everything has gone. While the queue is paused it refuses: `/retry` first, or save a draft.
+`[s]end now` sends what's queued, saves any composer text and staged media as a draft, and leaves once everything has gone. While the queue is paused it refuses: `/retry` first, or save a draft.
 
 Pasted text is inserted with its newlines; escape sequences and other control characters are dropped. In terminals with bracketed paste (almost all of them), a paste never submits. Without it, a one-line paste that ends in a newline submits, as it would in a shell.
 

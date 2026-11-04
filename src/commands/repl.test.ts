@@ -71,7 +71,7 @@ describe("bsky repl", () => {
       expect(process.stderr.write).toHaveBeenCalledWith(
         "bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n",
       );
-      expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Interactive REPL for writing threads"));
+      expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Interactive composer for posts"));
       expect(startRepl).not.toHaveBeenCalled();
     },
   );

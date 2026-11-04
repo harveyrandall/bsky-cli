@@ -117,7 +117,7 @@ export function App(props: AppProps) {
     repl.close();
     exit(LEFT);
   }, [exit, repl]);
-  // Ctrl+D on an empty composer and /exit: ask first if posts are still waiting.
+  // Ctrl+D and /exit: ask first if anything would be lost.
   const requestExit = (text: string) => (repl.wouldLose(text) ? ask({ kind: "exit" }) : leave());
 
   const pendingCount = repl.pendingCount();
@@ -179,7 +179,7 @@ export function App(props: AppProps) {
         print("Can't send now: the queue is paused after an error — /retry first, or choose save [d]raft.", "error");
         return;
       }
-      // Sending what's queued; unsent composer text is kept as a draft rather than posted mid-exit.
+      // Sending what's queued; composer text and staged media are kept as a draft rather than posted mid-exit.
       try {
         for (const draft of repl.composerDrafts(text)) {
           const d = await props.drafts.save(draft);

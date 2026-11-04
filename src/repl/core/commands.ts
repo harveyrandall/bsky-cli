@@ -118,7 +118,7 @@ export const COMMANDS: readonly ReplCommand[] = [
     name: "new",
     aliases: [],
     usage: "/new",
-    summary: "Stop the thread and pick what to write next",
+    summary: "Pick what to write next (stops the thread)",
     run(_args, ctx) {
       return ctx.repl.newMenu();
     },

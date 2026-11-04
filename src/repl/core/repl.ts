@@ -99,8 +99,8 @@ const manualDraft = (item: Unsent) =>
   draftOf("manual", item.posts.map(stripLabel), { target: item.target, media: item.media, quote: quoteOf(item.intent) });
 
 /**
- * The session: mode, active thread, settings, the post registry and the send
- * pipeline. UI-free: it talks to the network through `agent`, to the person
+ * The session: mode, active thread, settings, staged media, the post registry
+ * and the send pipeline. UI-free: it talks to the network through `agent`, to the person
  * through `ask`, and reports through `print`. "Spec §n" here and nearby means
  * docs/superpowers/specs/2026-10-31-bsky-repl-design.md; this is §5.
  */

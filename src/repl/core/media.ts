@@ -74,7 +74,7 @@ export function canStage(staged: readonly StagedMedia[], kind: MediaKind): strin
 // Not //host/…: on Windows, checking a pasted network path would connect to it.
 const PATH_LIKE = /^(\/(?!\/)|~\/|\.\.?\/)/;
 
-/** The paths in a drag-and-drop paste; undefined if it's anything else. */
+/** The tokens of a paste, if they're all shaped like paths. Doesn't check that they exist. */
 export function parseDroppedPaths(text: string): string[] | undefined {
   try {
     const tokens = tokenize(text);

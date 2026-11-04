@@ -151,7 +151,7 @@ An interactive composer for writing threads, posts, quotes, scheduled posts and 
 
 ## Drafts
 
-Drafts are saved locally when posting fails (network errors, edge cases) or when `--draft` is used. Network drafts are automatically offered for sending next time you run a command while online.
+Drafts are saved locally when posting fails (network errors, edge cases), when `--draft` is used, or from the [REPL](repl.md). Network drafts are automatically offered for sending next time you run a command while online.
 
 ### `bsky drafts list` / `bsky drafts ls`
 
@@ -232,7 +232,7 @@ When `--times` is omitted, the post repeats indefinitely until manually deleted.
     Each recurring post is a single file that gets updated in place. After publishing, the scheduled date advances to the next occurrence and the remaining count decrements. On the last occurrence, the file is deleted. Recurrence rules are stored as RFC 5545 RRULE strings.
 
 !!! tip "First-use onboarding"
-    The first time you schedule a post, you'll be offered to enable the background scheduler automatically. You can also set it up later with `bsky schedule enable`.
+    When `bsky schedule post` finds nothing scheduled, it offers to enable the background scheduler. Posts scheduled from the REPL don't get this offer, but the REPL says if the scheduler isn't enabled. You can also set it up later with `bsky schedule enable`.
 
 ### `bsky schedule list` / `bsky schedule ls`
 
