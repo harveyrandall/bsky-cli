@@ -20,10 +20,7 @@ export function parseInput(input: string): Parsed {
   return { kind: "text", text: input };
 }
 
-/** "keep" leaves the text in the composer so the user can fix it; `restore` replaces it. */
-export type DispatchResult = SubmitOutcome;
-
-export async function dispatch(input: string, ctx: CommandContext): Promise<DispatchResult> {
+export async function dispatch(input: string, ctx: CommandContext): Promise<SubmitOutcome> {
   const parsed = parseInput(input);
   if (parsed.kind === "empty") return "done";
   // The REPL never exits on an error: report it and keep the text.

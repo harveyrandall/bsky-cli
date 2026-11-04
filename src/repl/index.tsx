@@ -13,7 +13,7 @@ export interface ReplOptions {
   settings: ReplSettings;
   agent: ReplAgent;
   handle: string;
-  /** The config file undo/pace answers are saved to. */
+  /** The config file the save offer writes to. */
   configPath: string;
   profile?: string;
 }

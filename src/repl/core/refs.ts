@@ -25,7 +25,7 @@ export interface RegistryEntry {
   root: StrongRef;
   parent?: AtUri;
   excerpt: string;
-  /** Set for someone else's post. */
+  /** The author's handle, for a post not made in this session: someone else's, or an older one of yours. */
   external?: Handle;
   letter?: ThreadLetter;
 }
@@ -152,7 +152,7 @@ export class Registry {
     return this.list;
   }
 
-  /** `(4) 3lbx7kt5def2v`, plus ` (at://…)` when verbose and where the post branches from. */
+  /** `(4) 3lbx7kt5def2v`, then ` (at://…)` when verbose, ` ↳ 2` when its parent isn't the entry before it, and ` ext @handle` for someone else's post. */
   format(e: RegistryEntry, verbose: boolean): string {
     const previous = this.list[this.list.indexOf(e) - 1];
     const branch = e.parent && e.parent !== previous?.uri ? ` ↳ ${this.byUri(e.parent)?.label ?? "?"}` : "";

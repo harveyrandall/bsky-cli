@@ -15,7 +15,7 @@ export interface ReplCommand {
   readonly aliases: readonly string[];
   readonly usage: string;
   readonly summary: string;
-  /** Gets the raw text after the name instead of shell-style tokens, so posts keep newlines and apostrophes. */
+  /** Gets the raw, trimmed text after the name instead of shell-style tokens, so posts keep newlines and apostrophes. */
   readonly raw?: boolean;
   run(args: string[], ctx: CommandContext, rest: string): void | SubmitOutcome | Promise<void | SubmitOutcome>;
 }
@@ -114,7 +114,7 @@ export const COMMANDS: readonly ReplCommand[] = [
     name: "settings",
     aliases: [],
     usage: "/settings [undo|pace N]",
-    summary: "Show or change undo and pace",
+    summary: "Change undo or pace, then show the settings",
     async run([key, value], ctx) {
       if (key === undefined) await ctx.repl.askSettings();
       else if (key === "undo" || key === "pace") ctx.repl.setCooldown(key, cooldown(key, value));
@@ -137,7 +137,7 @@ export const COMMANDS: readonly ReplCommand[] = [
     name: "retry",
     aliases: [],
     usage: "/retry",
-    summary: "Resend the last batch that failed",
+    summary: "Resend what couldn't be sent (network error, rate limit or expired session)",
     async run(_args, ctx) {
       await ctx.repl.retry();
     },

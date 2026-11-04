@@ -5,7 +5,7 @@ import type { SubmitPlan } from "@/repl/core/markers";
 import type { Countdown as CountdownState } from "@/repl/core/pipeline";
 import { ringCount } from "@/repl/ui/Ring";
 
-/** A one-line picker: ←/→ move, Enter picks, Esc dismisses (undefined). */
+/** A picker: ←/→ or Tab move, Enter picks, Esc or Ctrl+C dismisses (undefined). */
 export function Choice({
   label,
   options,
@@ -36,7 +36,7 @@ export function Choice({
   );
 }
 
-/** The split preview (spec §7). Only `y` posts; any other key declines. */
+/** The split preview (spec §7). Only `y` or `Y` posts; any other key declines. */
 export function SplitPreview({
   plan,
   posts,
@@ -70,7 +70,7 @@ export function SplitPreview({
   );
 }
 
-/** `Sending in 7s… [Esc] cancel  [Enter] send now` while the undo window is open. */
+/** `Sending in 7s… [Esc] cancel  [Enter] send now` in the undo window; without the keys while pacing. */
 export function Countdown({ countdown, now }: { countdown: CountdownState; now: number }) {
   if (countdown.phase === "sending") return <Text dimColor>Sending…</Text>;
   const secs = Math.max(1, Math.ceil((countdown.sendAt - now) / 1000));

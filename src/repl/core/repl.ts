@@ -46,7 +46,7 @@ export interface ReplDeps {
   ask: ReplAsk;
   print(text: string, style?: LineStyle): void;
   onChange(): void;
-  /** Put text back in the composer (after an asynchronous failure). */
+  /** Text coming back after an asynchronous failure. */
   restore(text: string): void;
   saveDraft(d: Omit<Draft, "id" | "createdAt">): Promise<{ id: string }>;
   deleteDraft(id: string): Promise<void>;
@@ -72,9 +72,10 @@ const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
 const manualDraft = (item: Unsent) => draftOf("manual", item.posts.map(stripLabel), item.target);
 
 /**
- * The session (spec §5): mode, active thread, settings, the post registry and
- * the send pipeline. UI-free: it talks to the network through `agent`, to the
- * person through `ask`, and reports through `print`.
+ * The session: mode, active thread, settings, the post registry and the send
+ * pipeline. UI-free: it talks to the network through `agent`, to the person
+ * through `ask`, and reports through `print`. "Spec §n" here and nearby means
+ * docs/superpowers/specs/2026-10-31-bsky-repl-design.md; this is §5.
  */
 export class Repl {
   readonly registry: Registry;
@@ -182,6 +183,7 @@ export class Repl {
     return m.kind === "thread" || (m.kind !== "idle" && m.returnTo === "thread");
   }
 
+  /** Thread posts are labelled, and so are replies that stay in the active thread. */
   private labelled(kind: WriteKind, root?: StrongRef): boolean {
     if (!this.s.threadLabel || kind === "standalone") return false;
     return kind === "thread" || (this.inThread() && root?.uri === this.threadState?.root.uri);
@@ -247,7 +249,7 @@ export class Repl {
     return r.entry ?? this.registry.byUri(r.ref.uri) ?? this.registry.addExternal(r.post!, o);
   }
 
-  /** Ask for unset undo/pace once per session, then offer to save the answers. */
+  /** Ask for unset undo/pace until answered, then offer to save the answers. False when dismissed. */
   private async settleCooldowns(): Promise<boolean> {
     if (this.cooldownsSettled) return true;
     const asked: { undo?: Cooldown; pace?: Cooldown } = {};
@@ -402,7 +404,7 @@ export class Repl {
     return "unhandled";
   }
 
-  /** Ctrl+C below any overlay: like Esc, but it clears text first and hints when idle. */
+  /** Ctrl+C below any overlay: like Esc for pending posts and once modes; otherwise it clears text before stopping a thread, and hints when idle. */
   interrupt(composerText: string): "clear" | "handled" | "hint" | { restore: string } {
     const once = this.current.kind === "reply-once" || this.current.kind === "post-once";
     if (this.busy() || once) {

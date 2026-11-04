@@ -2,7 +2,8 @@ import { isValidDid, isValidHandle, isValidTid } from "@atproto/syntax";
 
 // Template-literal and branded types give stored strings a checked shape.
 // Neither exists at runtime, so every value from outside (config, user input,
-// API responses) goes through a guard; `as` casts appear only in the guards.
+// API responses) goes through a guard. The remaining `as` casts only brand
+// strings the code has just built from checked parts.
 
 export type Did = `did:plc:${string}` | `did:web:${string}`;
 export type Handle = `${string}.${string}`;

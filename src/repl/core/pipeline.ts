@@ -77,7 +77,7 @@ interface Active {
   last?: SendTarget;
   /** Draft that a successful retry of this item replaces. */
   draftId?: string;
-  /** Skip the undo window (a retry). */
+  /** Skip the undo window (send now, or a retry). */
   immediate?: boolean;
   /** When a rate limit being waited out ends; set once per post. */
   limitedUntil?: number;
@@ -88,9 +88,10 @@ type Classified = { kind: Failure["kind"] } | { kind: "wait"; ms: number };
 /**
  * A FIFO of posts to send (spec §9). The first post of an item goes out at
  * max(enqueued + undo, last sent + pace), later ones at last sent + pace.
- * Parents are resolved at send time, so an item queued behind another replies
- * to it. A network failure saves the failed post and the rest of its item as
- * a draft and pauses the queue until retry() or cancelAll().
+ * Parents are resolved at send time, so a thread item queued behind another
+ * replies to its last post. A network error, an expired session or a rate limit
+ * too long to wait out saves the failed post and the rest of its item as a
+ * draft and pauses the queue until retry() or cancelAll().
  */
 export class Pipeline {
   private queue: Active[] = [];
@@ -98,7 +99,7 @@ export class Pipeline {
   private lastSentAt = -Infinity;
   private timer: unknown;
   private sending = false;
-  /** Set while paused after a network failure, waiting for retry() or cancelAll(). */
+  /** Set while paused, waiting for retry() or cancelAll(). */
   private failure?: Failure;
 
   constructor(private readonly deps: PipelineDeps) {}
@@ -166,7 +167,7 @@ export class Pipeline {
     return cancelled;
   }
 
-  /** Resend the last network failure; its draft is deleted once it all sends. */
+  /** Resend what paused the queue; its draft is deleted once it all sends. */
   async retry(): Promise<boolean> {
     const f = this.failure;
     if (!f) return false;
@@ -188,7 +189,7 @@ export class Pipeline {
   private sendAt(a: Active): number {
     const { undo, pace } = this.deps.settings();
     const paced = Math.max(this.lastSentAt + pace * 1000, a.limitedUntil ?? -Infinity);
-    // Only an item's first post waits out the undo window, and not on a retry.
+    // Only an item's first post waits out the undo window, and not once sent now or retried.
     if (a.index > 0 || a.immediate) return paced;
     return Math.max(a.item.createdAt + undo * 1000, paced);
   }
@@ -260,6 +261,7 @@ export class Pipeline {
   private classify(err: unknown, a: Active): Classified {
     const e = err as { status?: number; error?: string; headers?: Record<string, string> };
     if (e.status === 429) {
+      // ratelimit-reset is a Unix time in seconds.
       const ms = Number(e.headers?.["ratelimit-reset"]) * 1000 - this.deps.now();
       return a.limitedUntil === undefined && ms >= 0 && ms <= 60_000 ? { kind: "wait", ms } : { kind: "limited" };
     }

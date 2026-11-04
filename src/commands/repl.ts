@@ -28,7 +28,7 @@ function checkCooldowns(opts: { undo?: unknown; pace?: unknown }): void {
 const asRef = (r?: { uri: string; cid: string }): StrongRef | undefined =>
   r && isAtUri(r.uri) && isCid(r.cid) ? { uri: r.uri, cid: r.cid } : undefined;
 
-/** A post from the API, or undefined if any field fails its guard. */
+/** A post from the API, or undefined if its refs or author fail a guard. Non-string text becomes "". */
 function toLookup(post: AppBskyFeedDefs.PostView): PostLookup | undefined {
   const record = post.record as { text?: unknown; reply?: { root?: { uri: string; cid: string }; parent?: { uri: string; cid: string } } };
   const ref = asRef(post);

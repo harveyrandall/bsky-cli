@@ -11,9 +11,8 @@ function duration(ms: number): string {
 }
 
 /**
- * What the session posted (spec §12). A thread is a root with two or more of
- * your posts, or your replies under someone else's post; a single post on its
- * own is standalone.
+ * What the session posted (spec §12). A thread is any group of your posts
+ * sharing a root, unless it is a single post that is its own root (standalone).
  */
 export function exitSummary(r: {
   registry: Registry;

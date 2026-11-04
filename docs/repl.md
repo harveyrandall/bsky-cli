@@ -16,27 +16,29 @@ The prompt shows what Enter will do with plain text:
 | Prompt | Mode | Plain text |
 |---|---|---|
 | `bsky ›` | idle | A hint, text kept — or a new thread with `-t` / `/auto-thread on` |
-| `thread ›`, `thread (4) ›` | thread | The next post, replying to the last one (`(4)`) |
+| `thread ›`, `thread (4) ›` | thread | The next post, replying to the post in brackets |
 | `thread A (A4) ›` | thread, with `-l` | The same, with lettered labels |
 | `reply→2 ›` | reply once | A reply to post 2, then back to the previous mode |
 | `post ›` | post once | A post on its own, then back |
 
 | Command | Does |
 |---|---|
-| `/thread [text\|ref]` | Start a thread (its first post, if you give text), or continue the thread a ref points to. `/thread "42"` posts the text `42`. Options `--undo N` and `--pace N` go first. |
+| `/thread [text\|ref]` | Start a thread (its first post, if you give text), or continue from the post a ref names. `/thread "42"` posts the text `42`. `--undo N` and `--pace N` go first and change the session's setting. |
 | `/reply <ref> [text]` | Reply once — now with text, or to whatever you type next |
 | `/reply-from <ref>` | Continue the thread from another post |
 | `/post [text]` | Post on its own |
 | `/auto-thread [on\|off]` | Toggle starting a thread from plain text |
-| `/settings [undo\|pace N]` | Show or change the undo window and pace; with no arguments it asks for each |
+| `/settings [undo\|pace N]` | Change the undo window or pace, then show the settings; with no arguments it asks for each |
 | `/history` | List this session's posts |
-| `/retry` | Resend the last batch that couldn't reach Bluesky |
+| `/retry` | Resend what couldn't be sent (network error, rate limit or expired session) |
 | `/help [command]` | List commands, or show help for one |
 | `/exit` (`/quit`) | Leave the REPL (same as Ctrl+D) |
 
 Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it replies to something other than the post before it, and the full `at://` URI with `-v`.
 
-**Refs** name a post: its number (`4`, or `A4` with `-l`), its record key, an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
+**Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
+
+A name that isn't a command gets a suggestion and your text stays. Command names start with a lowercase letter, so `/Help` and `/ x` are text; start with `\/` to post text that begins like a command.
 
 ## Markers and the preview
 
@@ -45,27 +47,28 @@ Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it re
 - `<//` cuts the text after it (up to `//>` if there is one); it isn't posted.
 - A `\` right before a marker makes it plain text: `\///` is the text `///`, and the backslash isn't counted.
 
-One post of 300 characters or fewer, with no markers, is sent straight away. Anything else is previewed first: every post with its count, what is kept for next time and what is cut, then `Post 3? [y/N]`. Only `y` posts; any other key returns the text to the composer as you typed it. Long text without `///` is split for you, and when it is only a little over (301–375) the preview also suggests where to trim it to fit one post. A `///` piece that is still over the limit is refused, and the text stays for you to fix.
+One post within the limit (300, or 298 with the thread label), with no markers, skips the preview and goes straight to the queue. Anything else is previewed first: every post with its count, what is kept for next time and what is cut, then `Post 3? [y/N]`. Only `y` or `Y` posts; any other key leaves what you typed in the composer, command included. Long text without `///` is split for you, and when it is only a little over (301–375) the preview also suggests where to trim it to fit one post. A `///` piece that is still over the limit is refused, and what you typed stays for you to fix.
 
 ## Undo window and pacing
 
-- **Undo window:** a post waits this long before it is sent. It shows dimmed with `Sending in 7s… [Esc] cancel  [Enter] send now`; Esc puts it back in the composer.
+- **Undo window:** what you submit waits this long before its first post is sent. Meanwhile the composer shows it dimmed and read-only, with `Sending in 7s… [Esc] cancel  [Enter] send now`. Esc returns it to the composer as you typed it, or saves it as a draft if the composer already had text.
 - **Pace:** the minimum time between posts, so a thread doesn't arrive all at once.
 
 Each is none, 5, 10 or 15 seconds. If you haven't set them (`--undo`, `--pace` or the config file), the first thread of a session asks for each, then offers to save your answers: `Yes`, `No`, or `No, don't ask again`.
 
 ## Thread label
 
-With `--thread-label` (or `thread-label = true`), every post in the active thread ends with `🧵` on its own line — first instead of last with `--prepend-thread-label`. Posts on their own are never labelled. The label takes 2 characters, so those posts have 298 to work with and the ring shows `/298`.
+With `--thread-label` (or `thread-label = true`), every post in the active thread, including replies within it, ends with `🧵` on its own line. `--prepend-thread-label` turns the label on and puts it first instead of last. Posts on their own are never labelled. The label takes 2 characters, so those posts have 298 to work with and the ring shows `/298`.
 
 ## When something goes wrong
 
 The REPL never exits on an error.
 
-- **Can't reach Bluesky:** the failed post and the rest of its batch are saved as a draft, and the queue pauses. `/retry` sends them now (and deletes the draft); the CLI's usual draft sync sends them on your next run otherwise.
-- **Rate limited:** retried once automatically if the limit resets within a minute, otherwise as above.
-- **Post rejected:** the error is shown and the text comes back to the composer.
+- **Can't reach Bluesky, or a server error:** the failed post and the rest of its batch are saved as a draft, and the queue pauses. `/retry` sends them now and deletes the draft once they have all gone. Esc clears the pause and leaves the draft; the CLI's usual draft sync offers to send it on your next run.
+- **Rate limited:** waited out once if the limit resets within a minute, otherwise as above.
+- **Post rejected:** the error is shown, and the failed post and any after it come back as the command that sends them to the same place (`/post …`, `/reply 3 …`). If you've started typing, they're saved as a draft instead.
 - **Session expired:** run `bsky login`; unsent posts are saved as a draft.
+- **A draft can't be saved:** the posts stay queued for `/retry` or Esc, and nothing is lost.
 
 ## Keys
 
@@ -74,7 +77,7 @@ The REPL never exits on an error.
 | Enter | Submit |
 | Shift+Enter, Alt+Enter, Ctrl+J | Newline |
 | `\` then Enter, at the end of a line | Newline (the `\` is removed) |
-| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through the commands you've run this session, keeping your draft |
+| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've submitted this session, keeping your draft |
 | Ctrl+A / Ctrl+E, Home / End | Line start / end |
 | Alt+←/→ (Alt+B/F) | Word left / right |
 | Ctrl+W, Ctrl+U | Delete word, delete to line start |
@@ -85,13 +88,15 @@ Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
 
 | | Esc | Ctrl+C | Ctrl+D |
 |---|---|---|---|
-| A preview or question is open | Close it (preview text returns) | Same | — |
-| Posts are waiting to send | Cancel them; text returns to an empty composer, or is saved as a draft | Same | — |
+| A preview or question is open | Close it (preview text stays) | Same | — |
+| Posts are waiting to send, or paused | Cancel them; text returns to an empty composer, or is saved as a draft. A paused post stays in its draft | Same | — |
 | Replying or posting once | Back to the previous mode | Same | — |
 | The composer has text | — | Clear it | — |
 | In a thread | Stop the thread | Stop the thread | — |
 | Idle | — | Reminds you Ctrl+D exits | — |
-| Anywhere | | | Exit; if anything would be lost: `[s]end now · save [d]raft · discard [x] · [Esc] stay` |
+| Otherwise | | | Exit; if anything would be lost: `[s]end now · save [d]raft · discard [x] · [Esc] stay` |
+
+`[s]end now` sends what's queued, saves any composer text as a draft, and leaves once everything has gone. While the queue is paused it refuses: `/retry` first, or save a draft.
 
 Pasted text is inserted with its newlines; escape sequences and other control characters are dropped. In terminals with bracketed paste (almost all of them), a paste never submits. Without it, a one-line paste that ends in a newline submits, as it would in a shell.
 
@@ -114,7 +119,7 @@ The count turns yellow 40 characters before the limit and red above it, where it
 
 ## When you leave
 
-The REPL prints what you posted: `7 posts in 2 threads`. With `-v` it lists every post with its URI, the session's start and end, and any failures with their draft ids.
+The REPL prints what you posted: `7 posts in 2 threads`, and any drafts that failures left behind. With `-v` it lists every post with its URI, the session's start and end, and every failure.
 
 ## Options
 
@@ -156,4 +161,4 @@ Set defaults in the `[repl]` section of the [config file](configuration.md):
 # cut-marker = "<//"
 ```
 
-`ask-to-save = false` stops the offer to save undo and pace answers; choosing "No, don't ask again" sets it for you. `resumable` and `keep-sessions` belong to resumable sessions, which arrive in a later release. Markers must be non-empty text with no spaces, can't start with `/` and a letter (that begins a command), and must differ from each other. Otherwise `bsky repl` stops with an error naming the key and the rule.
+`ask-to-save = false` stops the offer to save undo and pace answers; choosing "No, don't ask again" sets it for you. `force-alt`, `resumable` and `keep-sessions` belong to media and resumable sessions, which arrive in later releases. Markers must be non-empty text with no spaces, can't start with `/` and a letter (that begins a command), and must differ from each other. Otherwise `bsky repl` stops with an error naming the key and the rule.

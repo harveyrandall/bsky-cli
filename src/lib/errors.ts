@@ -1,4 +1,4 @@
-/** True for errors where the request never reached Bluesky (offline, DNS, refused, timed out). */
+/** True for transport failures (offline, DNS, refused, timed out); the request may or may not have arrived. */
 export function isNetworkError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : "";
   const cause = err instanceof Error ? err.cause : undefined;
