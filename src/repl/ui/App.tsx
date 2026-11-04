@@ -109,7 +109,9 @@ export function App(props: AppProps) {
         composerBusy: () => held.current !== undefined || composerText.current.trim() !== "",
       }),
   );
-  useEffect(() => props.onReady?.(repl), [repl]);
+  useEffect(() => {
+    props.onReady?.(repl);
+  }, [repl]);
   // Leaving always stops the queue, so nothing is posted after the REPL closes.
   const leave = useCallback(() => {
     repl.close();

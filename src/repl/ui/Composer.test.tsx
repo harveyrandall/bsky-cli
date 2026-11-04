@@ -55,6 +55,12 @@ describe("Composer", () => {
     expect(frame.split("\n")[0]).toContain("📎 chart.png");
     expect(frame.split("\n").length).toBeLessThan(6);
   });
+  it("says a file needs text when you press Enter on nothing", async () => {
+    const { type, props } = setup({ chips: "📎 chart.png" });
+    await type("\r");
+    expect(props.onHint).toHaveBeenCalledWith("Type some text to go with it: posts need text");
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
   it("offers a paste into an empty composer, and inserts it if it isn't taken", async () => {
     const { type, props, lastFrame } = setup();
     await type("\x1b[200~/a.png\x1b[201~");

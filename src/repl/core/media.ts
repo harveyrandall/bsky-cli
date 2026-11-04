@@ -15,14 +15,21 @@ export interface StagedMedia {
 
 /** The filesystem, as far as checking a file goes. */
 export interface MediaFs {
-  /** undefined when there's no such file. */
+  /** undefined when there's no such file; anything else wrong throws. */
   size(path: string): Promise<number | undefined>;
   /** The file's first bytes. */
   head(path: string): Promise<Uint8Array>;
 }
 
 export const nodeMediaFs: MediaFs = {
-  size: (path) => stat(path).then((s) => (s.isFile() ? s.size : undefined), () => undefined),
+  async size(path) {
+    const found = await stat(path).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") return undefined;
+      throw err;
+    });
+    if (found?.isDirectory()) throw new Error("is a folder");
+    return found?.size;
+  },
   async head(path) {
     const file = await open(path);
     try {
@@ -44,12 +51,16 @@ function kindOf(head: Uint8Array): MediaKind | undefined {
 /** What a file is, and why it can't be attached if it can't. */
 export async function inspectMedia(path: string, fs: MediaFs): Promise<{ kind?: MediaKind; error?: string }> {
   const name = basename(path);
-  const size = await fs.size(path);
-  if (size === undefined) return { error: `${name} not found` };
-  const kind = kindOf(await fs.head(path));
-  if (!kind) return { error: `${name} isn't an image or MP4 video` };
-  const limit = kind === "image" ? maxImageBytes() : maxVideoBytes();
-  return size > limit ? { kind, error: `${name} is over the ${megabytes(limit)} ${kind} limit` } : { kind };
+  try {
+    const size = await fs.size(path);
+    if (size === undefined) return { error: `${name} not found` };
+    const kind = kindOf(await fs.head(path));
+    if (!kind) return { error: `${name} isn't an image or MP4 video` };
+    const limit = kind === "image" ? maxImageBytes() : maxVideoBytes();
+    return size > limit ? { kind, error: `${name} is over the ${megabytes(limit)} ${kind} limit` } : { kind };
+  } catch (err) {
+    return { error: `${name}: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 /** Why `kind` can't join what's staged, if it can't. */

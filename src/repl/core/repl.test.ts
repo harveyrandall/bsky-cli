@@ -482,11 +482,12 @@ describe("media", () => {
     expect(alt).toHaveBeenCalledWith("a.png", true);
     expect(repl.staged()[0].alt).toBe("A chart");
   });
-  it("drops just that file on Esc", async () => {
+  it("drops just that file on Esc, and says so", async () => {
     const answers = [null, "B"];
-    const { repl } = setup({ forceAlt: true }, { alt: vi.fn(async () => answers.shift()) });
+    const { repl, printed } = setup({ forceAlt: true }, { alt: vi.fn(async () => answers.shift()) });
     await repl.attach(["/x/a.png", "/x/b.png"]);
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.png"]);
+    expect(printed()).toContain("Left out a.png");
   });
   it("says why a file can't be attached and carries on", async () => {
     const { repl, printed } = setup();
@@ -779,6 +780,23 @@ describe("/new", () => {
     await repl.newMenu();
     expect(repl.mode().kind).toBe("thread");
     expect(repl.thread()).toBeDefined();
+  });
+  it("clears /new from the composer if you dismiss it", async () => {
+    const { repl } = setup();
+    expect(await repl.newMenu()).toBe("done");
+  });
+  it("keeps the thread going until a sub-prompt is answered", async () => {
+    const { repl, flush } = setup({}, { ...pick("Image post"), text: vi.fn(async () => undefined) });
+    await repl.startThread("one");
+    await flush();
+    await repl.newMenu();
+    expect(repl.mode().kind).toBe("thread");
+    expect(repl.thread()).toBeDefined();
+  });
+  it("treats a blank path as dismissing the prompt", async () => {
+    const { repl, printed } = setup({}, { ...pick("Image post"), text: vi.fn(async () => "  ") });
+    await repl.newMenu();
+    expect(printed()).not.toContain("not found");
   });
   it("stops the thread when you pick something", async () => {
     const { repl, flush, printed } = setup({}, pick("Post"));
@@ -1154,6 +1172,21 @@ describe("failures", () => {
     await repl.retry();
     await flush();
     expect(repl.failures()).toHaveLength(1);
+  });
+  it("won't retry while a draft is still being saved", async () => {
+    const { repl, agent, deps, flush, printed } = setup();
+    let saved = (_: { id: string }) => {};
+    deps.saveDraft.mockImplementationOnce(() => new Promise((resolve) => (saved = resolve)));
+    agent.post.mockRejectedValueOnce(new Error("fetch failed"));
+    await repl.post("hello");
+    await flush();
+    await repl.retry();
+    expect(printed()).toContain("Nothing to retry");
+    saved({ id: "d1" });
+    await flush();
+    await repl.retry();
+    await flush();
+    expect(agent.post).toHaveBeenCalledTimes(2);
   });
   it("says which post of a batch the server rejected", async () => {
     const { repl, agent, flush, printed } = setup();

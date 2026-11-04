@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { parseDate, parseTime, resolveAmPm, toUtcIso, formatLocalDateTime } from "./date-prompt";
 
 describe("parseDate", () => {
+  it("refuses a day the month doesn't have", () => {
+    expect(parseDate("31-02-2030")).toBeNull();
+    expect(parseDate("31-11-2030")).toBeNull();
+    expect(parseDate("29-02-2028")).toEqual({ day: 29, month: 2, year: 2028 });
+  });
   let nowSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {

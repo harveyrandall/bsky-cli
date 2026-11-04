@@ -123,7 +123,10 @@ export function Composer(props: ComposerProps) {
 
   const submitting = useRef(false);
   const submit = async (text: string) => {
-    if (text.trim() === "") return;
+    if (text.trim() === "") {
+      if (chips) props.onHint("Type some text to go with it: posts need text");
+      return;
+    }
     if (submitting.current) {
       props.onHint(STILL_WORKING);
       return;

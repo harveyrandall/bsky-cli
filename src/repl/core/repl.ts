@@ -16,6 +16,11 @@ const LABEL = "🧵";
 const ALT_INTRO = "Alt text tells people using screen readers what's in your image — without it, they're left out of the post.";
 
 const NEW_ITEMS = ["Post", "Thread", "Image post", "Video post", "Quote post", "Scheduled post", "Draft"] as const;
+const NEW_QUESTIONS: Partial<Record<(typeof NEW_ITEMS)[number], string>> = {
+  "Image post": "Path to the file:",
+  "Video post": "Path to the file:",
+  "Quote post": "Post to quote (number, link or at:// URI):",
+};
 
 type ReturnTo = "idle" | "thread";
 
@@ -453,7 +458,10 @@ export class Repl {
         if (!explained) this.deps.print(ALT_INTRO, "dim");
         explained = true;
         const answer = await this.askAlt(basename(path));
-        if (answer === null) continue;
+        if (answer === null) {
+          this.deps.print(`Left out ${basename(path)}`, "dim");
+          continue;
+        }
         text = answer;
       }
       // Checked again: a post coming back during the prompt can stage media of its own.
@@ -525,26 +533,26 @@ export class Repl {
   async newMenu(): Promise<SubmitOutcome> {
     if (this.blockedByPending()) return "keep";
     const pick = await this.deps.ask.choose("New:", NEW_ITEMS);
-    if (pick === undefined) return "keep";
+    if (pick === undefined) return "done";
+    const item = NEW_ITEMS[pick];
+    // The thread stops only once there's something to do instead.
+    const question = NEW_QUESTIONS[item];
+    const answer = question ? (await this.deps.ask.text(question))?.trim() : undefined;
+    if (question && !answer) return "done";
     if (this.threadState) this.stopThread();
     this.current = { kind: "idle" };
     this.deps.onChange();
-    switch (NEW_ITEMS[pick]) {
+    switch (item) {
       case "Post":
         return this.post();
       case "Thread":
         return this.startThread();
       case "Image post":
-      case "Video post": {
-        const path = await this.deps.ask.text("Path to the file:");
-        if (path === undefined) return "keep";
-        await this.attach(parseDroppedPaths(path) ?? [path.trim()]);
-        return this.media.length > 0 ? this.post() : "keep";
-      }
-      case "Quote post": {
-        const ref = await this.deps.ask.text("Post to quote (number, link or at:// URI):");
-        return ref === undefined ? "keep" : this.quote(ref);
-      }
+      case "Video post":
+        await this.attach(parseDroppedPaths(answer!) ?? [answer!]);
+        return this.media.length > 0 ? this.post() : "done";
+      case "Quote post":
+        return this.quote(answer!);
       case "Scheduled post":
         this.current = { kind: "schedule-once", returnTo: "idle" };
         break;

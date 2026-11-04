@@ -192,7 +192,8 @@ export class Pipeline {
   /** Resend what paused the queue; its draft is deleted once it all sends. */
   async retry(): Promise<boolean> {
     const f = this.failure;
-    if (!f) return false;
+    // Still sending: its draft is being saved, and retrying now would race that.
+    if (!f || this.sending) return false;
     // Without a draft, the failed posts never left the queue.
     if (f.draftId !== undefined) {
       const item = { ...f.item, posts: f.item.posts.slice(f.from), media: mediaFrom(f.item, f.from) };

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { homedir } from "node:os";
-import { canStage, chips, expandHome, inspectMedia, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { canStage, chips, expandHome, inspectMedia, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 const mp4 = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]);
@@ -14,6 +16,12 @@ describe("inspectMedia", () => {
   });
   it("names a file that isn't there", async () => {
     await expect(inspectMedia("/x/chart.png", fs(undefined))).resolves.toEqual({ error: "chart.png not found" });
+  });
+  it("reports a file it can't read instead of throwing", async () => {
+    const unreadable: MediaFs = { size: async () => 10, head: async () => Promise.reject(new Error("EACCES: permission denied")) };
+    await expect(inspectMedia("/x/a.png", unreadable)).resolves.toEqual({ error: "a.png: EACCES: permission denied" });
+    const denied: MediaFs = { size: async () => Promise.reject(new Error("EPERM")), head: async () => png };
+    await expect(inspectMedia("/x/a.png", denied)).resolves.toEqual({ error: "a.png: EPERM" });
   });
   it("refuses what isn't media", async () => {
     await expect(inspectMedia("/x/a.pdf", fs(10, pdf))).resolves.toEqual({ error: "a.pdf isn't an image or MP4 video" });
@@ -68,6 +76,22 @@ describe("parseDroppedPaths", () => {
 describe("chips", () => {
   it("lists file names", () => {
     expect(chips([{ path: "/x/chart.png", kind: "image" }, { path: "/y/photo.jpg", kind: "image" }])).toBe("📎 chart.png · photo.jpg");
+  });
+});
+
+describe("nodeMediaFs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bsky-media-"));
+  it("says there's no such file only when there isn't", async () => {
+    await expect(nodeMediaFs.size(join(dir, "missing.png"))).resolves.toBeUndefined();
+  });
+  it("won't take a folder for a file", async () => {
+    await expect(nodeMediaFs.size(dir)).rejects.toThrow("is a folder");
+  });
+  it("reads a file's size and first bytes", async () => {
+    const file = join(dir, "a.bin");
+    writeFileSync(file, new Uint8Array(20).fill(7));
+    await expect(nodeMediaFs.size(file)).resolves.toBe(20);
+    expect((await nodeMediaFs.head(file)).length).toBe(12);
   });
 });
 
