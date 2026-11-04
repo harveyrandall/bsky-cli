@@ -4,6 +4,7 @@ import { getClient } from "@/index";
 import { createPost } from "@/commands/post";
 import { activeConfigPath } from "@/toml-config";
 import { resolveMarkers } from "@/repl/core/markers";
+import { mediaOptions } from "@/repl/core/media";
 import type { PostLookup } from "@/repl/core/refs";
 import type { ReplAgent, ReplSettings } from "@/repl/core/repl";
 import { isAtUri, isCid, isDid, isHandle, toStrongRef, type StrongRef } from "@/repl/core/types";
@@ -62,19 +63,20 @@ export function replAgent(agent: AtpAgent): ReplAgent {
       const res = await agent.getPosts({ uris });
       return res.data.posts.flatMap((p) => toLookup(p) ?? []);
     },
-    async post(text, reply) {
-      return toStrongRef(await createPost(agent, text, reply ? { reply: reply.parent, replyRoot: reply.root } : {}));
+    async post(text, reply, media, quote) {
+      const target = reply ? { reply: reply.parent, replyRoot: reply.root } : {};
+      return toStrongRef(await createPost(agent, text, { ...target, ...mediaOptions(media), quote }));
     },
   };
 }
 
 // Flags whose features land in later releases; the rest are read now.
-const NOT_YET = new Set(["forceAlt", "resume", "resumable"]);
+const NOT_YET = new Set(["resume", "resumable"]);
 
 export function registerRepl(program: Command): void {
   program
     .command("repl", { isDefault: true })
-    .description("Interactive REPL for writing threads")
+    .description("Interactive composer for posts, threads, quotes, scheduled posts and drafts")
     .option("-t, --auto-thread", "Start a thread when you type plain text")
     .option("--no-auto-thread", "Don't start a thread from plain text")
     .option("-l, --prefix-thread", "Label posts per thread (A1, B2…)")
@@ -126,6 +128,7 @@ export function registerRepl(program: Command): void {
         pace: opts.pace,
         askToSave: opts.askToSave !== false,
         verbose: program.opts().verbose === true,
+        forceAlt: opts.forceAlt === true,
       };
       const { startRepl } = await import("@/repl");
       await startRepl({
@@ -134,7 +137,7 @@ export function registerRepl(program: Command): void {
         agent: replAgent(agent),
         handle: agent.session?.handle ?? "",
         configPath: activeConfigPath(),
-        profile: program.opts().profile ?? process.env.BSKY_PROFILE,
+        profile: program.opts().profile,
       });
     });
 }

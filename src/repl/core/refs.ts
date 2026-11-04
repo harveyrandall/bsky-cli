@@ -25,6 +25,8 @@ export interface RegistryEntry {
   root: StrongRef;
   parent?: AtUri;
   excerpt: string;
+  /** What went with it, as printed: `📷 2`, `🎞`, `❝ 3`. */
+  notes?: string;
   /** The author's handle, for a post not made in this session: someone else's, or an older one of yours. */
   external?: Handle;
   letter?: ThreadLetter;
@@ -110,7 +112,7 @@ export class Registry {
     return entry;
   }
 
-  addOwn(ref: StrongRef, o: { root: StrongRef; parent?: AtUri; text: string; letter?: ThreadLetter }): RegistryEntry {
+  addOwn(ref: StrongRef, o: { root: StrongRef; parent?: AtUri; text: string; letter?: ThreadLetter; notes?: string }): RegistryEntry {
     return this.add({
       label: this.nextLabel(o.letter),
       ...ref,
@@ -119,6 +121,7 @@ export class Registry {
       root: o.root,
       parent: o.parent,
       excerpt: excerptOf(o.text),
+      notes: o.notes,
       letter: this.prefixed ? this.lastLetter : undefined,
     });
   }
@@ -152,13 +155,13 @@ export class Registry {
     return this.list;
   }
 
-  /** `(4) 3lbx7kt5def2v`, then ` (at://…)` when verbose, ` ↳ 2` when its parent isn't the entry before it, and ` ext @handle` for someone else's post. */
+  /** `(4) 3lbx7kt5def2v`, then ` (at://…)` when verbose, ` ↳ 2` when its parent isn't the entry before it, ` ext @handle` for someone else's post, and what went with it. */
   format(e: RegistryEntry, verbose: boolean): string {
     const previous = this.list[this.list.indexOf(e) - 1];
     const branch = e.parent && e.parent !== previous?.uri ? ` ↳ ${this.byUri(e.parent)?.label ?? "?"}` : "";
     const uri = verbose ? ` (${e.uri})` : "";
     const ext = e.external && e.authorDid !== this.self ? ` ext @${e.external}` : "";
-    return `(${e.label}) ${e.rkey}${uri}${branch}${ext}`;
+    return `(${e.label}) ${e.rkey}${uri}${branch}${ext}${e.notes ? ` ${e.notes}` : ""}`;
   }
 }
 

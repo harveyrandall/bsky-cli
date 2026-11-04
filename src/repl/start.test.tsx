@@ -3,7 +3,9 @@ import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import { LEFT } from "@/repl/ui/App";
 import { Registry } from "@/repl/core/refs";
 
-const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues } = vi.hoisted(() => ({
+const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues, getSchedulerStatus, saveScheduledPost } = vi.hoisted(() => ({
+  saveScheduledPost: vi.fn(),
+  getSchedulerStatus: vi.fn(),
   render: vi.fn(),
   detectKittyKeyboard: vi.fn(),
   saveDraft: vi.fn(),
@@ -12,6 +14,8 @@ const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues } =
 }));
 vi.mock("@/drafts", () => ({ saveDraft, deleteDraft }));
 vi.mock("@/toml-config", () => ({ setConfigValues }));
+vi.mock("@/lib/scheduler", () => ({ getSchedulerStatus }));
+vi.mock("@/scheduled", () => ({ saveScheduledPost }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
 const { startRepl, offlineProps } = await import("@/repl");
@@ -64,15 +68,36 @@ describe("startRepl", () => {
     render.mockReturnValue(app);
     const running = startRepl({ ...options, profile: "work" });
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
-    const { drafts, saveConfig, configName } = render.mock.calls[0][0].props;
+    const { drafts, saveConfig, saveScheduled, configName } = render.mock.calls[0][0].props;
     const draft = { reason: "manual", type: "post", text: "hi" };
     await drafts.save(draft);
     await drafts.delete("d1");
     await saveConfig({ undo: 5 });
+    const post = { scheduledAt: "2099-01-01T00:00:00.000Z", text: "later" };
+    await saveScheduled(post);
+    expect(saveScheduledPost).toHaveBeenCalledWith(post, "work");
     expect(saveDraft).toHaveBeenCalledWith(draft, "work");
     expect(deleteDraft).toHaveBeenCalledWith("d1", "work");
     expect(setConfigValues).toHaveBeenCalledWith("/tmp/config.toml", "repl", { undo: 5 });
     expect(configName).toBe("config.toml");
+    app.unmount();
+    await running;
+  });
+
+  it("treats a scheduler it can't check as not running", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl(options);
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const { schedulerRunning } = render.mock.calls[0][0].props;
+    getSchedulerStatus.mockReturnValueOnce("enabled");
+    expect(schedulerRunning()).toBe(true);
+    getSchedulerStatus.mockReturnValueOnce("not installed");
+    expect(schedulerRunning()).toBe(false);
+    getSchedulerStatus.mockImplementationOnce(() => {
+      throw new Error("Unsupported platform");
+    });
+    expect(schedulerRunning()).toBe(false);
     app.unmount();
     await running;
   });

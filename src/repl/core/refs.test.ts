@@ -132,6 +132,16 @@ describe("Registry.format", () => {
   });
 });
 
+describe("Registry.format notes", () => {
+  it("shows what a post carried", () => {
+    const reg = new Registry(false);
+    const own = (r: StrongRef, notes?: string) => reg.format(reg.addOwn(r, { root: r, text: "a", notes }), false);
+    expect(own(r1, "📷 2")).toBe("(1) 3lbx7kt5def2a 📷 2");
+    expect(own(r2, "🎞")).toBe("(2) 3lbx7kt5def2b 🎞");
+    expect(own(r3, "❝ 1")).toBe("(3) 3lbx7kt5def2c ❝ 1");
+  });
+});
+
 describe("an external reply", () => {
   const reply: PostLookup = { ...alicePost, root: aliceRoot, parent: aliceRoot };
   it("keeps its own thread's root, so a reply to it stays in that thread", async () => {

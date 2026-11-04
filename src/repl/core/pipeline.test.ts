@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { Pipeline, type PipelineDeps, type SendTarget } from "./pipeline";
+import { Pipeline, draftOf, type PipelineDeps, type SendTarget } from "./pipeline";
+import type { StagedMedia } from "./media";
 import type { AtUri, Cid, StrongRef } from "./types";
 
 const ref = (n: number): StrongRef => ({
@@ -18,7 +19,7 @@ function setup(o: { undo?: number; pace?: number } = {}) {
     now: () => Date.now(),
     setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimer: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
-    send: vi.fn(async (text: string, target?: SendTarget) => {
+    send: vi.fn(async (text: string, target?: SendTarget, _media?: readonly StagedMedia[], _quote?: StrongRef) => {
       sent.push({ text, target, at: Date.now() });
       return ref(++n);
     }),
@@ -128,6 +129,89 @@ describe("Pipeline timing", () => {
     pipeline.enqueue({ kind: "reply", target: ref(9), root: ref(8) }, ["x", "y"]);
     await vi.advanceTimersByTimeAsync(0);
     expect(sent.map((s) => s.target)).toEqual([{ parent: ref(9), root: ref(8) }, { parent: ref(1), root: ref(8) }]);
+  });
+});
+
+const chart: StagedMedia = { path: "/x/chart.png", kind: "image", alt: "A chart" };
+
+describe("draftOf", () => {
+  it("puts media on a lone post", () => {
+    expect(draftOf("network", ["a"], { media: [chart, { path: "/x/b.png", kind: "image" }] })).toEqual({
+      reason: "network",
+      type: "post",
+      text: "a",
+      images: ["/x/chart.png", "/x/b.png"],
+      imageAlts: ["A chart", "b.png"],
+    });
+    expect(draftOf("network", ["a"], { media: [{ path: "/x/c.mp4", kind: "video", alt: "A clip" }] })).toMatchObject({
+      video: "/x/c.mp4",
+      videoAlt: "A clip",
+    });
+  });
+  it("puts media on a thread's first post", () => {
+    expect(draftOf("manual", ["a", "b"], { media: [chart] }).posts).toEqual([
+      { text: "a", images: ["/x/chart.png"], imageAlts: ["A chart"] },
+      { text: "b" },
+    ]);
+  });
+  it("marks a quote", () => {
+    expect(draftOf("network", ["a"], { quote: ref(1) })).toEqual({ reason: "network", type: "quote", text: "a", quoteUri: ref(1).uri });
+  });
+});
+
+describe("Pipeline quotes", () => {
+  it("send the quoted post with the text", async () => {
+    const { pipeline, deps } = setup();
+    pipeline.enqueue({ kind: "quote", target: ref(7) }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.send).toHaveBeenCalledExactlyOnceWith("a", undefined, undefined, ref(7));
+  });
+  it("stay quotes in their draft", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "quote", target: ref(7) }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ type: "quote", quoteUri: ref(7).uri }));
+  });
+});
+
+describe("Pipeline media", () => {
+  it("goes with an item's first post only", async () => {
+    const { pipeline, deps } = setup();
+    pipeline.enqueue({ kind: "standalone" }, ["a", "b"], [chart]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.send.mock.calls.map(([text, , media]) => [text, media])).toEqual([["a", [chart]], ["b", undefined]]);
+  });
+  it("stays in the draft when the first post fails, and goes with the retry", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "standalone" }, ["a"], [chart]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ images: ["/x/chart.png"] }));
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.send).toHaveBeenLastCalledWith("a", undefined, [chart], undefined);
+  });
+  it("isn't sent again when a later post fails", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockResolvedValueOnce(ref(1)).mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "standalone" }, ["a", "b"], [chart]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.not.objectContaining({ images: expect.anything() }));
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.send.mock.lastCall?.[2]).toBeUndefined();
+  });
+  it("comes back from a cancelled item that hasn't started", () => {
+    const { pipeline } = setup({ undo: 5 });
+    pipeline.enqueue({ kind: "standalone" }, ["a"], [chart]);
+    expect(pipeline.cancelAll()[0].media).toEqual([chart]);
+  });
+  it("doesn't come back from an item whose first post went", async () => {
+    const { pipeline } = setup({ pace: 5 });
+    pipeline.enqueue({ kind: "standalone" }, ["a", "b"], [chart]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pipeline.cancelAll()[0].media).toBeUndefined();
   });
 });
 

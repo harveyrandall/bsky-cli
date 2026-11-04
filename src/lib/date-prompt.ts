@@ -17,6 +17,7 @@ export function parseDate(input: string): { day: number; month: number; year: nu
   if (day < 1 || day > 31) return null;
   if (month < 1 || month > 12) return null;
   if (year < new Date().getFullYear()) return null;
+  if (new Date(year, month - 1, day).getMonth() !== month - 1) return null; // 31-02 would roll over
 
   return { day, month, year };
 }

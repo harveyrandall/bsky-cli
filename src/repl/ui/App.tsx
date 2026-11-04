@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Static, Text, useApp } from "ink";
+import { basename } from "node:path";
 import type { Markers, SubmitPlan } from "@/repl/core/markers";
+import { chips, parseDroppedPaths, type StagedMedia } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
+import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
-import { Choice, Countdown, ExitPrompt, SplitPreview, type ExitChoice } from "@/repl/ui/Overlays";
+import { Choice, Countdown, ExitPrompt, SplitPreview, TextPrompt, YesNo, type ExitChoice } from "@/repl/ui/Overlays";
 
 export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
 export const KITTY_HINT =
@@ -25,6 +28,8 @@ export interface AppProps {
   agent: ReplAgent;
   drafts: { save: ReplDeps["saveDraft"]; delete: ReplDeps["deleteDraft"] };
   saveConfig: ReplDeps["saveConfig"];
+  saveScheduled: ReplDeps["saveScheduled"];
+  schedulerRunning: ReplDeps["schedulerRunning"];
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -39,54 +44,81 @@ interface LogLine {
 type Overlay =
   | { kind: "cooldown"; which: "undo" | "pace"; resolve(v: Cooldown | undefined): void }
   | { kind: "save"; values: { undo?: Cooldown; pace?: Cooldown }; resolve(a: "yes" | "no" | "never"): void }
-  | { kind: "preview"; plan: SubmitPlan; labelled: boolean; resolve(ok: boolean): void }
-  | { kind: "exit"; text: string };
+  | { kind: "preview"; plan: SubmitPlan; labelled: boolean; media: readonly StagedMedia[]; resolve(ok: boolean): void }
+  | { kind: "choice"; label: string; options: readonly string[]; resolve(i: number | undefined): void }
+  | { kind: "text"; label: string; resolve(text: string | undefined): void }
+  | { kind: "drop"; paths: readonly string[]; resolve(ok: boolean): void }
+  | { kind: "exit" };
 
 export function App(props: AppProps) {
   const { markers, kittyHint } = props;
-  const { exit } = useApp();
+  const { exit, suspendTerminal } = useApp();
   const [log, setLog] = useState<LogLine[]>(() => [
     { id: 0, text: HEADER, style: "normal" },
     ...(kittyHint ? [{ id: 1, text: KITTY_HINT, style: "dim" as const }] : []),
   ]);
-  const print = useCallback(
-    (text: string, style: LineStyle = "normal") => setLog((l) => [...l, { id: l.length, text, style }]),
-    [],
-  );
+  // Set while $EDITOR has the terminal: Ink drops anything printed then, so lines wait here.
+  const held = useRef<[string, LineStyle][] | undefined>(undefined);
+  const print = useCallback((text: string, style: LineStyle = "normal") => {
+    if (held.current) held.current.push([text, style]);
+    else setLog((l) => [...l, { id: l.length, text, style }]);
+  }, []);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const [overlay, setOverlay] = useState<Overlay>();
+  // Questions wait their turn: replacing an open one would leave it unanswered for good.
+  const [overlays, setOverlays] = useState<Overlay[]>([]);
+  const overlay = overlays[0];
+  const ask = (next: Overlay) => setOverlays((open) => [...open, next]);
   const [restore, setRestore] = useState<{ id: number; text: string }>();
   const [exitWhenSent, setExitWhenSent] = useState(false);
+  const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
+  const composerText = useRef("");
+  /** What send now has already saved, so leaving needn't ask about it again. */
+  const savedText = useRef<string | undefined>(undefined);
 
   const [repl] = useState(
     () =>
       new Repl(props.settings, markers, {
         agent: props.agent,
         ask: {
-          cooldown: (which) => new Promise((resolve) => setOverlay({ kind: "cooldown", which, resolve })),
-          saveOffer: (values) => new Promise((resolve) => setOverlay({ kind: "save", values, resolve })),
-          confirm: (plan, labelled) => new Promise((resolve) => setOverlay({ kind: "preview", plan, labelled, resolve })),
+          cooldown: (which) => new Promise((resolve) => ask({ kind: "cooldown", which, resolve })),
+          saveOffer: (values) => new Promise((resolve) => ask({ kind: "save", values, resolve })),
+          confirm: (plan, labelled, media) => new Promise((resolve) => ask({ kind: "preview", plan, labelled, media, resolve })),
+          alt: (file, required) =>
+            new Promise((resolve) =>
+              ask({
+                kind: "text",
+                label: `Alt text for ${file} (${required ? "required; Esc drops the file" : "Enter to skip"}):`,
+                resolve: (text) => resolve(text === undefined ? null : text.trim() === "" ? undefined : text),
+              }),
+            ),
+          choose: (label, options) => new Promise((resolve) => ask({ kind: "choice", label, options, resolve })),
+          text: (label) => new Promise((resolve) => ask({ kind: "text", label, resolve })),
         },
         print,
         onChange: rerender,
         restore: (text) => {
           // Something came back: don't leave with it.
           setExitWhenSent(false);
-          setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
+          fillComposer(text);
         },
         saveDraft: props.drafts.save,
         deleteDraft: props.drafts.delete,
         saveConfig: props.saveConfig,
+        saveScheduled: props.saveScheduled,
+        schedulerRunning: props.schedulerRunning,
+        composerBusy: () => held.current !== undefined || composerText.current.trim() !== "",
       }),
   );
-  useEffect(() => props.onReady?.(repl), [repl]);
+  useEffect(() => {
+    props.onReady?.(repl);
+  }, [repl]);
   // Leaving always stops the queue, so nothing is posted after the REPL closes.
   const leave = useCallback(() => {
     repl.close();
     exit(LEFT);
   }, [exit, repl]);
-  // Ctrl+D on an empty composer and /exit: ask first if posts are still waiting.
-  const requestExit = (text: string) => (repl.wouldLose(text) ? setOverlay({ kind: "exit", text }) : leave());
+  // Ctrl+D and /exit: ask first if anything would be lost.
+  const requestExit = (text: string) => (repl.wouldLose(text) ? ask({ kind: "exit" }) : leave());
 
   const pendingCount = repl.pendingCount();
   // Tick the countdown while anything is queued.
@@ -96,50 +128,77 @@ export function App(props: AppProps) {
     return () => clearInterval(timer);
   }, [pendingCount > 0]);
   useEffect(() => {
-    if (exitWhenSent && pendingCount === 0) leave();
-  }, [exitWhenSent, pendingCount]);
+    if (!exitWhenSent || pendingCount > 0 || overlay) return;
+    setExitWhenSent(false);
+    requestExit(composerText.current === savedText.current ? "" : composerText.current);
+  }, [exitWhenSent, pendingCount, overlay]);
 
-  const close = () => setOverlay(undefined);
+  const close = () => setOverlays((open) => open.slice(1));
 
-  // Text that came back while the composer was busy: keep both.
-  const keepAsDraft = async (text: string) => {
+  // The editor gets the terminal to itself; Ink restores its modes afterwards.
+  const edit = async (text: string) => {
+    let edited = text;
+    held.current = [];
     try {
-      const d = await props.drafts.save({ reason: "manual", type: "post", text });
-      print(`A post came back while you were typing; saved it as draft ${d.id}`, "dim");
-    } catch (err) {
-      print(`A post came back but couldn't be saved as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
-      print(text);
+      await suspendTerminal(async () => {
+        edited = await editInEditor(text);
+      });
+    } finally {
+      const lines = held.current;
+      held.current = undefined;
+      for (const [line, style] of lines) print(line, style);
     }
+    return edited;
   };
 
-  const chooseExit = async (choice: ExitChoice, text: string) => {
+  // A paste of media paths: ask to attach them. Anything else, or a no, is text after all.
+  const offerDrop = async (paths: readonly string[], text: string) => {
+    try {
+      const attach =
+        (await repl.areMedia(paths)) && (await new Promise<boolean>((resolve) => ask({ kind: "drop", paths, resolve })));
+      if (attach) await repl.attach(paths);
+      else fillComposer(text);
+    } catch (err) {
+      print(err instanceof Error ? err.message : String(err), "error");
+      fillComposer(text);
+    }
+  };
+  const takePaste = (text: string) => {
+    const paths = parseDroppedPaths(text);
+    if (paths) void offerDrop(paths, text);
+    return paths !== undefined;
+  };
+
+  const chooseExit = async (choice: ExitChoice) => {
     close();
     if (choice === "stay") return;
+    // Read now, not when the prompt opened: a post may have come back since.
+    const text = composerText.current;
     if (choice === "send") {
       if (repl.pausedBy()) {
         print("Can't send now: the queue is paused after an error — /retry first, or choose save [d]raft.", "error");
         return;
       }
-      // Sending what's queued; unsent composer text is kept as a draft rather than posted mid-exit.
-      if (text.trim() !== "") {
-        try {
-          const d = await props.drafts.save({ reason: "manual", type: "post", text });
+      // Sending what's queued; composer text and staged media are kept as a draft rather than posted mid-exit.
+      try {
+        for (const draft of repl.composerDrafts(text)) {
+          const d = await props.drafts.save(draft);
           print(`Saved as draft ${d.id}`, "dim");
-        } catch (err) {
-          print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
-          return;
         }
+      } catch (err) {
+        print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
+        return;
       }
+      savedText.current = text;
+      repl.detach("all");
       repl.sendNow();
       setExitWhenSent(true);
       return;
     }
     if (choice === "draft") {
       // Save first; only leave (which cancels the queue) once everything is safe.
-      const drafts = repl.draftItems();
-      if (text.trim() !== "") drafts.push({ reason: "manual", type: "post", text });
       try {
-        for (const draft of drafts) {
+        for (const draft of [...repl.draftItems(), ...repl.composerDrafts(text)]) {
           const d = await props.drafts.save(draft);
           print(`Saved as draft ${d.id}`, "dim");
         }
@@ -157,6 +216,7 @@ export function App(props: AppProps) {
       case "cooldown":
         return (
           <Choice
+            key={overlay.which}
             label={overlay.which === "undo" ? "Undo window before each post?" : "Minimum time between posts?"}
             options={["none", "5s", "10s", "15s"]}
             onPick={(i) => {
@@ -186,6 +246,7 @@ export function App(props: AppProps) {
           <SplitPreview
             plan={overlay.plan}
             posts={overlay.labelled ? repl.labelPosts(overlay.plan.posts) : overlay.plan.posts}
+            media={overlay.media}
             limit={overlay.labelled ? 298 : 300}
             onAnswer={(ok) => {
               close();
@@ -193,8 +254,42 @@ export function App(props: AppProps) {
             }}
           />
         );
+      case "choice":
+        return (
+          <Choice
+            key={overlay.label}
+            label={overlay.label}
+            options={overlay.options}
+            onPick={(i) => {
+              close();
+              overlay.resolve(i);
+            }}
+          />
+        );
+      case "text":
+        return (
+          <TextPrompt
+            label={overlay.label}
+            onDone={(text) => {
+              close();
+              overlay.resolve(text);
+            }}
+          />
+        );
+      case "drop": {
+        const more = overlay.paths.length > 1 ? ` and ${overlay.paths.length - 1} more` : "";
+        return (
+          <YesNo
+            label={`Attach ${basename(overlay.paths[0])}${more}?`}
+            onAnswer={(ok) => {
+              close();
+              overlay.resolve(ok);
+            }}
+          />
+        );
+      }
       case "exit":
-        return <ExitPrompt onChoose={(c) => void chooseExit(c, overlay.text)} />;
+        return <ExitPrompt onChoose={(c) => void chooseExit(c)} />;
     }
   })();
 
@@ -217,9 +312,10 @@ export function App(props: AppProps) {
         limit={repl.composerLimit()}
         pending={repl.waiting()}
         active={!overlay}
+        chips={repl.staged().length > 0 ? chips(repl.staged()) : undefined}
         restore={restore}
-        onRestoreBusy={(text) => void keepAsDraft(text)}
-        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), repl })}
+        onText={(text) => (composerText.current = text)}
+        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
         onEscape={(text) => {
           setExitWhenSent(false);
           return repl.escape(text);
@@ -227,6 +323,8 @@ export function App(props: AppProps) {
         onInterrupt={(text) => repl.interrupt(text)}
         onEof={requestExit}
         onSendNow={() => repl.sendNow()}
+        onEdit={edit}
+        onPaste={takePaste}
         onHint={(text) => print(text, "dim")}
         onError={(text) => print(text, "error")}
       />

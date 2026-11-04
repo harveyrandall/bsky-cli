@@ -71,7 +71,7 @@ describe("bsky repl", () => {
       expect(process.stderr.write).toHaveBeenCalledWith(
         "bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n",
       );
-      expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Interactive REPL for writing threads"));
+      expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Interactive composer for posts"));
       expect(startRepl).not.toHaveBeenCalled();
     },
   );
@@ -154,6 +154,16 @@ describe("bsky repl", () => {
     expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Commands:"));
   });
 
+  it.each([
+    ["-f", ["repl", "-f"], {}],
+    ["force-alt = true", ["repl"], { repl: { "force-alt": true } }],
+  ])("requires alt text with %s, and doesn't call it unused", async (_, args, config) => {
+    setTTY(true, true);
+    await makeProgram(config).parseAsync(args, { from: "user" });
+    expect(startRepl).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ forceAlt: true }) }));
+    expect(process.stderr.write).not.toHaveBeenCalledWith(expect.stringContaining("force-alt"));
+  });
+
   it("maps flags and config onto the session's settings", async () => {
     setTTY(true, true);
     const p = makeProgram({ repl: { "ask-to-save": false } });
@@ -168,6 +178,7 @@ describe("bsky repl", () => {
           pace: 10,
           askToSave: false,
           verbose: false,
+          forceAlt: false,
         },
       }),
     );
@@ -210,6 +221,21 @@ describe("replAgent", () => {
   });
   it("won't start without a session", () => {
     expect(() => replAgent({} as never)).toThrow("Not logged in");
+  });
+  it("hands createPost staged media", async () => {
+    const { createPost } = await import("@/commands/post");
+    vi.mocked(createPost).mockResolvedValueOnce({ uri, cid: "bafyabc" } as never);
+    const agent = { session: { did: "did:plc:me" } } as never;
+    await replAgent(agent).post("hi", undefined, [{ path: "/x/a.png", kind: "image", alt: "A chart" }]);
+    expect(createPost).toHaveBeenCalledWith(agent, "hi", { images: ["/x/a.png"], imageAlts: ["A chart"] });
+  });
+  it("hands createPost the post being quoted", async () => {
+    const { createPost } = await import("@/commands/post");
+    vi.mocked(createPost).mockResolvedValueOnce({ uri, cid: "bafyabc" } as never);
+    const agent = { session: { did: "did:plc:me" } } as never;
+    const quoted = { uri, cid: "bafyq" } as never;
+    await replAgent(agent).post("look", undefined, undefined, quoted);
+    expect(vi.mocked(createPost).mock.lastCall?.[2].quote).toEqual({ uri, cid: "bafyq" });
   });
   it("keeps a post with no reply as its own root", async () => {
     await expect(lookup({ text: "hi" })).resolves.toMatchObject([{ uri, text: "hi", root: undefined }]);

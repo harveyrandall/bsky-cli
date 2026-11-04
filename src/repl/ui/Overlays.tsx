@@ -1,9 +1,12 @@
-import { useState } from "react";
-import { Box, Text, useInput } from "ink";
+import { useReducer, useRef, useState } from "react";
+import { Box, Text, useInput, usePaste } from "ink";
 import { graphemeLength, trimSuggestions } from "@/lib/split-thread";
 import type { SubmitPlan } from "@/repl/core/markers";
+import { chips, type StagedMedia } from "@/repl/core/media";
 import type { Countdown as CountdownState } from "@/repl/core/pipeline";
 import { ringCount } from "@/repl/ui/Ring";
+
+const segmenter = new Intl.Segmenter();
 
 /** A picker: ←/→ or Tab move, Enter picks, Esc or Ctrl+C dismisses (undefined). */
 export function Choice({
@@ -40,12 +43,15 @@ export function Choice({
 export function SplitPreview({
   plan,
   posts,
+  media,
   limit,
   onAnswer,
 }: {
   plan: SubmitPlan;
   /** What will be posted, labels included. */
   posts: readonly string[];
+  /** Goes with the first post. */
+  media: readonly StagedMedia[];
   limit: number;
   onAnswer(ok: boolean): void;
 }) {
@@ -58,6 +64,7 @@ export function SplitPreview({
         <Box key={i} flexDirection="column">
           <Text dimColor>{`── ${i + 1}/${posts.length} · ${ringCount(graphemeLength(post), 300)} ──`}</Text>
           <Text>{post}</Text>
+          {i === 0 && media.length > 0 && <Text dimColor>{chips(media)}</Text>}
         </Box>
       ))}
       {plan.keep && <Text>{`Kept for next: ${plan.keep}`}</Text>}
@@ -68,6 +75,41 @@ export function SplitPreview({
       <Text>{`Post ${posts.length}? [y/N]`}</Text>
     </Box>
   );
+}
+
+/** A line of text: Enter gives it, Esc or Ctrl+C gives undefined. */
+export function TextPrompt({ label, onDone }: { label: string; onDone(text: string | undefined): void }) {
+  // In a ref, so keys that arrive in one stdin chunk each see the last one's text.
+  const text = useRef("");
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const set = (value: string) => {
+    text.current = value;
+    rerender();
+  };
+  const done = (value: string | undefined) => {
+    set(""); // the next question can reuse this prompt
+    onDone(value);
+  };
+  useInput((input, key) => {
+    const line = /^([^\r\n]*)[\r\n]/.exec(input);
+    if (key.return || line) done(text.current + (line?.[1] ?? ""));
+    else if (key.escape || (key.ctrl && input === "c")) done(undefined);
+    else if (key.backspace || key.delete) set([...segmenter.segment(text.current)].slice(0, -1).map((g) => g.segment).join(""));
+    else if (!key.ctrl && !key.meta) set(text.current + input);
+  });
+  usePaste((pasted) => set(text.current + pasted.replace(/\s*\n\s*/g, " ")));
+  return (
+    <Text>
+      {`${label} ${text.current}`}
+      <Text inverse> </Text>
+    </Text>
+  );
+}
+
+/** `Attach chart.png? [Y/n]`: Enter or `y` for yes, any other key for no. */
+export function YesNo({ label, onAnswer }: { label: string; onAnswer(ok: boolean): void }) {
+  useInput((input, key) => onAnswer(key.return || input === "y" || input === "Y"));
+  return <Text>{`${label} [Y/n]`}</Text>;
 }
 
 /** `Sending in 7s… [Esc] cancel  [Enter] send now` in the undo window; without the keys while pacing. */

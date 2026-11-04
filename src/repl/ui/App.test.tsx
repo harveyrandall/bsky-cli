@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
@@ -7,12 +10,42 @@ import { IDLE_HINT, type Repl, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import type { AtUri, Cid, StrongRef } from "@/repl/core/types";
 
-const { exit } = vi.hoisted(() => ({ exit: vi.fn() }));
+const { exit, suspendTerminal, editInEditor, suspended } = vi.hoisted(() => {
+  const suspended = { now: false, during: [] as boolean[] };
+  return {
+    suspended,
+    exit: vi.fn(),
+    suspendTerminal: vi.fn(async (run: () => Promise<void>) => {
+      suspended.now = true;
+      await run();
+      suspended.now = false;
+    }),
+    editInEditor: vi.fn(async (text: string) => {
+      suspended.during.push(suspended.now);
+      return `${text} edited`;
+    }),
+  };
+});
 vi.mock("ink", async (importOriginal) => {
   const ink = await importOriginal<typeof import("ink")>();
-  return { ...ink, useApp: () => ({ ...ink.useApp(), exit }) };
+  return { ...ink, useApp: () => ({ ...ink.useApp(), exit, suspendTerminal }) };
 });
-beforeEach(() => exit.mockClear());
+vi.mock("@/lib/editor", () => ({ editInEditor }));
+beforeEach(() => {
+  exit.mockClear();
+  suspendTerminal.mockClear();
+  editInEditor.mockClear();
+  suspended.during = [];
+});
+
+const dir = mkdtempSync(join(tmpdir(), "bsky-app-"));
+const image = join(dir, "chart.png");
+const photo = join(dir, "photo.png");
+const notes = join(dir, "notes.txt");
+for (const file of [image, photo]) writeFileSync(file, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+writeFileSync(notes, "plain text");
+const paste = (text: string) => `\x1b[200~${text}\x1b[201~`;
+const RIGHT = "\x1b[C";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 const ref = (n: number): StrongRef => ({
@@ -31,6 +64,7 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
   const saveConfig = vi.fn(async () => {});
+  const saveScheduled = vi.fn(async () => ({ id: "s1" }));
   const app = render(
     <App
       markers={DEFAULT_MARKERS}
@@ -39,6 +73,8 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
       agent={agent}
       drafts={drafts}
       saveConfig={saveConfig}
+      saveScheduled={saveScheduled}
+      schedulerRunning={() => true}
       configName="config.toml"
       onReady={(r) => (session = r)}
     />,
@@ -51,7 +87,9 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
   };
   // Colour codes depend on the terminal running the tests.
   const lastFrame = () => stripVTControlCharacters(app.lastFrame() ?? "");
-  return { ...app, lastFrame, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, repl: () => session! };
+  // For a frame that follows a chain of promises, which a fixed tick can miss on a busy machine.
+  const shows = (text: string) => vi.waitFor(() => expect(lastFrame()).toContain(text));
+  return { ...app, lastFrame, shows, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, saveScheduled, repl: () => session! };
 }
 
 describe("App", () => {
@@ -193,8 +231,8 @@ describe("App", () => {
   });
   it("lists the candidates when Tab can't extend the name", async () => {
     const { type, lastFrame } = setup();
-    await type("/", "\t");
-    expect(lastFrame()).toContain("/auto-thread  /exit  /help  /history  /post");
+    await type("/re", "\t");
+    expect(lastFrame()).toContain("/reply  /reply-from  /retry");
   });
 });
 
@@ -209,7 +247,7 @@ describe("App threads", () => {
     expect(lastFrame()).toMatch(/^thread \(1\) ›\s*$/m);
     await type("two", "\r");
     await tick();
-    expect(agent.post).toHaveBeenLastCalledWith("two", { parent: ref(1), root: ref(1) });
+    expect(agent.post).toHaveBeenLastCalledWith("two", { parent: ref(1), root: ref(1) }, undefined, undefined);
   });
   it("previews a split and posts it on y", async () => {
     const { type, lastFrame, agent } = setup();
@@ -241,16 +279,16 @@ describe("App threads", () => {
     expect(agent.post).not.toHaveBeenCalled();
   });
   it("asks for undo and pace on the first thread, then saves them on Yes", async () => {
-    const { type, lastFrame, saveConfig } = setup({ settings: { undo: undefined, pace: undefined, askToSave: true } });
+    const { type, shows, saveConfig } = setup({ settings: { undo: undefined, pace: undefined, askToSave: true } });
     await type("/thread", "\r");
-    expect(lastFrame()).toContain("Undo window before each post?");
+    await shows("Undo window before each post?");
     await type("\x1b[C", "\r");
-    expect(lastFrame()).toContain("Minimum time between posts?");
+    await shows("Minimum time between posts?");
     await type("\r");
-    expect(lastFrame()).toContain("Save undo 5s · pace off as your defaults in config.toml?");
+    await shows("Save undo 5s · pace off as your defaults in config.toml?");
     await type("\r");
-    expect(saveConfig).toHaveBeenCalledWith({ undo: 5, pace: 0 });
-    expect(lastFrame()).toMatch(/^thread ›\s*$/m);
+    await vi.waitFor(() => expect(saveConfig).toHaveBeenCalledWith({ undo: 5, pace: 0 }));
+    await shows("thread ›");
   });
   it("asks what to do on Ctrl+D with unsent text, and leaves on x", async () => {
     const { type, lastFrame } = setup();
@@ -313,6 +351,63 @@ describe("App threads", () => {
     ]);
     expect(exit).toHaveBeenCalledOnce();
   });
+  describe("while a post is in flight", () => {
+    const inFlight = async (s: ReturnType<typeof setup>) => {
+      const post: { finish(ref: StrongRef): void; fail(err: Error): void } = { finish() {}, fail() {} };
+      s.agent.post.mockImplementationOnce(() => new Promise((resolve, reject) => Object.assign(post, { finish: resolve, fail: reject })));
+      await s.type("/post hello", "\r");
+      await tick();
+      return post;
+    };
+    it("saves what's in the composer when you answer, not when you were asked", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type("\x04");
+      post.fail(Object.assign(new Error("Invalid record"), { status: 400 }));
+      await tick();
+      await s.type("d");
+      await tick();
+      expect(s.drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "hello" });
+      expect(exit).toHaveBeenCalledOnce();
+    });
+    it("asks again if you typed something after choosing send now", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type("\x04", "s", "more");
+      post.finish(ref(1));
+      await tick();
+      await tick();
+      expect(exit).not.toHaveBeenCalled();
+      expect(s.lastFrame()).toContain("save [d]raft");
+    });
+    it("doesn't leave under an open question", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type("\x04", "s", `/attach ${image}`, "\r");
+      await tick();
+      post.finish(ref(1));
+      await tick();
+      await tick();
+      expect(exit).not.toHaveBeenCalled();
+      expect(s.lastFrame()).toContain("Alt text for chart.png");
+    });
+    it("moves staged media into the draft on send now, so it isn't in both places", async () => {
+      const s = setup();
+      const post = await inFlight(s);
+      await s.type(`/attach ${image}`, "\r");
+      await tick();
+      await s.type("\r");
+      await tick();
+      await s.type("\x04", "s");
+      await tick();
+      expect(s.drafts.save).toHaveBeenCalledWith(expect.objectContaining({ images: [image] }));
+      expect(s.repl().staged()).toEqual([]);
+      post.finish(ref(1));
+      await tick();
+      await tick();
+      expect(exit).toHaveBeenCalledOnce();
+    });
+  });
   it("send now saves unsent composer text as a draft before leaving", async () => {
     const { type, drafts } = setup();
     await type("unsent", "\x04", "s");
@@ -355,5 +450,255 @@ describe("App threads", () => {
     await tick();
     expect(exit).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("bsky › /post bad");
+  });
+});
+
+describe("App media", () => {
+  const attached = async (s: ReturnType<typeof setup>) => {
+    await s.type(`/attach ${image}`, "\r");
+    await tick();
+    await s.type("\r");
+    await tick();
+    return s;
+  };
+  it("asks for alt text, then shows the file above the composer", async () => {
+    const { type, shows, repl } = setup();
+    await type(`/attach ${image}`, "\r");
+    await shows("Alt text tells people using screen readers");
+    await shows("Alt text for chart.png (Enter to skip):");
+    await type("A bar chart");
+    await shows("A bar chart");
+    await type("\r");
+    await shows("📎 chart.png");
+    expect(repl().staged()).toEqual([{ path: image, kind: "image", alt: "A bar chart" }]);
+  });
+  it("says alt text is required with --force-alt, and Esc drops the file", async () => {
+    const { type, lastFrame, repl } = setup({ settings: { forceAlt: true } });
+    await type(`/attach ${image}`, "\r");
+    await tick();
+    expect(lastFrame()).toContain("Alt text for chart.png (required; Esc drops the file):");
+    await type("\r");
+    await tick();
+    expect(lastFrame()).toContain("(required; Esc drops the file):");
+    await type("\x1b");
+    await tick();
+    await tick();
+    expect(repl().staged()).toEqual([]);
+    expect(lastFrame()).not.toContain("📎");
+    expect(lastFrame()).not.toContain("Alt text for");
+  });
+  it("sends staged media with the next post", async () => {
+    const s = await attached(setup());
+    await s.type("/post hello", "\r");
+    await tick();
+    expect(s.agent.post).toHaveBeenCalledWith("hello", undefined, [{ path: image, kind: "image" }], undefined);
+    expect(s.lastFrame()).not.toContain("📎");
+  });
+  it("marks media in the preview", async () => {
+    const s = await attached(setup());
+    await s.type("/post a /// b", "\r");
+    await tick();
+    expect(s.lastFrame()).toContain("Post 2? [y/N]");
+    expect(s.lastFrame().indexOf("📎 chart.png")).toBeLessThan(s.lastFrame().indexOf("── 2/2"));
+  });
+  it("asks before attaching a file dropped on an empty composer", async () => {
+    const { type, lastFrame, repl } = setup();
+    await type(paste(image));
+    await tick();
+    expect(lastFrame()).toContain("Attach chart.png? [Y/n]");
+    await type("\r");
+    await tick();
+    await type("\r");
+    await tick();
+    expect(repl().staged().map((m) => m.path)).toEqual([image]);
+  });
+  it("counts several dropped files", async () => {
+    const { type, lastFrame } = setup();
+    await type(paste(`${image} ${photo}`));
+    await tick();
+    expect(lastFrame()).toContain("Attach chart.png and 1 more? [Y/n]");
+  });
+  it("pastes the path as text if you say no", async () => {
+    const { type, lastFrame, repl } = setup();
+    await type(paste(image));
+    await tick();
+    await type("n");
+    await tick();
+    expect(lastFrame()).toContain(`bsky › ${image}`.slice(0, 40));
+    expect(repl().staged()).toEqual([]);
+  });
+  it("says why a dropped file is too big, rather than pasting its path", async () => {
+    const big = join(dir, "phone.png");
+    writeFileSync(big, new Uint8Array([0x89, 0x50, 0x4e, 0x47, ...new Array(1_000_000).fill(0)]));
+    const { type, lastFrame, repl } = setup();
+    await type(paste(big));
+    await tick();
+    expect(lastFrame()).toContain("Attach phone.png? [Y/n]");
+    await type("\r");
+    await tick();
+    expect(lastFrame()).toContain("phone.png is over the 1 MB image limit");
+    expect(lastFrame()).not.toContain(`bsky › ${dir}`.slice(0, 30));
+    expect(repl().staged()).toEqual([]);
+  });
+  it("treats a path pasted into text as text", async () => {
+    const { type, lastFrame } = setup();
+    await type("see ", paste(image));
+    await tick();
+    expect(lastFrame()).not.toContain("Attach");
+    expect(lastFrame().replace(/\s/g, "")).toContain(`see${image}`.replace(/\s/g, ""));
+  });
+  it("treats a drop as text if any of it isn't media", async () => {
+    const { type, lastFrame } = setup();
+    await type(paste(`${image} ${notes}`));
+    await tick();
+    await tick();
+    expect(lastFrame()).not.toContain("Attach");
+    expect(lastFrame().replace(/\s/g, "")).toContain(notes.replace(/\s/g, ""));
+  });
+  it("keeps a paste it couldn't check, and says why", async () => {
+    const s = setup();
+    vi.spyOn(s.repl(), "areMedia").mockRejectedValueOnce(new Error("EIO"));
+    await s.type(paste(image));
+    await tick();
+    await tick();
+    expect(s.lastFrame()).toContain("EIO");
+    expect(s.lastFrame().replace(/\s/g, "")).toContain(image.replace(/\s/g, ""));
+  });
+  it("updates the files shown when one is detached", async () => {
+    const s = setup();
+    await s.type(`/attach ${image} ${photo} --alt charts`, "\r");
+    await tick();
+    expect(s.lastFrame()).toContain("📎 chart.png · photo.png");
+    await s.type("/detach 1", "\r");
+    await tick();
+    expect(s.lastFrame()).toContain("📎 photo.png");
+    expect(s.lastFrame()).not.toContain("chart.png");
+  });
+  it("treats a path that isn't media as text", async () => {
+    const { type, lastFrame } = setup();
+    await type(paste(notes));
+    await tick();
+    await tick();
+    expect(lastFrame()).not.toContain("Attach");
+    expect(lastFrame()).toContain("bsky › ");
+    expect(lastFrame().replace(/\s/g, "")).toContain(notes.replace(/\s/g, ""));
+  });
+  it("queues a question behind an open one rather than replacing it", async () => {
+    const s = setup();
+    let finish = (_: boolean) => {};
+    vi.spyOn(s.repl(), "areMedia").mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    await s.type(paste(image));
+    await s.type("/new", "\r");
+    await tick();
+    finish(true);
+    await tick();
+    expect(s.lastFrame()).toContain("New:");
+    expect(s.lastFrame()).not.toContain("Attach chart.png");
+    await s.type("\x1b");
+    await tick();
+    expect(s.lastFrame()).toContain("Attach chart.png? [Y/n]");
+    await s.type("n");
+    await tick();
+    await s.type("\x15", "/exit", "\r");
+    await tick();
+    expect(exit).toHaveBeenCalledOnce();
+  });
+  it("hands the composer's text to $EDITOR on Ctrl+G and puts the result back", async () => {
+    const { type, lastFrame } = setup();
+    await type("draft", "\x07");
+    await tick();
+    expect(suspended.during).toEqual([true]);
+    expect(editInEditor).toHaveBeenCalledWith("draft");
+    expect(lastFrame()).toContain("bsky › draft edited");
+  });
+  it("does the same with /edit", async () => {
+    const { type, lastFrame } = setup();
+    await type("/edit draft", "\r");
+    await tick();
+    expect(suspended.during).toEqual([true]);
+    expect(lastFrame()).toContain("bsky › draft edited");
+    expect(lastFrame()).not.toContain("/edit");
+  });
+  it("holds back what happens while $EDITOR is open, and keeps a post that comes back", async () => {
+    let closeEditor = (_: string) => {};
+    editInEditor.mockImplementationOnce(() => new Promise((resolve) => (closeEditor = resolve)));
+    let reject = (_: Error) => {};
+    const { type, lastFrame, agent, drafts } = setup();
+    agent.post.mockImplementationOnce(() => new Promise((_, r) => (reject = r)));
+    await type("/post bad", "\r");
+    await tick();
+    await type("\x07");
+    await tick();
+    reject(Object.assign(new Error("Invalid record"), { status: 400 }));
+    await tick();
+    expect(lastFrame()).not.toContain("Invalid record");
+    closeEditor("my words");
+    await tick();
+    expect(lastFrame()).toContain("Invalid record");
+    expect(lastFrame()).toContain("bsky › my words");
+    expect(lastFrame()).toContain("A post came back while you were typing; saved it as draft d1");
+    expect(drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "bad" });
+  });
+  it("reports an editor that won't start and keeps the text", async () => {
+    editInEditor.mockRejectedValueOnce(new Error("Couldn't open nano: ENOENT"));
+    const { type, lastFrame } = setup();
+    await type("draft", "\x07");
+    await tick();
+    expect(lastFrame()).toContain("Couldn't open nano");
+    expect(lastFrame()).toContain("bsky › draft");
+  });
+  it("walks /new through to a saved draft", async () => {
+    const { type, lastFrame, drafts } = setup();
+    await type("/new", "\r");
+    await tick();
+    expect(lastFrame()).toContain("Post");
+    expect(lastFrame()).toContain("Scheduled post");
+    await type(RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, "\r");
+    await tick();
+    expect(lastFrame()).toContain("draft ›");
+    await type("for later", "\r");
+    await tick();
+    expect(drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "for later" });
+    expect(lastFrame()).toContain("Saved as draft d1");
+  });
+  it("walks /new through to a scheduled post", async () => {
+    const { type, lastFrame, saveScheduled } = setup();
+    await type("/new", "\r");
+    await tick();
+    await type(RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, "\r");
+    await tick();
+    await type("later on", "\r");
+    await tick();
+    expect(lastFrame()).toContain("Date (DD-MM or DD-MM-YYYY):");
+    await type("31-12-2099", "\r");
+    await tick();
+    expect(lastFrame()).toContain("Time (HH:MM):");
+    expect(lastFrame()).not.toContain("31-12-2099");
+    await type("15:30", "\r");
+    await tick();
+    expect(saveScheduled).toHaveBeenCalledWith({ scheduledAt: new Date(2099, 11, 31, 15, 30).toISOString(), text: "later on" });
+    expect(lastFrame()).toContain("Scheduled for 31 Dec 2099, 15:30 (s1)");
+  });
+  it("starts the pace question at its first option, whatever undo was", async () => {
+    const { type, lastFrame } = setup({ settings: { undo: undefined, pace: undefined } });
+    await type("/thread", "\r");
+    await tick();
+    await type(RIGHT, "\r");
+    await tick();
+    expect(lastFrame()).toContain("› none");
+  });
+  it("starts each picker at its first option", async () => {
+    const { type, lastFrame } = setup();
+    await type("/new", "\r");
+    await tick();
+    await type(RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, "\r");
+    await tick();
+    await type("later on", "\r");
+    await tick();
+    await type("31-12-2099", "\r");
+    await tick();
+    await type("3:30", "\r");
+    await tick();
+    expect(lastFrame()).toContain("› AM");
   });
 });

@@ -1,10 +1,5 @@
 import { stdin, stderr } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { writeFile, readFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import chalk from "chalk";
 import type { Command } from "commander";
 import type { ComAtprotoRepoStrongRef } from "@atproto/api";
@@ -18,6 +13,7 @@ import {
 } from "@/lib/split-thread";
 import type { ThreadPost } from "@/lib/split-thread";
 import { saveDraft } from "@/drafts";
+import { editInEditor } from "@/lib/editor";
 import { outputJson } from "@/lib/format";
 import type { Draft, ThreadDraftPost } from "@/lib/types";
 
@@ -112,12 +108,7 @@ function renderPreview(posts: ThreadPostWithMedia[]): void {
 async function editPost(
   post: ThreadPostWithMedia,
 ): Promise<ThreadPostWithMedia> {
-  const editor = process.env.EDITOR || "vi";
-  const tmpPath = join(tmpdir(), `bsky-thread-${randomBytes(4).toString("hex")}.txt`);
-  await writeFile(tmpPath, post.text, "utf-8");
-  spawnSync(editor, [tmpPath], { stdio: "inherit" });
-  const newText = (await readFile(tmpPath, "utf-8")).trimEnd();
-  return { ...post, text: newText };
+  return { ...post, text: await editInEditor(post.text) };
 }
 
 async function interactivePreview(
@@ -183,7 +174,11 @@ async function interactivePreview(
         console.error(chalk.red(`Invalid post number: ${n}`));
         continue;
       }
-      current[n - 1] = await editPost(current[n - 1]);
+      try {
+        current[n - 1] = await editPost(current[n - 1]);
+      } catch (err) {
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      }
       continue;
     }
 

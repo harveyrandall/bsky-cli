@@ -72,21 +72,27 @@ export interface ComposerProps {
   pending?: string;
   /** False while an overlay has the keyboard. */
   active?: boolean;
-  /** Text coming back (a rejected post): fills an empty composer whenever `id` changes. */
+  /** Staged files, shown above the draft. */
+  chips?: string;
+  /** Text coming back (a rejected post, a paste that wasn't a drop): added whenever `id` changes. */
   restore?: { id: number; text: string };
-  /** Restored text that would have overwritten what's being typed. */
-  onRestoreBusy(text: string): void;
+  /** The draft, whenever it changes. */
+  onText(text: string): void;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
   onEof(text: string): void;
   onSendNow(): void;
+  /** Ctrl+G: the text back from $EDITOR. */
+  onEdit(text: string): Promise<string>;
+  /** A paste into an empty composer: true if it's been dealt with. */
+  onPaste(text: string): boolean;
   onHint(text: string): void;
   onError(message: string): void;
 }
 
 export function Composer(props: ComposerProps) {
-  const { markers, prompt, limit, pending, active = true, restore } = props;
+  const { markers, prompt, limit, pending, active = true, restore, chips } = props;
   const { rows: windowRows, columns } = useWindowSize();
   // Editor state lives in a ref so keys that arrive in one stdin chunk (fast
   // typing, slow SSH) each see the text the previous key left behind.
@@ -94,13 +100,12 @@ export function Composer(props: ComposerProps) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const apply = (action: EditorAction) => {
     editor.current = editorReducer(editor.current, action);
+    props.onText(editor.current.text);
     rerender();
   };
 
   useEffect(() => {
-    if (!restore) return;
-    if (editor.current.text.trim() === "") apply({ type: "set", text: restore.text });
-    else props.onRestoreBusy(restore.text);
+    if (restore) apply({ type: "insert", text: restore.text });
   }, [restore?.id]);
 
   // The REPL never exits on an error: report it and keep the draft.
@@ -118,7 +123,10 @@ export function Composer(props: ComposerProps) {
 
   const submitting = useRef(false);
   const submit = async (text: string) => {
-    if (text.trim() === "") return;
+    if (text.trim() === "") {
+      if (chips) props.onHint("Type some text to go with it: posts need text");
+      return;
+    }
     if (submitting.current) {
       props.onHint(STILL_WORKING);
       return;
@@ -155,6 +163,9 @@ export function Composer(props: ComposerProps) {
       case "submit":
         void submit(text);
         return;
+      case "edit":
+        props.onEdit(text).then((edited) => apply({ type: "set", text: edited }), report);
+        return;
       case "complete": {
         const completed = completeCommand(text, cursor);
         if (completed.text !== text) apply({ type: "set", text: completed.text });
@@ -183,7 +194,9 @@ export function Composer(props: ComposerProps) {
   usePaste(
     (text) => {
       try {
-        if (pending === undefined) apply({ type: "insert", text });
+        if (pending !== undefined) return;
+        if (editor.current.text === "" && props.onPaste(text)) return;
+        apply({ type: "insert", text });
       } catch (err) {
         report(err);
       }
@@ -209,11 +222,16 @@ export function Composer(props: ComposerProps) {
   rows.forEach((row, i) => {
     if (row.start <= cursor) cursorRow = i;
   });
-  const [first, last] = visibleRows(rows.length, cursorRow, windowRows);
+  const [first, last] = visibleRows(rows.length, cursorRow, chips ? windowRows - 1 : windowRows);
   const hidden = (n: number, arrow: string) =>
     n > 0 && <Text dimColor>{`${indent}${arrow} ${n} more line${n === 1 ? "" : "s"}`}</Text>;
   return (
     <Box flexDirection="column">
+      {chips && (
+        <Text dimColor wrap="truncate">
+          {chips}
+        </Text>
+      )}
       {hidden(first, "↑")}
       {rows.slice(first, last).map((row, j) => {
         const shown = text.slice(row.start, row.end);

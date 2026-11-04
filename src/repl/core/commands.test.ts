@@ -27,7 +27,7 @@ describe("suggest", () => {
 describe("completeCommand", () => {
   it("completes a unique command name", () => {
     expect(completeCommand("/he", 3)).toEqual({ text: "/help ", cursor: 6, candidates: [] });
-    expect(completeCommand("/e", 2)).toEqual({ text: "/exit ", cursor: 6, candidates: [] });
+    expect(completeCommand("/ex", 3)).toEqual({ text: "/exit ", cursor: 6, candidates: [] });
   });
   it("lists candidates when it can't extend", () => {
     const re = completeCommand("/re", 3);
