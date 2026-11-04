@@ -19,6 +19,16 @@ describe("editorReducer", () => {
   it("replaces a trailing backslash with a newline", () => {
     expect(r(at("a\\"), { type: "continueLine" })).toMatchObject({ text: "a\n", cursor: 2 });
   });
+  it("continues a line with a plain newline when no backslash precedes the cursor", () => {
+    expect(r(at("abc", 0), { type: "continueLine" })).toMatchObject({ text: "\nabc", cursor: 1 });
+  });
+  it("cleans text it is given to set", () => {
+    expect(r(at(""), { type: "set", text: "a\x1b[31mb\r\n" })).toMatchObject({ text: "ab\n", cursor: 3 });
+  });
+  it("keeps the cursor on a grapheme boundary when an insert or word jump lands inside one", () => {
+    expect(r(at("\u0301x", 0), { type: "insert", text: "e" })).toMatchObject({ text: "e\u0301x", cursor: 2 });
+    expect(r(at("a \u0301b"), { type: "wordLeft" }).cursor).toBe(3);
+  });
   it("jumps and deletes by words", () => {
     expect(r(at("one two  three"), { type: "wordLeft" }).cursor).toBe(9);
     expect(r(at("one two", 0), { type: "wordRight" }).cursor).toBe(3);

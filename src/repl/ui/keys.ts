@@ -1,5 +1,5 @@
 import type { Key } from "ink";
-import type { EditorAction } from "@/repl/ui/editor";
+import type { EditorAction, EditorState } from "@/repl/ui/editor";
 
 export type KeyAction =
   | EditorAction
@@ -22,7 +22,7 @@ const CTRL = new Map<string, KeyAction>([
  * Map one Ink keypress to an action; first match wins. Shift+Enter only
  * arrives under the kitty protocol, so Alt+Enter and Ctrl+J also add a newline.
  */
-export function keyToAction(input: string, key: Partial<Key>, s: { text: string; cursor: number }): KeyAction {
+export function keyToAction(input: string, key: Partial<Key>, s: Pick<EditorState, "text" | "cursor">): KeyAction {
   if (key.return && (key.shift || key.meta)) return { type: "newline" };
   if (input === "\n" || (key.ctrl && input === "j")) return { type: "newline" };
   if (key.return) {
@@ -56,7 +56,7 @@ const CONTROL = /([\x00-\x08\x0b\x0c\x0e-\x1f])/;
  * unbracketed paste, kept as text for the editor to turn into newlines.
  */
 export function chunkKeys(input: string): [string, Partial<Key>][] {
-  const enter = input.indexOf("\r") === input.length - 1;
+  const enter = input.endsWith("\r") && input.indexOf("\r") === input.length - 1;
   const keys: [string, Partial<Key>][] = [];
   for (const part of (enter ? input.slice(0, -1) : input).split(CONTROL)) {
     if (!CONTROL.test(part)) {

@@ -84,11 +84,16 @@ function wordRight(text: string, i: number): number {
   return i;
 }
 
-const splice = (s: EditorState, from: number, to: number, insert = ""): EditorState => ({
-  ...s,
-  text: s.text.slice(0, from) + insert + s.text.slice(to),
-  cursor: from + insert.length,
-});
+/** `i`, or the end of the grapheme it falls inside (an insert can merge with what follows). */
+function snap(text: string, i: number): number {
+  const g = segmenter.segment(text).containing(i);
+  return !g || g.index === i ? i : g.index + g.segment.length;
+}
+
+const splice = (s: EditorState, from: number, to: number, insert = ""): EditorState => {
+  const text = s.text.slice(0, from) + insert + s.text.slice(to);
+  return { ...s, text, cursor: snap(text, from + insert.length) };
+};
 
 const show = (s: EditorState, text: string, historyIndex: number | null): EditorState => ({
   ...s,
@@ -133,12 +138,14 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   switch (action.type) {
     case "insert":
       return splice(s, cursor, cursor, clean(action.text));
-    case "set":
-      return { ...s, text: action.text, cursor: action.text.length };
+    case "set": {
+      const set = clean(action.text);
+      return { ...s, text: set, cursor: set.length };
+    }
     case "newline":
       return splice(s, cursor, cursor, "\n");
     case "continueLine":
-      return splice(s, cursor - 1, cursor, "\n");
+      return text[cursor - 1] === "\\" ? splice(s, cursor - 1, cursor, "\n") : splice(s, cursor, cursor, "\n");
     case "backspace":
       return splice(s, prevBoundary(text, cursor), cursor);
     case "delete":
@@ -152,11 +159,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "lineEnd":
       return { ...s, cursor: lineEnd(text, cursor) };
     case "wordLeft":
-      return { ...s, cursor: wordLeft(text, cursor) };
+      return { ...s, cursor: snap(text, wordLeft(text, cursor)) };
     case "wordRight":
-      return { ...s, cursor: wordRight(text, cursor) };
+      return { ...s, cursor: snap(text, wordRight(text, cursor)) };
     case "deleteWord":
-      return splice(s, wordLeft(text, cursor), cursor);
+      return splice(s, snap(text, wordLeft(text, cursor)), cursor);
     case "deleteToLineStart":
       return splice(s, lineStart(text, cursor), cursor);
     case "clear":

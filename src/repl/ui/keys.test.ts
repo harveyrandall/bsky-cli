@@ -47,5 +47,6 @@ describe("chunkKeys", () => {
   it("treats one \\r at the end as Enter and any other \\r as pasted text", () => {
     expect(chunkKeys("/help\r")).toEqual([["/help", {}], ["\r", { return: true }]]);
     expect(chunkKeys("a\rb\r")).toEqual([["a\rb\r", {}]]);
+    expect(chunkKeys("")).toEqual([]);
   });
 });
