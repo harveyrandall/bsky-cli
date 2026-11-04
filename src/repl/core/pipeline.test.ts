@@ -85,6 +85,35 @@ describe("Pipeline timing", () => {
     expect(deps.send).not.toHaveBeenCalled();
     expect(pipeline.pending()).toEqual([]);
   });
+  it("doesn't resend a post that was in flight when everything was cancelled", async () => {
+    const { pipeline, deps, sent } = setup();
+    let release = () => {};
+    deps.send.mockImplementationOnce(async (text: string) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      sent.push({ text, at: Date.now() });
+      return ref(1);
+    });
+    pipeline.enqueue({ kind: "thread" }, ["a", "b", "c"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pipeline.cancelAll().map((i) => i.posts)).toEqual([["b", "c"]]);
+    release();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(sent.map((s) => s.text)).toEqual(["a"]);
+    expect(pipeline.pending()).toEqual([]);
+  });
+  it("drafts only the in-flight post when it fails after a cancel", async () => {
+    const { pipeline, deps } = setup();
+    let fail = () => {};
+    deps.send.mockImplementationOnce(
+      () => new Promise<StrongRef>((_resolve, reject) => (fail = () => reject(fetchFailed()))),
+    );
+    pipeline.enqueue({ kind: "standalone" }, ["a", "b"]);
+    await vi.advanceTimersByTimeAsync(0);
+    pipeline.cancelAll();
+    fail();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.saveDraft).toHaveBeenCalledWith({ reason: "network", type: "post", text: "a" });
+  });
   it("resolves parents at send time", async () => {
     const { pipeline, sent } = setup({ undo: 5 });
     pipeline.enqueue({ kind: "thread" }, ["root"]);

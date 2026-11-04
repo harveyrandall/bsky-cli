@@ -130,9 +130,10 @@ export class Pipeline {
     const cancelled = this.queue
       .map((a) => ({ ...a.item, posts: a.item.posts.slice(a === inFlight ? a.index + 1 : a.index) }))
       .filter((i) => i.posts.length > 0);
-    this.queue = inFlight
-      ? [{ ...inFlight, item: { ...inFlight.item, posts: inFlight.item.posts.slice(0, inFlight.index + 1) } }]
-      : [];
+    // Truncate the in-flight item in place: sendHead still holds it and checks
+    // its length when the send returns.
+    if (inFlight) inFlight.item = { ...inFlight.item, posts: inFlight.item.posts.slice(0, inFlight.index + 1) };
+    this.queue = inFlight ? [inFlight] : [];
     this.paused = false;
     this.deps.onChange();
     return cancelled;
@@ -202,7 +203,7 @@ export class Pipeline {
       a.index++;
       a.rateLimited = false;
       if (a.index >= a.item.posts.length) {
-        this.queue.shift();
+        if (this.queue[0] === a) this.queue.shift();
         if (a.draftId) await this.deps.deleteDraft(a.draftId);
       }
     } catch (err) {
@@ -235,7 +236,7 @@ export class Pipeline {
     }
     const message = err instanceof Error ? err.message : String(err);
     const failure: Failure = { kind: c.kind, item: a.item, from: a.index, message };
-    this.queue.shift();
+    if (this.queue[0] === a) this.queue.shift();
     if (c.kind === "rejected") {
       this.deps.onFailed(failure);
       return;
