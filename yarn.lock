@@ -291,6 +291,7 @@ __metadata:
   resolution: "@harveyrandall/bsky-cli@workspace:."
   dependencies:
     "@atproto/api": "npm:^0.19.1"
+    "@atproto/syntax": "npm:^0.5.2"
     "@types/node": "npm:^25.3.3"
     "@types/react": "npm:^19.3"
     "@types/semver": "npm:^7.7.1"
