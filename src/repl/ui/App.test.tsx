@@ -302,4 +302,29 @@ describe("App threads", () => {
     expect(lastFrame()).toContain("Couldn't save drafts (EACCES); still here");
     expect(repl().pipeline.pending()).toHaveLength(1);
   });
+  it("send now saves unsent composer text as a draft before leaving", async () => {
+    const { type, drafts } = setup();
+    await type("unsent", "\x04", "s");
+    await tick();
+    expect(drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "unsent" });
+    expect(exit).toHaveBeenCalledOnce();
+  });
+  it("send now refuses while the queue is paused after an error", async () => {
+    const { type, lastFrame, agent } = setup();
+    agent.post.mockRejectedValueOnce(new Error("fetch failed"));
+    await type("/post a", "\r");
+    await tick();
+    await type("unsent", "\x04", "s");
+    expect(exit).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("Can't send now: the queue is paused after an error");
+  });
+  it("stays if a post comes back while it's sending everything to leave", async () => {
+    const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });
+    agent.post.mockRejectedValueOnce(Object.assign(new Error("Invalid record"), { status: 400 }));
+    await type("/post bad", "\r", "\x04", "s");
+    await tick();
+    await tick();
+    expect(exit).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("bsky › bad");
+  });
 });

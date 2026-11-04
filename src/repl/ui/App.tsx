@@ -69,7 +69,11 @@ export function App(props: AppProps) {
         },
         print,
         onChange: rerender,
-        restore: (text) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text })),
+        restore: (text) => {
+          // Something came back: don't leave with it.
+          setExitWhenSent(false);
+          setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
+        },
         saveDraft: props.drafts.save,
         deleteDraft: props.drafts.delete,
         saveConfig: props.saveConfig,
@@ -112,6 +116,20 @@ export function App(props: AppProps) {
     close();
     if (choice === "stay") return;
     if (choice === "send") {
+      if (repl.pipeline.isPaused()) {
+        print("Can't send now: the queue is paused after an error — /retry first, or choose save [d]raft.", "error");
+        return;
+      }
+      // Sending what's queued; unsent composer text is kept as a draft rather than posted mid-exit.
+      if (text.trim() !== "") {
+        try {
+          const d = await props.drafts.save({ reason: "manual", type: "post", text });
+          print(`Saved as draft ${d.id}`, "dim");
+        } catch (err) {
+          print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
+          return;
+        }
+      }
       repl.pipeline.sendNow();
       setExitWhenSent(true);
       return;
@@ -210,7 +228,10 @@ export function App(props: AppProps) {
         restore={restore}
         onRestoreBusy={(text) => void keepAsDraft(text)}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), repl })}
-        onEscape={(text) => repl.escape(text)}
+        onEscape={(text) => {
+          setExitWhenSent(false);
+          return repl.escape(text);
+        }}
         onInterrupt={(text) => repl.interrupt(text)}
         onEof={requestExit}
         onSendNow={() => repl.pipeline.sendNow()}
@@ -218,6 +239,7 @@ export function App(props: AppProps) {
         onError={(text) => print(text, "error")}
       />
       {countdown && <Countdown countdown={countdown} now={Date.now()} />}
+      {exitWhenSent && <Text dimColor>Leaving once everything is sent — Esc to stay</Text>}
       {repl.pipeline.isPaused() && (
         <Text color="yellow">Paused after a network error — /retry to resend it, Esc to cancel what's queued</Text>
       )}
