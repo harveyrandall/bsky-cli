@@ -53,13 +53,13 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["saveSession"]; resume?: AppProps["resume"] } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["saveSession"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]> } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
     selfDid: "did:plc:me" as const,
     resolveHandle: vi.fn(),
-    getPosts: vi.fn(async () => []),
+    getPosts: vi.fn(o.hold ?? (async () => [])),
     post: vi.fn(async () => ref(++n)),
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
@@ -748,6 +748,7 @@ describe("App resuming", () => {
   it("puts the composer back as it was, cursor and history included", async () => {
     const { lastFrame, type, shows } = setup({ resume: file() });
     await shows("── resumed k3f7xq ──");
+    await tick();
     expect(lastFrame()).toContain("bsky › half a thought");
     await type("X");
     expect(lastFrame()).toContain("bsky › halfX a thought");
@@ -756,8 +757,22 @@ describe("App resuming", () => {
   it("brings back what you'd submitted for ↑", async () => {
     const { type, lastFrame, shows } = setup({ resume: file({ composer: { text: "", cursor: 0 } }) });
     await shows("── resumed k3f7xq ──");
+    await tick();
     await type("\x1b[A");
     expect(lastFrame()).toContain("bsky › /thread");
+  });
+  it("holds the keyboard until the session is back", async () => {
+    let finish = (_: never[]) => {};
+    const thread = { root: ref(1), cursor: ref(1), count: 1 };
+    const posts = [{ label: "1", ...ref(1), rkey: "3lbx7kt5defba", authorDid: "did:plc:me", root: ref(1), excerpt: "one" }];
+    const app = setup({ resume: file({ thread, posts, mode: { kind: "thread" }, composer: { text: "", cursor: 0 } }), hold: () => new Promise((resolve) => (finish = resolve)) });
+    await app.shows("── resumed k3f7xq ──");
+    await app.type("typed too soon");
+    expect(app.lastFrame()).not.toContain("typed too soon");
+    finish([]);
+    await tick();
+    await app.type("later");
+    await app.shows("later");
   });
   it("asks about unsent posts through the keyboard", async () => {
     const pending = [{ id: 1, intent: { kind: "standalone" }, posts: ["left over"], createdAt: 0 }];

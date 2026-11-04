@@ -118,6 +118,9 @@ export class Repl {
   private closed = false;
   private readonly failed: Failure[] = [];
   private media: StagedMedia[] = [];
+  /** Saved posts waiting for Send, Edit or Discard. */
+  private unanswered: Unsent[] = [];
+  private readonly timers: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   private readonly letters = new Map<number, ThreadLetter | undefined>();
 
   constructor(
@@ -127,13 +130,13 @@ export class Repl {
   ) {
     this.s = { ...settings };
     this.registry = new Registry(settings.prefixThread, deps.agent.selfDid);
-    const timers = deps.timers ?? {
+    this.timers = deps.timers ?? {
       now: () => Date.now(),
       setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
       clearTimer: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
     };
     this.pipeline = new Pipeline({
-      ...timers,
+      ...this.timers,
       send: (text, reply, media, quote) => deps.agent.post(text, reply, media, quote),
       threadTarget: () => this.threadState && { parent: this.threadState.cursor, root: this.threadState.root },
       saveDraft: deps.saveDraft,
@@ -220,39 +223,58 @@ export class Repl {
 
   /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
   async resume(file: ReplSessionFile): Promise<void> {
+    // All of it first, so a save at any moment from here has the whole session.
     this.registry.restore(file.posts, file.counters);
+    this.threadState = file.thread;
+    this.media = [...file.staged];
+    this.unanswered = [...file.pending];
+    this.current = this.resumeMode(file.mode);
     this.deps.print(`── resumed ${file.id} ──`, "dim");
     for (const entry of this.registry.entries()) this.deps.print(this.registry.format(entry, this.s.verbose), "dim");
-    for (const m of file.staged) {
-      const there = (await inspectMedia(m.path, this.deps.fs ?? nodeMediaFs)).kind !== undefined;
-      if (there) this.media.push(m);
-      else this.deps.print(`${basename(m.path)} is no longer there; dropped it`, "error");
-    }
-    if (file.thread) await this.resumeThread(file.thread);
-    this.current = this.resumeMode(file.mode);
+    this.deps.onChange();
+    await this.checkStaged();
+    if (file.thread) await this.checkThread(file.thread);
     this.deps.onChange();
     for (const item of file.pending) await this.resumeItem(item);
   }
 
+  private async checkStaged(): Promise<void> {
+    for (const m of [...this.media]) {
+      const found = await inspectMedia(m.path, this.deps.fs ?? nodeMediaFs);
+      if (found.kind !== undefined && found.error === undefined) continue;
+      this.media = this.media.filter((staged) => staged !== m);
+      this.deps.print(`Dropped ${m.path}: ${found.error}`, "error");
+    }
+  }
+
+  /** getPosts, for as long as a person should be kept waiting. */
+  private lookUp(uris: AtUri[]) {
+    let timer: unknown;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = this.timers.setTimer(() => reject(new Error("timed out")), 10_000);
+    });
+    return Promise.race([this.deps.agent.getPosts(uris), timeout]).finally(() => this.timers.clearTimer(timer));
+  }
+
   /** The cursor, or the nearest of its ancestors that's still there. */
-  private async resumeThread(saved: ThreadState): Promise<void> {
+  private async checkThread(saved: ThreadState): Promise<void> {
     const chain: string[] = [];
     for (let uri: string | undefined = saved.cursor.uri; uri && chain.length < 25; uri = this.registry.byUri(uri)?.parent) chain.push(uri);
     let found: Set<string>;
     try {
-      found = new Set((await this.deps.agent.getPosts(chain as AtUri[])).map((p) => p.uri));
+      found = new Set((await this.lookUp(chain as AtUri[])).map((p) => p.uri));
     } catch (err) {
       this.deps.print(`Couldn't check the thread (${err instanceof Error ? err.message : String(err)}); carrying on from where it was`, "error");
-      this.threadState = saved;
       return;
     }
-    if (found.has(saved.cursor.uri)) {
-      this.threadState = saved;
-      return;
-    }
+    if (found.has(saved.cursor.uri)) return;
     const survivor = this.registry.byUri(chain.find((uri) => found.has(uri)) ?? "");
     if (!survivor) {
       this.deps.print("The thread's posts have gone; thread stopped", "dim");
+      this.threadState = undefined;
+      const m = this.current;
+      if (m.kind === "thread") this.current = { kind: "idle" };
+      else if (m.kind !== "idle") this.current = { ...m, returnTo: "idle" };
       return;
     }
     this.threadState = { ...saved, cursor: { uri: survivor.uri, cid: survivor.cid } };
@@ -272,17 +294,19 @@ export class Repl {
   private async resumeItem(item: Unsent): Promise<void> {
     const line = stripLabel(item.posts[0]).split("\n")[0];
     const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"`, ["Send", "Edit", "Discard"]);
-    if (answer === 2) return;
     if (answer === 0) {
       // A thread post goes after the cursor, whatever it was when saved.
       const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item.intent.kind === "thread" ? undefined : item.target);
       this.letters.set(sent.id, this.letterFor(item.intent));
-    } else if (this.deps.composerBusy() || !this.fits(item.media ?? [])) {
+    } else if (answer !== 2 && (this.deps.composerBusy() || !this.fits(item.media ?? []))) {
       await this.saveToDrafts([item], (id) => `Saved as draft ${id}`);
-    } else {
+    } else if (answer !== 2) {
       this.restage(item.media);
       this.deps.restore(this.asResend(item));
     }
+    // Only now: until it's somewhere else, a kill must leave it to ask about again.
+    this.unanswered = this.unanswered.filter((i) => i !== item);
+    this.deps.onChange();
   }
 
   /** The session as a file. Tokens aren't part of it: the profile's own session file has those. */
@@ -306,7 +330,7 @@ export class Repl {
       composer,
       staged: this.media,
       // Everything queued, a post in flight included: a kill leaves no telling if it went.
-      pending: [...this.pipeline.pending()],
+      pending: [...this.pipeline.pending(), ...this.unanswered],
       history,
       counters: { nextLabel, nextViewed: 0, nextLetter },
     };
@@ -797,7 +821,7 @@ export class Repl {
   }
 
   wouldLose(composerText: string): boolean {
-    return composerText.trim() !== "" || this.media.length > 0 || this.pipeline.pending().length > 0;
+    return composerText.trim() !== "" || this.media.length > 0 || this.pipeline.pending().length > 0 || this.unanswered.length > 0;
   }
 
   private cancelPending(composerText: string): EscapeResult {

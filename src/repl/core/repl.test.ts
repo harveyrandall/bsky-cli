@@ -807,7 +807,7 @@ describe("resume", () => {
     agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
     await repl.resume(file);
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/a.png"]);
-    expect(printed()).toContain("missing.png is no longer there; dropped it");
+    expect(printed()).toContain("Dropped /x/missing.png: missing.png not found");
   });
   it("goes back into a once mode", async () => {
     const file = await saved({ then: (s) => s.repl.reply("1").then(() => undefined) });
@@ -831,6 +831,80 @@ describe("resume", () => {
     agent.getPosts.mockResolvedValueOnce([]);
     await repl.resume(file);
     expect(repl.mode()).toEqual({ kind: "post-once", returnTo: "idle" });
+  });
+
+  describe("while it's still checking", () => {
+    it("has the whole session from the start, so a save then loses nothing", async () => {
+      const file = await saved({
+        then: async (s) => {
+          await s.repl.attach(["/x/a.png"]);
+          await s.repl.reply("1");
+        },
+      });
+      const { repl, agent, flush } = setup();
+      agent.getPosts.mockImplementationOnce(() => new Promise(() => {}));
+      void repl.resume(file);
+      await flush();
+      const now = repl.snapshot(meta, { text: "", cursor: 0 }, []);
+      expect(now.thread).toEqual(file.thread);
+      expect(now.mode).toEqual(file.mode);
+      expect(now.staged).toEqual(file.staged);
+      expect(now.posts).toHaveLength(2);
+    });
+    it("gives up on a check that hangs, keeping the thread", async () => {
+      const file = await saved();
+      const { repl, agent, printed } = setup();
+      agent.getPosts.mockImplementationOnce(() => new Promise(() => {}));
+      const done = repl.resume(file);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await done;
+      expect(repl.thread()?.cursor).toEqual(ref(2));
+      expect(printed()).toContain("Couldn't check the thread (timed out)");
+    });
+  });
+
+  describe("with unsent posts", () => {
+    const twoQueued = () =>
+      saved({
+        settings: { undo: 0 },
+        then: async (s) => {
+          s.repl.setCooldown("undo", 5);
+          await s.repl.submitText("first");
+          await s.repl.submitText("second");
+        },
+      });
+    const pendingNow = (r: { snapshot: Repl["snapshot"] }) => r.snapshot(meta, { text: "", cursor: 0 }, []).pending.map((p) => p.posts[0]);
+    it("keeps them in the file until they're answered, so a kill at the question loses nothing", async () => {
+      const file = await twoQueued();
+      const answers: ((n: number) => void)[] = [];
+      const choose = vi.fn(() => new Promise<number | undefined>((resolve) => answers.push(resolve)));
+      const { repl, agent, flush, deps } = setup({ undo: 5 }, { choose });
+      agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+      void repl.resume(file);
+      await flush();
+      expect(pendingNow(repl)).toEqual(["first", "second"]);
+      expect(repl.wouldLose("")).toBe(true);
+      deps.onChange.mockClear();
+      answers[0](2);
+      await flush();
+      expect(pendingNow(repl)).toEqual(["second"]);
+      expect(deps.onChange).toHaveBeenCalled();
+      answers[1](0);
+      await flush();
+      expect(pendingNow(repl)).toEqual(["second"]);
+      expect(repl.pendingCount()).toBe(1);
+    });
+    it("goes after the cursor one by one, not all to the saved parent", async () => {
+      const file = await twoQueued();
+      file.pending[0].target = { parent: ref(7), root: ref(1) };
+      file.pending[1].target = { parent: ref(7), root: ref(1) };
+      const { repl, agent, flush } = setup({}, { choose: vi.fn(async () => 0) });
+      agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+      agent.post.mockResolvedValueOnce(ref(3)).mockResolvedValueOnce(ref(4));
+      await repl.resume(file);
+      await flush();
+      expect(agent.post.mock.calls.map(([text, reply]) => [text, reply?.parent])).toEqual([["first", ref(2)], ["second", ref(3)]]);
+    });
   });
 
   describe("with unsent posts", () => {

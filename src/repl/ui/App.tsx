@@ -124,9 +124,15 @@ export function App(props: AppProps) {
         composerBusy: () => held.current !== undefined || composerText().trim() !== "",
       }),
   );
+  // The keyboard waits until the session is back, so nothing acts on half of it.
+  const [resuming, setResuming] = useState(props.resume !== undefined);
   useEffect(() => {
     props.onReady?.(repl);
-    if (props.resume) repl.resume(props.resume).catch((err: unknown) => print(err instanceof Error ? err.message : String(err), "error"));
+    if (!props.resume) return;
+    repl
+      .resume(props.resume)
+      .catch((err: unknown) => print(err instanceof Error ? err.message : String(err), "error"))
+      .finally(() => setResuming(false));
   }, [repl]);
 
   const saveFailed = useRef(false);
@@ -344,7 +350,7 @@ export function App(props: AppProps) {
         prompt={repl.prompt()}
         limit={repl.composerLimit()}
         pending={repl.waiting()}
-        active={!overlay}
+        active={!overlay && !resuming}
         chips={repl.staged().length > 0 ? chips(repl.staged()) : undefined}
         restore={restore}
         onEditor={onEditor}
