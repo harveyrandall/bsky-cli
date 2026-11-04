@@ -1,0 +1,141 @@
+import { describe, it, expect } from "vitest";
+import { parseSessionFile, type ReplSessionFile } from "./persist";
+import { isIsoUtc, isMarker, isSessionId } from "./types";
+
+const did = "did:plc:me";
+const uri = (rkey: string) => `at://${did}/app.bsky.feed.post/${rkey}`;
+const ref = (rkey: string) => ({ uri: uri(rkey), cid: `bafy${rkey}` });
+const a = "3lbx7kt5def2a";
+const b = "3lbx7kt5def2b";
+
+const good = () =>
+  ({
+    version: 1,
+    id: "k3f7xq",
+    createdAt: "2026-11-04T10:00:00.000Z",
+    updatedAt: "2026-11-04T10:05:00.000Z",
+    handle: "me.bsky.social",
+    did,
+    profile: "work",
+    settings: {
+      autoThread: false,
+      prefixThread: true,
+      threadLabel: "append",
+      undo: 5,
+      pace: 0,
+      verbose: false,
+      forceAlt: true,
+      askToSave: true,
+      markers: { split: "///", send: "//>", cut: "<//" },
+    },
+    posts: [
+      { label: "A1", ...ref(a), rkey: a, authorDid: did, root: ref(a), excerpt: "Launch day", letter: "A", notes: "📷 1" },
+      { label: "A2", ...ref(b), rkey: b, authorDid: did, root: ref(a), parent: uri(a), excerpt: "second", letter: "A" },
+    ],
+    viewed: [],
+    thread: { root: ref(a), cursor: ref(b), letter: "A", count: 2 },
+    mode: { kind: "reply-once", target: "A1", returnTo: "thread" },
+    composer: { text: "half a thought", cursor: 6 },
+    staged: [{ path: "/x/a.png", kind: "image", alt: "A chart" }],
+    pending: [
+      { id: 3, intent: { kind: "thread" }, posts: ["next"], createdAt: 1000, target: { parent: ref(b), root: ref(a) } },
+      { id: 4, intent: { kind: "quote", target: ref(a) }, posts: ["look"], createdAt: 1001 },
+      { id: 5, intent: { kind: "reply", target: ref(a), root: ref(a) }, posts: ["hi"], createdAt: 1002, media: [{ path: "/x/b.png", kind: "image" }] },
+    ],
+    history: ["/thread", "first"],
+    counters: { nextLabel: 3, nextViewed: 0, nextLetter: 1 },
+  }) as unknown as ReplSessionFile;
+
+type Mutable = Record<string, any>;
+const breaks: [string, (f: Mutable) => void][] = [
+  ["version", (f) => (f.version = 2)],
+  ["id", (f) => (f.id = "NOPE!!")],
+  ["createdAt", (f) => (f.createdAt = "yesterday")],
+  ["updatedAt", (f) => (f.updatedAt = "2026-11-04T10:05:00+01:00")],
+  ["handle", (f) => (f.handle = "not a handle")],
+  ["did", (f) => (f.did = "did:nope")],
+  ["profile", (f) => (f.profile = 7)],
+  ["settings.undo", (f) => (f.settings.undo = 7)],
+  ["settings.threadLabel", (f) => (f.settings.threadLabel = "sideways")],
+  ["settings.markers.split", (f) => (f.settings.markers.split = "a b")],
+  ["posts[0].uri", (f) => (f.posts[0].uri = "https://bsky.app")],
+  ["posts[0].cid", (f) => (f.posts[0].cid = "Qm123")],
+  ["posts[1].label", (f) => (f.posts[1].label = "a2")],
+  ["posts[0].root", (f) => (f.posts[0].root = { uri: "x", cid: "y" })],
+  ["posts[1].parent", (f) => (f.posts[1].parent = "x")],
+  ["posts[0].excerpt", (f) => (f.posts[0].excerpt = 1)],
+  ["thread.cursor", (f) => (f.thread.cursor = { uri: uri("nope"), cid: "b" })],
+  ["thread.count", (f) => (f.thread.count = -1)],
+  ["mode.kind", (f) => (f.mode.kind = "sideways")],
+  ["mode.target", (f) => (f.mode.target = "not a label")],
+  ["mode.returnTo", (f) => (f.mode.returnTo = "nowhere")],
+  ["composer.text", (f) => (f.composer.text = 1)],
+  ["composer.cursor", (f) => (f.composer.cursor = -1)],
+  ["staged[0].kind", (f) => (f.staged[0].kind = "audio")],
+  ["staged[0].path", (f) => (f.staged[0].path = "relative.png")],
+  ["pending[0].intent", (f) => (f.pending[0].intent = { kind: "sideways" })],
+  ["pending[0].posts", (f) => (f.pending[0].posts = [])],
+  ["pending[0].target", (f) => (f.pending[0].target = { parent: ref(a) })],
+  ["pending[2].media", (f) => (f.pending[2].media = [{ path: "b.png", kind: "image" }])],
+  ["history", (f) => (f.history = [1])],
+  ["counters.nextLabel", (f) => (f.counters.nextLabel = "3")],
+];
+
+describe("parseSessionFile", () => {
+  it("accepts a good file, through JSON, unchanged", () => {
+    const file = good();
+    expect(parseSessionFile(JSON.parse(JSON.stringify(file)))).toEqual(file);
+  });
+  it("accepts a file with nothing optional", () => {
+    const file = good() as Mutable;
+    for (const key of ["profile", "thread"]) delete file[key];
+    file.settings.undo = undefined;
+    file.mode = { kind: "idle" };
+    expect(() => parseSessionFile(JSON.parse(JSON.stringify(file)))).not.toThrow();
+  });
+  it.each(breaks)("refuses a bad %s, naming it", (field, spoil) => {
+    const file = good() as Mutable;
+    spoil(file);
+    expect(() => parseSessionFile(file)).toThrow(`Session file: bad ${field}`);
+  });
+  it("refuses what isn't an object", () => {
+    for (const raw of [null, 1, "text", []]) expect(() => parseSessionFile(raw)).toThrow("Session file");
+  });
+  it("refuses staged media a post couldn't hold, valid as each file is", () => {
+    const file = good() as Mutable;
+    file.staged.push({ path: "/x/c.mp4", kind: "video" });
+    expect(() => parseSessionFile(file)).toThrow("Session file: bad staged");
+  });
+  it("refuses queued media a post couldn't hold", () => {
+    const file = good() as Mutable;
+    file.pending[2].media = [1, 2, 3, 4, 5].map((n) => ({ path: `/x/${n}.png`, kind: "image" }));
+    expect(() => parseSessionFile(file)).toThrow("Session file: bad pending[2].media");
+  });
+  it("refuses a queued quote of two posts, or with media", () => {
+    const two = good() as Mutable;
+    two.pending[1].posts.push("more");
+    expect(() => parseSessionFile(two)).toThrow("Session file: bad pending[1]");
+    const media = good() as Mutable;
+    media.pending[1].media = [{ path: "/x/b.png", kind: "image" }];
+    expect(() => parseSessionFile(media)).toThrow("Session file: bad pending[1]");
+  });
+});
+
+describe("guards", () => {
+  it("isSessionId takes 6 base32 characters", () => {
+    expect(isSessionId("k3f9xq")).toBe(false); // 9 isn't base32
+    expect(isSessionId("k3f7xq")).toBe(true);
+    expect(isSessionId("k3f7x")).toBe(false);
+    expect(isSessionId("K3F7XQ")).toBe(false);
+  });
+  it("isIsoUtc takes a UTC timestamp only", () => {
+    expect(isIsoUtc("2026-11-04T10:00:00.000Z")).toBe(true);
+    expect(isIsoUtc("2026-11-04T10:00:00+01:00")).toBe(false);
+    expect(isIsoUtc("2026-11-04")).toBe(false);
+  });
+  it("isMarker takes text with no spaces", () => {
+    expect(isMarker("///")).toBe(true);
+    expect(isMarker("")).toBe(false);
+    expect(isMarker("a b")).toBe(false);
+  });
+});
