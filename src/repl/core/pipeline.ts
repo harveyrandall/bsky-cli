@@ -130,10 +130,16 @@ export class Pipeline {
   }
 
   pending(): readonly Unsent[] {
-    return this.queue.map((a) => this.unsent(a, a.index));
+    return this.queue.map((a) => this.remaining(a, a.index));
   }
 
-  private unsent(a: Active, from: number): Unsent {
+  /** What can still be stopped: everything but a post already being sent. */
+  unsent(): Unsent[] {
+    const inFlight = this.sending ? this.queue[0] : undefined;
+    return this.queue.map((a) => this.remaining(a, a === inFlight ? a.index + 1 : a.index)).filter((i) => i.posts.length > 0);
+  }
+
+  private remaining(a: Active, from: number): Unsent {
     return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a) };
   }
 
@@ -170,11 +176,9 @@ export class Pipeline {
    */
   cancelAll(o: { keepDrafts?: boolean } = {}): Unsent[] {
     this.clear();
+    const cancelled = this.unsent();
     // A post already being sent can't be stopped; it stays queued on its own.
     const inFlight = this.sending ? this.queue[0] : undefined;
-    const cancelled = this.queue
-      .map((a) => this.unsent(a, a === inFlight ? a.index + 1 : a.index))
-      .filter((i) => i.posts.length > 0);
     if (!o.keepDrafts) for (const a of this.queue) if (a !== inFlight) void this.dropDraft(a);
     // Truncate the in-flight item in place: sendHead still holds it and checks
     // its length when the send returns.

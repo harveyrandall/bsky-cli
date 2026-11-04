@@ -218,7 +218,7 @@ export class Repl {
 
   /** What's queued, as drafts that send it to the same places. */
   draftItems(): Omit<Draft, "id" | "createdAt">[] {
-    return this.pipeline.pending().map(manualDraft);
+    return this.pipeline.unsent().map(manualDraft);
   }
 
   prompt(): string {

@@ -283,6 +283,14 @@ describe("drafts of what's queued", () => {
     await flush();
     expect(repl.draftItems()).toEqual([{ reason: "manual", type: "reply", text: "two", replyUri: ref(1).uri }]);
   });
+  it("leave out a post already on its way, which can't be stopped", async () => {
+    const { repl, agent, flush } = setup();
+    agent.post.mockImplementationOnce(() => new Promise(() => {}));
+    await repl.post("one /// two");
+    await flush();
+    expect(repl.pendingCount()).toBe(1);
+    expect(repl.draftItems()).toEqual([{ reason: "manual", type: "post", text: "two" }]);
+  });
   it("are saved one per item when Esc can't put them back in the composer", async () => {
     const { repl, deps, flush } = setup({ undo: 5 });
     await repl.post("a");
