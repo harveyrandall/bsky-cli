@@ -543,8 +543,17 @@ export class Repl {
     }
   }
 
+  /** Says which posts are over the limit, if any are. */
+  private overLimit(plan: SubmitPlan, limit: number): boolean {
+    for (const i of plan.overLimit) {
+      this.deps.print(`Post ${i + 1} is ${graphemeLength(plan.posts[i])}/${limit} — shorten it or split it`, "error");
+    }
+    return plan.overLimit.length > 0;
+  }
+
   private async schedule(text: string): Promise<SubmitOutcome> {
     const plan = parseSubmit(text, this.markers, 300);
+    if (this.overLimit(plan, 300)) return "keep";
     if (plan.posts.length !== 1) {
       this.deps.print("A scheduled post is a single post of up to 300 characters", "error");
       return "keep";
@@ -554,15 +563,17 @@ export class Repl {
     const saved = await this.deps.saveScheduled({ scheduledAt, text: plan.posts[0], ...mediaOptions(this.media) });
     this.media = [];
     this.deps.print(`Scheduled for ${formatLocalDateTime(scheduledAt)} (${saved.id})`, "dim");
+    if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
   }
 
   private async saveAsDraft(text: string): Promise<SubmitOutcome> {
     const plan = parseSubmit(text, this.markers, 300);
-    if (plan.posts.length === 0) return "keep";
+    if (plan.posts.length === 0 || this.overLimit(plan, 300)) return "keep";
     const saved = await this.deps.saveDraft(draftOf("manual", plan.posts, { media: this.media }));
     this.media = [];
     this.deps.print(`Saved as draft ${saved.id}`, "dim");
+    if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
   }
 
@@ -679,12 +690,7 @@ export class Repl {
     const limit = labelled ? 298 : 300;
     const plan = parseSubmit(text, this.markers, limit);
     if (plan.posts.length === 0) return "keep";
-    if (plan.overLimit.length) {
-      for (const i of plan.overLimit) {
-        this.deps.print(`Post ${i + 1} is ${graphemeLength(plan.posts[i])}/${limit} — shorten it or split it`, "error");
-      }
-      return "keep";
-    }
+    if (this.overLimit(plan, limit)) return "keep";
     const quoting = intent.kind === "quote";
     if (quoting && plan.posts.length > 1) {
       this.deps.print("A quote is a single post: shorten it, or quote the first part and reply to it", "error");

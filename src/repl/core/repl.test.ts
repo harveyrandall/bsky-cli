@@ -711,6 +711,20 @@ describe("/new", () => {
     expect(repl.staged()).toEqual([]);
     expect(repl.mode().kind).toBe("idle");
   });
+  it("refuses a post over the limit, which would half-send later", async () => {
+    const { repl, deps, printed } = setup({}, pick("Draft"));
+    await repl.newMenu();
+    expect(await repl.submitText(`short /// ${"y".repeat(301)}`)).toBe("keep");
+    expect(printed()).toContain("Post 2 is 301/300");
+    expect(deps.saveDraft).not.toHaveBeenCalled();
+    expect(repl.mode().kind).toBe("draft-once");
+  });
+  it("says what it cut from a draft", async () => {
+    const { repl, printed } = setup({}, pick("Draft"));
+    await repl.newMenu();
+    await repl.submitText("keep this <// scrap");
+    expect(printed()).toContain("Discarded: scrap");
+  });
   it("keeps a thread's shape in a draft", async () => {
     const { repl, deps } = setup({}, pick("Draft"));
     await repl.newMenu();
@@ -758,6 +772,19 @@ describe("scheduled posts", () => {
     expect(await repl.submitText("later")).toBe("keep");
     expect(deps.saveScheduled).not.toHaveBeenCalled();
     expect(repl.mode().kind).toBe("schedule-once");
+  });
+  it("refuse a post over the limit, even one a marker kept from splitting", async () => {
+    const { repl, deps, printed } = setup({}, answers("05-11-2026", "15:30"));
+    await repl.newMenu();
+    expect(await repl.submitText(`${"y".repeat(301)} ///`)).toBe("keep");
+    expect(printed()).toContain("Post 1 is 301/300");
+    expect(deps.saveScheduled).not.toHaveBeenCalled();
+  });
+  it("say what was cut", async () => {
+    const { repl, printed } = setup({}, answers("05-11-2026", "15:30"));
+    await repl.newMenu();
+    await repl.submitText("keep this <// scrap");
+    expect(printed()).toContain("Discarded: scrap");
   });
   it("are one post", async () => {
     const { repl, deps, printed } = setup({}, answers("05-11-2026", "15:30"));
