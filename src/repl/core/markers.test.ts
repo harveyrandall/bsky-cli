@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_MARKERS, DEFAULT_MARKERS as m, resolveMarkers, scanMarkers, segmentAt } from "./markers";
+import { graphemeLength } from "@/lib/split-thread";
+import { DEFAULT_MARKERS, DEFAULT_MARKERS as m, parseSubmit, resolveMarkers, scanMarkers, segmentAt } from "./markers";
 
 describe("scanMarkers", () => {
   it("finds each marker kind with offsets", () => {
@@ -69,5 +70,43 @@ describe("resolveMarkers", () => {
 describe("an empty marker", () => {
   it("is never matched, so scanning can't stall", () => {
     expect(segmentAt("hi", 2, { ...m, split: "" })).toEqual({ index: 1, total: 1, text: "hi", region: "send" });
+  });
+});
+
+describe("parseSubmit", () => {
+  const p = (text: string, limit = 300) => parseSubmit(text, m, limit);
+  it("sends up to //> and keeps the rest as typed", () => {
+    expect(p("a //> b <// c")).toEqual({ posts: ["a"], keep: "b <// c", autoSplit: false, markersUsed: true, overLimit: [] });
+  });
+  it("discards what follows <// in the send part", () => {
+    expect(p("a <// b //> c")).toMatchObject({ posts: ["a"], discard: "b", keep: "c" });
+  });
+  it("splits at /// and drops empty pieces", () => {
+    expect(p("one /// two ///")).toMatchObject({ posts: ["one", "two"], markersUsed: true });
+  });
+  it("removes escapes and doesn't count escaped markers", () => {
+    expect(p("file:\\///tmp")).toMatchObject({ posts: ["file:///tmp"], markersUsed: false });
+  });
+  it("auto-splits long text without markers", () => {
+    const plan = p("word ".repeat(70).trim());
+    expect(plan).toMatchObject({ autoSplit: true, markersUsed: false, overLimit: [] });
+    expect(plan.posts.length).toBeGreaterThan(1);
+    for (const post of plan.posts) expect(graphemeLength(post)).toBeLessThanOrEqual(300);
+  });
+  it("honours a smaller limit", () => {
+    const text = "x ".repeat(149) + "x";
+    expect(p(text).autoSplit).toBe(false);
+    expect(p(text, 298).autoSplit).toBe(true);
+  });
+  it("flags a marker-made post over the limit instead of splitting it", () => {
+    const plan = p(`short /// ${"y".repeat(320)}`);
+    expect(plan).toMatchObject({ autoSplit: false, overLimit: [1] });
+    expect(plan.posts[1]).toHaveLength(320);
+  });
+  it("uses custom markers", () => {
+    expect(parseSubmit("a ~~ b", { ...m, split: "~~" }, 300).posts).toEqual(["a", "b"]);
+  });
+  it("has no posts for blank text", () => {
+    expect(p("   ").posts).toEqual([]);
   });
 });

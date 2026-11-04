@@ -1,3 +1,5 @@
+import { graphemeLength, splitThread } from "@/lib/split-thread";
+
 export interface Markers {
   readonly split: string;
   readonly send: string;
@@ -115,4 +117,53 @@ export function segmentAt(text: string, cursor: number, m: Markers): Segment {
   const start = before === 0 ? 0 : splits[before - 1].end;
   const end = before < splits.length ? splits[before].start : piecesEnd;
   return { region: "send", index: before + 1, total, text: clean(start, end) };
+}
+
+export interface SubmitPlan {
+  /** Trimmed, empty pieces dropped. */
+  posts: string[];
+  /** Text after the first send marker, as typed, for the composer. */
+  keep?: string;
+  /** Text after the first cut marker in the send part. */
+  discard?: string;
+  /** No split markers and the text was over the limit. */
+  autoSplit: boolean;
+  markersUsed: boolean;
+  /** Indexes of marker-made posts longer than the limit. */
+  overLimit: number[];
+}
+
+/**
+ * What submitting `text` sends (spec §7): up to the first send marker, minus
+ * anything after a cut marker, split at split markers. Long text with no split
+ * markers is split automatically to fit `limit`.
+ */
+export function parseSubmit(text: string, m: Markers, limit: number): SubmitPlan {
+  const hits = scanMarkers(text, m);
+  const send = hits.find((h) => h.kind === "send");
+  const sendStart = send?.start ?? text.length;
+  const cut = hits.find((h) => h.kind === "cut" && h.start < sendStart);
+  const piecesEnd = cut?.start ?? sendStart;
+  const splits = hits.filter((h) => h.kind === "split" && h.end <= piecesEnd);
+
+  const keep = send ? text.slice(send.end).replace(/^\s+/, "") : "";
+  const discard = cut ? unescape(text.slice(cut.end, sendStart), m).trim() : "";
+  const bounds = [0, ...splits.flatMap((h) => [h.start, h.end]), piecesEnd];
+  const pieces: string[] = [];
+  for (let i = 0; i < bounds.length; i += 2) pieces.push(unescape(text.slice(bounds[i], bounds[i + 1]), m).trim());
+  let posts = pieces.filter((p) => p !== "");
+
+  const autoSplit = splits.length === 0 && posts.length === 1 && graphemeLength(posts[0]) > limit;
+  if (autoSplit) {
+    posts = splitThread(posts[0], { splitMarker: false, maxChars: limit, threadLabel: false }).map((p) => p.text);
+  }
+  const overLimit = splits.length === 0 ? [] : posts.flatMap((p, i) => (graphemeLength(p) > limit ? [i] : []));
+  return {
+    posts,
+    ...(keep && { keep }),
+    ...(discard && { discard }),
+    autoSplit,
+    markersUsed: Boolean(send || cut || splits.length),
+    overLimit,
+  };
 }
