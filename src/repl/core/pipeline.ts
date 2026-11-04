@@ -238,7 +238,8 @@ export class Pipeline {
       return !a.rateLimited && ms >= 0 && ms <= 60_000 ? { kind: "wait", ms } : { kind: "network" };
     }
     if (e.status === 401 || e.error === "ExpiredToken" || e.error === "InvalidToken") return { kind: "expired" };
-    return isNetworkError(err) ? { kind: "network" } : { kind: "rejected" };
+    // A 5xx says nothing about the post; only a 4xx rejects it.
+    return isNetworkError(err) || (e.status ?? 0) >= 500 ? { kind: "network" } : { kind: "rejected" };
   }
 
   private async fail(a: Active, target: SendTarget | undefined, err: unknown): Promise<void> {

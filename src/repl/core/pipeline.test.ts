@@ -194,6 +194,14 @@ describe("Pipeline errors", () => {
     expect(pipeline.lastFailure()).toBeUndefined();
     await expect(pipeline.retry()).resolves.toBe(false);
   });
+  it("treats a server error as a network failure, not a rejected post", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(Object.assign(new Error("Internal Server Error"), { status: 502 }));
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.onFailed).toHaveBeenCalledWith(expect.objectContaining({ kind: "network", draftId: "d1" }));
+    expect(pipeline.isPaused()).toBe(true);
+  });
   it("keeps a post it couldn't save as a draft at the head of the paused queue", async () => {
     const { pipeline, deps, sent } = setup();
     deps.send.mockRejectedValueOnce(fetchFailed());
