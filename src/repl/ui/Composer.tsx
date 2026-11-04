@@ -3,7 +3,7 @@ import { Box, Text, useInput, usePaste, useWindowSize, type Key } from "ink";
 import { completeCommand } from "@/repl/core/commands";
 import { segmentAt, type Markers } from "@/repl/core/markers";
 import type { EscapeResult, Repl, SubmitOutcome } from "@/repl/core/repl";
-import { editorReducer, emptyEditor, type EditorAction } from "@/repl/ui/editor";
+import { editorReducer, emptyEditor, type EditorAction, type EditorState } from "@/repl/ui/editor";
 import { chunkKeys, keyToAction } from "@/repl/ui/keys";
 import { Ring } from "@/repl/ui/Ring";
 
@@ -77,7 +77,7 @@ export interface ComposerProps {
   /** Text coming back (a rejected post, a paste that wasn't a drop): added whenever `id` changes. */
   restore?: { id: number; text: string };
   /** The draft, whenever it changes. */
-  onText(text: string): void;
+  onEditor(state: EditorState): void;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -100,7 +100,7 @@ export function Composer(props: ComposerProps) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const apply = (action: EditorAction) => {
     editor.current = editorReducer(editor.current, action);
-    props.onText(editor.current.text);
+    props.onEditor(editor.current);
     rerender();
   };
 

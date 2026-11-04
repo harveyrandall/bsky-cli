@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
-import { App } from "./App";
+import { App, type AppProps } from "./App";
 import { offlineProps } from "@/repl";
 import { IDLE_HINT, type Repl, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
@@ -53,7 +53,7 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings> } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["saveSession"] } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
@@ -75,6 +75,7 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
+      saveSession={o.saveSession}
       configName="config.toml"
       onReady={(r) => (session = r)}
     />,
@@ -700,5 +701,42 @@ describe("App media", () => {
     await type("3:30", "\r");
     await tick();
     expect(lastFrame()).toContain("› AM");
+  });
+});
+
+describe("App session saving", () => {
+  const saving = () => vi.fn(async () => {});
+  it("saves whenever the session changes", async () => {
+    const saveSession = saving();
+    const { type } = setup({ saveSession });
+    await type("/post hello", "\r");
+    await tick();
+    expect(saveSession).toHaveBeenCalled();
+    saveSession.mockClear();
+    await type("/thread", "\r");
+    await tick();
+    expect(saveSession).toHaveBeenCalled();
+  });
+  it("saves typing once it pauses, with the cursor and history", async () => {
+    const saveSession = saving();
+    const { type, repl } = setup({ saveSession });
+    await type("/thread", "\r");
+    await tick();
+    saveSession.mockClear();
+    await type("h", "i");
+    expect(saveSession).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(saveSession).toHaveBeenCalledOnce(), { timeout: 2000 });
+    expect(saveSession).toHaveBeenCalledWith(repl(), expect.objectContaining({ text: "hi", cursor: 2, history: ["/thread"] }));
+  });
+  it("says once if saving fails, and carries on", async () => {
+    const saveSession = vi.fn(async () => {
+      throw new Error("ENOSPC");
+    });
+    const { type, lastFrame } = setup({ saveSession });
+    await type("/post one", "\r");
+    await tick();
+    await type("/post two", "\r");
+    await tick();
+    expect(lastFrame().split("Couldn't save this session (ENOSPC)")).toHaveLength(2);
   });
 });

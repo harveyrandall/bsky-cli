@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Repl, IDLE_HINT, type ReplAsk, type ReplSettings } from "./repl";
 import { DEFAULT_MARKERS } from "./markers";
+import { parseSessionFile } from "./persist";
 import type { AtUri, Cid, Did, StrongRef } from "./types";
 import type { SendTarget } from "./pipeline";
 import type { LineStyle } from "./commands";
@@ -11,7 +12,7 @@ import type { MediaFs, StagedMedia } from "./media";
 const me = "did:plc:me" as Did;
 const ref = (n: number): StrongRef => ({
   uri: `at://${me}/app.bsky.feed.post/3lbx7kt5def${String.fromCharCode(97 + n)}a` as AtUri,
-  cid: `bafy${n}` as Cid,
+  cid: `bafy${String.fromCharCode(97 + n)}` as Cid,
 });
 
 const rejected = () => Object.assign(new Error("Invalid record"), { status: 400 });
@@ -733,6 +734,51 @@ describe("saving the composer as a draft", () => {
       { reason: "manual", type: "quote", text: "hi", quoteUri: ref(1).uri },
       { reason: "manual", type: "post", text: "", images: ["/x/a.png"], imageAlts: ["a.png"] },
     ]);
+  });
+});
+
+describe("snapshot", () => {
+  const meta = { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: me } as never;
+  const composer = { text: "half a thought", cursor: 4 };
+  const reread = (file: unknown) => parseSessionFile(JSON.parse(JSON.stringify(file)));
+  it("holds the whole session, and passes the file's own checks", async () => {
+    const { repl, flush } = setup({ undo: 5 });
+    repl.setCooldown("undo", 0);
+    await repl.startThread("one");
+    await flush();
+    await repl.reply("1");
+    await repl.attach(["/x/a.png"]);
+    repl.setCooldown("undo", 5);
+    await repl.post("waiting");
+    await repl.attach(["/x/b.png"]);
+    const file = reread(repl.snapshot(meta, composer, ["/thread"]));
+    expect(file).toMatchObject({
+      version: 1,
+      id: "k3f7xq",
+      updatedAt: "2026-11-04T10:00:00.000Z",
+      handle: "me.bsky.social",
+      did: me,
+      thread: { root: ref(1), cursor: ref(1), count: 1 },
+      mode: { kind: "reply-once", target: "1", returnTo: "thread" },
+      composer,
+      staged: [{ path: "/x/b.png", kind: "image" }],
+      history: ["/thread"],
+      counters: { nextLabel: 2, nextLetter: 0 },
+    });
+    expect(file.posts.map((p) => p.label)).toEqual(["1"]);
+    expect(file.pending).toMatchObject([{ posts: ["waiting"], intent: { kind: "standalone" }, media: [{ path: "/x/a.png" }] }]);
+    expect(file.settings).toMatchObject({ undo: 5, markers: DEFAULT_MARKERS });
+  });
+  it("includes a post in flight, which may or may not have gone", async () => {
+    const { repl, agent, flush } = setup();
+    agent.post.mockImplementationOnce(() => new Promise(() => {}));
+    await repl.post("going");
+    await flush();
+    expect(reread(repl.snapshot(meta, composer, [])).pending).toMatchObject([{ posts: ["going"] }]);
+  });
+  it("has no tokens in it", async () => {
+    const { repl } = setup();
+    expect(JSON.stringify(repl.snapshot(meta, composer, []))).not.toMatch(/jwt|password|token/i);
   });
 });
 

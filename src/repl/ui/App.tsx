@@ -9,6 +9,7 @@ import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
+import { emptyEditor, type EditorState } from "@/repl/ui/editor";
 import { Choice, Countdown, ExitPrompt, SplitPreview, TextPrompt, YesNo, type ExitChoice } from "@/repl/ui/Overlays";
 
 export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
@@ -30,6 +31,8 @@ export interface AppProps {
   saveConfig: ReplDeps["saveConfig"];
   saveScheduled: ReplDeps["saveScheduled"];
   schedulerRunning: ReplDeps["schedulerRunning"];
+  /** Keep the session on disk, so it can be resumed. */
+  saveSession?(repl: Repl, composer: EditorState): Promise<void>;
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -64,6 +67,7 @@ export function App(props: AppProps) {
     else setLog((l) => [...l, { id: l.length, text, style }]);
   }, []);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const changed = useRef(() => {});
   // Questions wait their turn: replacing an open one would leave it unanswered for good.
   const [overlays, setOverlays] = useState<Overlay[]>([]);
   const overlay = overlays[0];
@@ -71,7 +75,8 @@ export function App(props: AppProps) {
   const [restore, setRestore] = useState<{ id: number; text: string }>();
   const [exitWhenSent, setExitWhenSent] = useState(false);
   const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
-  const composerText = useRef("");
+  const composer = useRef(emptyEditor());
+  const composerText = () => composer.current.text;
   /** What send now has already saved, so leaving needn't ask about it again. */
   const savedText = useRef<string | undefined>(undefined);
 
@@ -95,7 +100,10 @@ export function App(props: AppProps) {
           text: (label) => new Promise((resolve) => ask({ kind: "text", label, resolve })),
         },
         print,
-        onChange: rerender,
+        onChange: () => {
+          rerender();
+          changed.current();
+        },
         restore: (text) => {
           // Something came back: don't leave with it.
           setExitWhenSent(false);
@@ -106,12 +114,29 @@ export function App(props: AppProps) {
         saveConfig: props.saveConfig,
         saveScheduled: props.saveScheduled,
         schedulerRunning: props.schedulerRunning,
-        composerBusy: () => held.current !== undefined || composerText.current.trim() !== "",
+        composerBusy: () => held.current !== undefined || composerText().trim() !== "",
       }),
   );
   useEffect(() => {
     props.onReady?.(repl);
   }, [repl]);
+
+  const saveFailed = useRef(false);
+  const save = () => {
+    props.saveSession?.(repl, composer.current).catch((err: unknown) => {
+      if (!saveFailed.current) print(`Couldn't save this session (${err instanceof Error ? err.message : String(err)})`, "error");
+      saveFailed.current = true;
+    });
+  };
+  changed.current = save;
+  // Typing is saved once it pauses; everything else as it happens.
+  const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const onEditor = (state: EditorState) => {
+    composer.current = state;
+    clearTimeout(typing.current);
+    typing.current = setTimeout(save, 1000);
+  };
+  useEffect(() => () => clearTimeout(typing.current), []);
   // Leaving always stops the queue, so nothing is posted after the REPL closes.
   const leave = useCallback(() => {
     repl.close();
@@ -130,7 +155,7 @@ export function App(props: AppProps) {
   useEffect(() => {
     if (!exitWhenSent || pendingCount > 0 || overlay) return;
     setExitWhenSent(false);
-    requestExit(composerText.current === savedText.current ? "" : composerText.current);
+    requestExit(composerText() === savedText.current ? "" : composerText());
   }, [exitWhenSent, pendingCount, overlay]);
 
   const close = () => setOverlays((open) => open.slice(1));
@@ -173,7 +198,7 @@ export function App(props: AppProps) {
     close();
     if (choice === "stay") return;
     // Read now, not when the prompt opened: a post may have come back since.
-    const text = composerText.current;
+    const text = composerText();
     if (choice === "send") {
       if (repl.pausedBy()) {
         print("Can't send now: the queue is paused after an error — /retry first, or choose save [d]raft.", "error");
@@ -314,7 +339,7 @@ export function App(props: AppProps) {
         active={!overlay}
         chips={repl.staged().length > 0 ? chips(repl.staged()) : undefined}
         restore={restore}
-        onText={(text) => (composerText.current = text)}
+        onEditor={onEditor}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
         onEscape={(text) => {
           setExitWhenSent(false);

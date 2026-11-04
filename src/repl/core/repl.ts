@@ -6,8 +6,9 @@ import type { LineStyle } from "./commands";
 import { escapeMarkers, parseSubmit, type Markers, type SubmitPlan } from "./markers";
 import { canStage, chips, expandHome, inspectMedia, mediaOptions, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
 import { Pipeline, draftOf, quoteOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
+import type { ReplSessionFile, SavedMode } from "./persist";
 import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
-import type { Cooldown, StrongRef, ThreadLetter } from "./types";
+import type { Cooldown, IsoUtc, OwnLabel, StrongRef, ThreadLetter } from "./types";
 
 export const IDLE_HINT =
   "Plain text needs a thread: /thread to start one, /post for a single post, or -t to do this automatically.";
@@ -27,7 +28,7 @@ type ReturnTo = "idle" | "thread";
 export type ReplMode =
   | { kind: "idle" }
   | { kind: "thread" }
-  | { kind: "reply-once" | "quote-once"; target: ResolvedRef; label: string; returnTo: ReturnTo }
+  | { kind: "reply-once" | "quote-once"; target: ResolvedRef; label: OwnLabel; returnTo: ReturnTo }
   | { kind: "post-once" | "schedule-once" | "draft-once"; returnTo: ReturnTo };
 
 export interface ReplSettings {
@@ -215,6 +216,33 @@ export class Repl {
 
   sendNow(): void {
     this.pipeline.sendNow();
+  }
+
+  /** The session as a file. Tokens aren't part of it: the profile's own session file has those. */
+  snapshot(
+    meta: Pick<ReplSessionFile, "id" | "createdAt" | "handle" | "did" | "profile">,
+    composer: ReplSessionFile["composer"],
+    history: string[],
+  ): ReplSessionFile {
+    const { posts, nextLabel, nextLetter } = this.registry.snapshot();
+    const m = this.current;
+    const mode: SavedMode = "target" in m ? { kind: m.kind, target: m.label, returnTo: m.returnTo } : m;
+    return {
+      version: 1,
+      ...meta,
+      updatedAt: new Date().toISOString() as IsoUtc,
+      settings: { ...this.s, markers: this.markers },
+      posts,
+      viewed: [],
+      thread: this.threadState,
+      mode,
+      composer,
+      staged: this.media,
+      // Everything queued, a post in flight included: a kill leaves no telling if it went.
+      pending: [...this.pipeline.pending()],
+      history,
+      counters: { nextLabel, nextViewed: 0, nextLetter },
+    };
   }
 
   /** Media waiting for the next post. */
