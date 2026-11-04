@@ -1,0 +1,68 @@
+import { describe, it, expect, vi } from "vitest";
+import { homedir } from "node:os";
+import { canStage, chips, expandHome, inspectMedia, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
+
+const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+const mp4 = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]);
+const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+const fs = (size: number | undefined, head = png): MediaFs => ({ size: vi.fn(async () => size), head: vi.fn(async () => head) });
+
+describe("inspectMedia", () => {
+  it("accepts images and MP4 video by their first bytes", async () => {
+    await expect(inspectMedia("/a.bin", fs(10))).resolves.toEqual({ kind: "image" });
+    await expect(inspectMedia("/a.bin", fs(10, mp4))).resolves.toEqual({ kind: "video" });
+  });
+  it("names a file that isn't there", async () => {
+    await expect(inspectMedia("/x/chart.png", fs(undefined))).resolves.toEqual({ error: "chart.png not found" });
+  });
+  it("refuses what isn't media", async () => {
+    await expect(inspectMedia("/x/a.pdf", fs(10, pdf))).resolves.toEqual({ error: "a.pdf isn't an image or MP4 video" });
+  });
+  it("holds images and video to their limits", async () => {
+    await expect(inspectMedia("/x/a.png", fs(1_000_000))).resolves.toEqual({ kind: "image" });
+    await expect(inspectMedia("/x/a.png", fs(1_000_001))).resolves.toEqual({ error: "a.png is over the 1 MB image limit" });
+    await expect(inspectMedia("/x/a.mp4", fs(100_000_001, mp4))).resolves.toEqual({ error: "a.mp4 is over the 100 MB video limit" });
+  });
+});
+
+describe("canStage", () => {
+  const image = (n: number): StagedMedia => ({ path: `/${n}.png`, kind: "image" });
+  it("allows up to the image limit", () => {
+    expect(canStage([image(1), image(2), image(3)], "image")).toBeUndefined();
+    expect(canStage([image(1), image(2), image(3), image(4)], "image")).toBe("Only 4 images per post");
+  });
+  it("never mixes images and video, and allows one video", () => {
+    const video: StagedMedia = { path: "/a.mp4", kind: "video" };
+    expect(canStage([], "video")).toBeUndefined();
+    expect(canStage([image(1)], "video")).toBe("A post can have images or one video, not both");
+    expect(canStage([video], "image")).toBe("A post can have images or one video, not both");
+    expect(canStage([video], "video")).toBe("Only one video per post");
+  });
+});
+
+describe("parseDroppedPaths", () => {
+  it("reads quoted and escaped paths", () => {
+    expect(parseDroppedPaths("'/a b.png'")).toEqual(["/a b.png"]);
+    expect(parseDroppedPaths("/a\\ b.png /c.jpg")).toEqual(["/a b.png", "/c.jpg"]);
+    expect(parseDroppedPaths("~/d.png\n./e.png ../f.png")).toEqual(["~/d.png", "./e.png", "../f.png"]);
+  });
+  it("leaves anything else as text", () => {
+    expect(parseDroppedPaths("")).toBeUndefined();
+    expect(parseDroppedPaths("just some text")).toBeUndefined();
+    expect(parseDroppedPaths("/a.png and more")).toBeUndefined();
+    expect(parseDroppedPaths("'/unclosed.png")).toBeUndefined();
+  });
+});
+
+describe("chips", () => {
+  it("lists file names", () => {
+    expect(chips([{ path: "/x/chart.png", kind: "image" }, { path: "/y/photo.jpg", kind: "image" }])).toBe("📎 chart.png · photo.jpg");
+  });
+});
+
+describe("expandHome", () => {
+  it("expands a leading ~/ only", () => {
+    expect(expandHome("~/a.png")).toBe(`${homedir()}/a.png`);
+    expect(expandHome("/x/~/a.png")).toBe("/x/~/a.png");
+  });
+});
