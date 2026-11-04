@@ -143,6 +143,13 @@ export class Pipeline {
   async retry(): Promise<boolean> {
     const f = this.failure;
     if (!f || f.kind === "rejected" || !this.paused) return false;
+    if (f.draftId === undefined) {
+      // The failed posts never left the queue (their draft couldn't be saved).
+      this.failure = undefined;
+      this.paused = false;
+      this.schedule();
+      return true;
+    }
     const last = this.failedLast;
     const intent: Intent = last ? { kind: "reply", target: last.parent, root: last.root } : f.item.intent;
     const item = { ...f.item, intent, posts: f.item.posts.slice(f.from) };
@@ -236,23 +243,30 @@ export class Pipeline {
     }
     const message = err instanceof Error ? err.message : String(err);
     const failure: Failure = { kind: c.kind, item: a.item, from: a.index, message };
-    if (this.queue[0] === a) this.queue.shift();
     if (c.kind === "rejected") {
+      if (this.queue[0] === a) this.queue.shift();
       this.deps.onFailed(failure);
       return;
     }
-    const rest = a.item.posts.slice(a.index);
-    const draft = await this.deps.saveDraft({
-      reason: "network",
-      type: rest.length > 1 ? "thread" : target ? "reply" : "post",
-      text: rest[0],
-      ...(target && { replyUri: target.parent.uri }),
-      ...(rest.length > 1 && { posts: rest.map((text) => ({ text })) }),
-    });
-    failure.draftId = draft.id;
-    this.failedLast = a.last;
-    this.failure = failure;
     this.paused = true;
+    this.failure = failure;
+    const rest = a.item.posts.slice(a.index);
+    try {
+      const draft = await this.deps.saveDraft({
+        reason: "network",
+        type: rest.length > 1 ? "thread" : target ? "reply" : "post",
+        text: rest[0],
+        ...(target && { replyUri: target.parent.uri }),
+        ...(rest.length > 1 && { posts: rest.map((text) => ({ text })) }),
+      });
+      failure.draftId = draft.id;
+      if (this.queue[0] === a) this.queue.shift();
+      this.failedLast = a.last;
+    } catch (saveErr) {
+      // No draft, so the posts stay queued (paused) for /retry or Esc.
+      failure.message = `${message}; couldn't save a draft either: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`;
+      a.immediate = true;
+    }
     this.deps.onFailed(failure);
   }
 }

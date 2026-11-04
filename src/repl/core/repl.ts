@@ -381,7 +381,14 @@ export class Repl {
     if (composerText.trim() === "") return { restore: joined };
     void this.deps
       .saveDraft({ reason: "manual", type: texts.length > 1 ? "thread" : "post", text: texts[0], ...(texts.length > 1 && { posts: texts.map((text) => ({ text })) }) })
-      .then((d) => this.deps.print(`Saved as draft ${d.id}`, "dim"));
+      .then(
+        (d) => this.deps.print(`Saved as draft ${d.id}`, "dim"),
+        (err) => {
+          // Never lose it: show the text so it can be copied.
+          this.deps.print(`Couldn't save the cancelled posts as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
+          this.deps.print(joined);
+        },
+      );
     return "handled";
   }
 
@@ -445,7 +452,9 @@ export class Repl {
 
   private onFailed(f: Failure): void {
     this.failed.push(f);
-    if (f.kind === "network") {
+    if (f.kind === "network" && f.draftId === undefined) {
+      this.deps.print(`Couldn't reach Bluesky (${f.message}). It's still queued: /retry to send it, Esc to cancel.`, "error");
+    } else if (f.kind === "network") {
       this.deps.print(`Couldn't reach Bluesky; saved as draft ${f.draftId}. /retry to send it now.`, "error");
     } else if (f.kind === "expired") {
       this.deps.print("Session expired — exit and run `bsky login`", "error");

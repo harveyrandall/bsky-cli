@@ -293,4 +293,13 @@ describe("App threads", () => {
     expect(lastFrame()).toContain("bsky › my next post");
     expect(drafts.save).toHaveBeenCalledWith(expect.objectContaining({ reason: "manual", text: expect.stringContaining("bad") }));
   });
+  it("stays put, with the queue intact, when the exit prompt can't save drafts", async () => {
+    const { type, lastFrame, drafts, repl } = setup({ settings: { undo: 5 } });
+    drafts.save.mockRejectedValueOnce(new Error("EACCES"));
+    await type("/post hello", "\r", "\x04", "d");
+    await tick();
+    expect(exit).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("Couldn't save drafts (EACCES); still here");
+    expect(repl().pipeline.pending()).toHaveLength(1);
+  });
 });

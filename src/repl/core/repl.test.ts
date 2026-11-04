@@ -183,6 +183,18 @@ describe("puts text back", () => {
   });
 });
 
+describe("draft saves that fail", () => {
+  it("print the cancelled text instead of crashing", async () => {
+    const { repl, deps, flush, printed } = setup({ undo: 5 });
+    deps.saveDraft.mockRejectedValueOnce(new Error("EACCES"));
+    await repl.post("waiting");
+    expect(repl.escape("new text")).toBe("handled");
+    await flush();
+    expect(printed()).toContain("Couldn't save the cancelled posts as a draft (EACCES):");
+    expect(printed()).toContain("waiting");
+  });
+});
+
 describe("submit", () => {
   it("previews anything that isn't one plain post", async () => {
     const { repl, ask, flush, posted } = setup();

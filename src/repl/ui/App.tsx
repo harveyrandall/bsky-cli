@@ -117,12 +117,18 @@ export function App(props: AppProps) {
       return;
     }
     if (choice === "draft") {
-      const texts = [...repl.pipeline.cancelAll().map((i) => i.posts.join(` ${markers.split} `)), text].filter(
+      // Save first; only leave (which cancels the queue) once everything is safe.
+      const texts = [...repl.pipeline.pending().map((i) => i.posts.join(` ${markers.split} `)), text].filter(
         (t) => t.trim() !== "",
       );
-      for (const t of texts) {
-        const d = await props.drafts.save({ reason: "manual", type: "post", text: t });
-        print(`Saved as draft ${d.id}`, "dim");
+      try {
+        for (const t of texts) {
+          const d = await props.drafts.save({ reason: "manual", type: "post", text: t });
+          print(`Saved as draft ${d.id}`, "dim");
+        }
+      } catch (err) {
+        print(`Couldn't save drafts (${err instanceof Error ? err.message : String(err)}); still here`, "error");
+        return;
       }
     }
     leave();

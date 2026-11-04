@@ -158,6 +158,22 @@ describe("Pipeline errors", () => {
     expect(sent.map((s) => s.text)).toEqual(["a", "b"]);
     expect(deps.deleteDraft).toHaveBeenCalledWith("d1");
   });
+  it("keeps a post it couldn't save as a draft at the head of the paused queue", async () => {
+    const { pipeline, deps, sent } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    deps.saveDraft.mockRejectedValueOnce(new Error("EACCES: permission denied"));
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.onFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "network", message: expect.stringContaining("EACCES") }),
+    );
+    expect(deps.onFailed.mock.calls[0][0].draftId).toBeUndefined();
+    expect(pipeline.isPaused()).toBe(true);
+    expect(pipeline.pending().map((i) => i.posts)).toEqual([["a"]]);
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map((s) => s.text)).toEqual(["a"]);
+  });
   it("retries once after a rate limit that resets within a minute", async () => {
     const { pipeline, deps, sent } = setup();
     deps.send.mockRejectedValueOnce(Object.assign(new Error("Rate Limit Exceeded"), { status: 429, headers: { "ratelimit-reset": "2" } }));
