@@ -81,7 +81,7 @@ An unknown command suggests the closest match and keeps your text so you can fix
 | `--resumable` | Save this session so it can be resumed (default) |
 | `-R, --no-resumable` | Don't save this session |
 
-The threading, media and resume flags are accepted now and take effect as those features land.
+These flags are accepted now so `--help` and shell completions list them, but none of them takes effect yet; each starts working when its feature ships.
 
 ## Configuration
 
