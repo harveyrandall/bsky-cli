@@ -737,6 +737,199 @@ describe("saving the composer as a draft", () => {
   });
 });
 
+describe("resume", () => {
+  const meta = { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: me } as never;
+  /** A session that wrote `posts`, as it would come back from disk. */
+  const saved = async (o: { posts?: string[]; settings?: Partial<ReplSettings>; then?: (s: ReturnType<typeof setup>) => Promise<void> } = {}) => {
+    const s = setup(o.settings);
+    await s.repl.startThread();
+    for (const text of o.posts ?? ["one", "two"]) {
+      await s.repl.submitText(text);
+      await s.flush();
+    }
+    await o.then?.(s);
+    return parseSessionFile(JSON.parse(JSON.stringify(s.repl.snapshot(meta, { text: "", cursor: 0 }, []))));
+  };
+  const alive = (...ns: number[]) => ns.map((n) => ({ ...ref(n), authorDid: me, authorHandle: "me.bsky.social" as const, text: "" }));
+
+  it("replays what was posted and carries the labels on", async () => {
+    const file = await saved();
+    const { repl, agent, flush, lines } = setup();
+    agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+    agent.post.mockResolvedValueOnce(ref(3));
+    await repl.resume(file);
+    expect(lines).toContainEqual(["── resumed k3f7xq ──", "dim"]);
+    expect(lines.filter(([text, style]) => style === "dim" && /^\(\d\) /.test(text))).toHaveLength(2);
+    await repl.submitText("three");
+    await flush();
+    expect(repl.registry.byLabel("3")?.uri).toBe(ref(3).uri);
+  });
+  it("carries on from the thread's cursor", async () => {
+    const file = await saved();
+    const { repl, agent, posted, flush } = setup();
+    agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+    await repl.resume(file);
+    expect(repl.mode().kind).toBe("thread");
+    await repl.submitText("three");
+    await flush();
+    expect(posted[0].reply).toEqual({ parent: ref(2), root: ref(1) });
+  });
+  it("falls back to the nearest post that's still there", async () => {
+    const file = await saved({ posts: ["one", "two", "three"] });
+    const { repl, agent, printed } = setup();
+    agent.getPosts.mockResolvedValueOnce(alive(1) as never);
+    await repl.resume(file);
+    expect(agent.getPosts).toHaveBeenCalledWith([ref(3).uri, ref(2).uri, ref(1).uri]);
+    expect(repl.thread()?.cursor).toEqual(ref(1));
+    expect(printed()).toContain("The post you were replying to has gone; continuing from (1)");
+  });
+  it("stops the thread if none of it is left", async () => {
+    const file = await saved();
+    const { repl, agent, printed } = setup();
+    agent.getPosts.mockResolvedValueOnce([]);
+    await repl.resume(file);
+    expect(repl.thread()).toBeUndefined();
+    expect(repl.mode().kind).toBe("idle");
+    expect(printed()).toContain("The thread's posts have gone; thread stopped");
+  });
+  it("keeps the thread if it can't check, and says so", async () => {
+    const file = await saved();
+    const { repl, agent, printed } = setup();
+    agent.getPosts.mockRejectedValueOnce(new Error("fetch failed"));
+    await repl.resume(file);
+    expect(repl.thread()?.cursor).toEqual(ref(2));
+    expect(printed()).toContain("Couldn't check the thread (fetch failed)");
+  });
+  it("drops staged files that have gone, and keeps the rest", async () => {
+    const file = await saved({ then: (s) => s.repl.attach(["/x/a.png", "/x/missing.png"]).then(() => undefined) });
+    file.staged.push({ path: "/x/missing.png", kind: "image" });
+    const { repl, agent, printed } = setup();
+    agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+    await repl.resume(file);
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/a.png"]);
+    expect(printed()).toContain("missing.png is no longer there; dropped it");
+  });
+  it("goes back into a once mode", async () => {
+    const file = await saved({ then: (s) => s.repl.reply("1").then(() => undefined) });
+    const { repl, agent } = setup();
+    agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+    await repl.resume(file);
+    expect(repl.prompt()).toBe("reply→1 ›");
+    expect(repl.mode()).toMatchObject({ kind: "reply-once", returnTo: "thread" });
+  });
+  it("falls back to where a once mode returns to if its post isn't known", async () => {
+    const file = await saved();
+    file.mode = { kind: "quote-once", target: "9", returnTo: "thread" };
+    const { repl, agent } = setup();
+    agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+    await repl.resume(file);
+    expect(repl.mode().kind).toBe("thread");
+  });
+  it("goes idle from a once mode if the thread it returns to has gone", async () => {
+    const file = await saved({ then: (s) => s.repl.post().then(() => undefined) });
+    const { repl, agent } = setup();
+    agent.getPosts.mockResolvedValueOnce([]);
+    await repl.resume(file);
+    expect(repl.mode()).toEqual({ kind: "post-once", returnTo: "idle" });
+  });
+
+  describe("with unsent posts", () => {
+    const queued = () =>
+      saved({
+        settings: { undo: 0 },
+        then: async (s) => {
+          s.repl.setCooldown("undo", 5);
+          await s.repl.submitText("waiting");
+        },
+      });
+    const answering = (answer: number | undefined) => {
+      const s = setup({ undo: 0 }, { choose: vi.fn(async () => answer) });
+      s.agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+      return s;
+    };
+    it("asks before sending anything", async () => {
+      const file = await queued();
+      const { repl, ask, agent, flush } = setup({ undo: 0 });
+      await repl.resume(file);
+      await flush();
+      expect(ask.choose).toHaveBeenCalledWith('Unsent from last time: "waiting"', ["Send", "Edit", "Discard"]);
+      expect(agent.post).not.toHaveBeenCalled();
+    });
+    it("sends on Send, into the thread", async () => {
+      const file = await queued();
+      const { repl, posted, flush } = answering(0);
+      await repl.resume(file);
+      await flush();
+      expect(posted).toMatchObject([{ text: "waiting", reply: { parent: ref(2), root: ref(1) } }]);
+    });
+    it("puts it in the composer on Edit", async () => {
+      const file = await queued();
+      const { repl, agent, deps, flush } = answering(1);
+      await repl.resume(file);
+      await flush();
+      expect(deps.restore).toHaveBeenCalledWith("waiting");
+      expect(agent.post).not.toHaveBeenCalled();
+    });
+    it("treats dismissing the question as Edit, so nothing is lost or sent", async () => {
+      const file = await queued();
+      const { repl, agent, deps, flush } = answering(undefined);
+      await repl.resume(file);
+      await flush();
+      expect(deps.restore).toHaveBeenCalledWith("waiting");
+      expect(agent.post).not.toHaveBeenCalled();
+    });
+    it("saves it as a draft on Edit if the composer's in use", async () => {
+      const file = await queued();
+      const { repl, deps, flush } = answering(1);
+      deps.composerBusy.mockReturnValue(true);
+      await repl.resume(file);
+      await flush();
+      expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ text: "waiting" }));
+      expect(deps.restore).not.toHaveBeenCalled();
+    });
+    it("forgets it on Discard", async () => {
+      const file = await queued();
+      const { repl, agent, deps, flush } = answering(2);
+      await repl.resume(file);
+      await flush();
+      expect(agent.post).not.toHaveBeenCalled();
+      expect(deps.restore).not.toHaveBeenCalled();
+      expect(deps.saveDraft).not.toHaveBeenCalled();
+    });
+    it("sends what's left of a batch to where it was going", async () => {
+      const file = await saved({
+        then: async (s) => {
+          s.repl.setCooldown("pace", 5);
+          await s.repl.post("a /// b");
+          await vi.advanceTimersByTimeAsync(5000);
+        },
+      });
+      file.thread = undefined;
+      const { repl, posted, flush } = setup({ pace: 0 }, { choose: vi.fn(async () => 0) });
+      await repl.resume(file);
+      await flush();
+      expect(posted.map((p) => p.text)).toEqual(["b"]);
+      expect(posted[0].reply?.parent).toEqual(file.pending[0].target?.parent);
+    });
+    it("sends media and quotes with what they went with", async () => {
+      const file = await saved({
+        settings: { undo: 0 },
+        then: async (s) => {
+          s.repl.setCooldown("undo", 5);
+          await s.repl.attach(["/x/a.png"]);
+          await s.repl.post("with media");
+          await s.repl.quote("1", "a quote");
+        },
+      });
+      const { repl, agent, posted, flush } = setup({}, { choose: vi.fn(async () => 0) });
+      agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
+      await repl.resume(file);
+      await flush();
+      expect(posted).toMatchObject([{ text: "with media", media: [{ path: "/x/a.png" }] }, { text: "a quote", quote: ref(1) }]);
+    });
+  });
+});
+
 describe("snapshot", () => {
   const meta = { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: me } as never;
   const composer = { text: "half a thought", cursor: 4 };

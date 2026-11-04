@@ -8,7 +8,7 @@ import { canStage, chips, expandHome, inspectMedia, mediaOptions, nodeMediaFs, p
 import { Pipeline, draftOf, quoteOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
 import type { ReplSessionFile, SavedMode } from "./persist";
 import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
-import type { Cooldown, IsoUtc, OwnLabel, StrongRef, ThreadLetter } from "./types";
+import type { AtUri, Cooldown, IsoUtc, OwnLabel, StrongRef, ThreadLetter } from "./types";
 
 export const IDLE_HINT =
   "Plain text needs a thread: /thread to start one, /post for a single post, or -t to do this automatically.";
@@ -216,6 +216,73 @@ export class Repl {
 
   sendNow(): void {
     this.pipeline.sendNow();
+  }
+
+  /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
+  async resume(file: ReplSessionFile): Promise<void> {
+    this.registry.restore(file.posts, file.counters);
+    this.deps.print(`── resumed ${file.id} ──`, "dim");
+    for (const entry of this.registry.entries()) this.deps.print(this.registry.format(entry, this.s.verbose), "dim");
+    for (const m of file.staged) {
+      const there = (await inspectMedia(m.path, this.deps.fs ?? nodeMediaFs)).kind !== undefined;
+      if (there) this.media.push(m);
+      else this.deps.print(`${basename(m.path)} is no longer there; dropped it`, "error");
+    }
+    if (file.thread) await this.resumeThread(file.thread);
+    this.current = this.resumeMode(file.mode);
+    this.deps.onChange();
+    for (const item of file.pending) await this.resumeItem(item);
+  }
+
+  /** The cursor, or the nearest of its ancestors that's still there. */
+  private async resumeThread(saved: ThreadState): Promise<void> {
+    const chain: string[] = [];
+    for (let uri: string | undefined = saved.cursor.uri; uri && chain.length < 25; uri = this.registry.byUri(uri)?.parent) chain.push(uri);
+    let found: Set<string>;
+    try {
+      found = new Set((await this.deps.agent.getPosts(chain as AtUri[])).map((p) => p.uri));
+    } catch (err) {
+      this.deps.print(`Couldn't check the thread (${err instanceof Error ? err.message : String(err)}); carrying on from where it was`, "error");
+      this.threadState = saved;
+      return;
+    }
+    if (found.has(saved.cursor.uri)) {
+      this.threadState = saved;
+      return;
+    }
+    const survivor = this.registry.byUri(chain.find((uri) => found.has(uri)) ?? "");
+    if (!survivor) {
+      this.deps.print("The thread's posts have gone; thread stopped", "dim");
+      return;
+    }
+    this.threadState = { ...saved, cursor: { uri: survivor.uri, cid: survivor.cid } };
+    this.deps.print(`The post you were replying to has gone; continuing from (${survivor.label})`, "dim");
+  }
+
+  private resumeMode(saved: SavedMode): ReplMode {
+    if (!("returnTo" in saved)) return { kind: saved.kind === "thread" && this.threadState ? "thread" : "idle" };
+    const returnTo = saved.returnTo === "thread" && this.threadState ? "thread" : "idle";
+    if (!("target" in saved)) return { ...saved, returnTo };
+    const entry = this.registry.byLabel(saved.target);
+    if (!entry) return { kind: returnTo };
+    const target = { ref: { uri: entry.uri, cid: entry.cid }, root: entry.root, entry };
+    return { kind: saved.kind, target, label: entry.label, returnTo };
+  }
+
+  private async resumeItem(item: Unsent): Promise<void> {
+    const line = stripLabel(item.posts[0]).split("\n")[0];
+    const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"`, ["Send", "Edit", "Discard"]);
+    if (answer === 2) return;
+    if (answer === 0) {
+      // A thread post goes after the cursor, whatever it was when saved.
+      const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item.intent.kind === "thread" ? undefined : item.target);
+      this.letters.set(sent.id, this.letterFor(item.intent));
+    } else if (this.deps.composerBusy() || !this.fits(item.media ?? [])) {
+      await this.saveToDrafts([item], (id) => `Saved as draft ${id}`);
+    } else {
+      this.restage(item.media);
+      this.deps.restore(this.asResend(item));
+    }
   }
 
   /** The session as a file. Tokens aren't part of it: the profile's own session file has those. */

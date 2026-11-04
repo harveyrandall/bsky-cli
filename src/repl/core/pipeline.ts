@@ -122,9 +122,10 @@ export class Pipeline {
 
   constructor(private readonly deps: PipelineDeps) {}
 
-  enqueue(intent: Intent, posts: string[], media?: readonly StagedMedia[]): QueueItem {
+  /** `after` is the post sent before these, for what's left of a resumed batch. */
+  enqueue(intent: Intent, posts: string[], media?: readonly StagedMedia[], after?: SendTarget): QueueItem {
     const item = { id: this.nextId++, intent, posts, media, createdAt: this.deps.now() };
-    this.queue.push({ item, index: 0 });
+    this.queue.push({ item, index: 0, last: after });
     this.schedule();
     return item;
   }
