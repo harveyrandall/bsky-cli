@@ -146,7 +146,33 @@ The count turns yellow 40 characters before the limit and red above it, where it
 
 ## When you leave
 
-The REPL prints what you posted: `7 posts in 2 threads`, and any drafts that failures left behind. With `-v` it lists every post with its URI, the session's start and end, and every failure.
+The REPL prints what you posted and how to come back: `7 posts in 2 threads · resume: bsky -r k3f9xq`, and any drafts that failures left behind. With `-v` it lists every post with its URI, the session's start and end, and every failure.
+
+## Resuming
+
+The REPL saves your session as you go, so a closed terminal or a crash loses nothing. When you start it and saved sessions exist, it asks which to open:
+
+```
+Resume a session?
+› + new
+  2026-10-31T14:05:22  k3f9xq  @you · 2 threads, 7 posts · "Launch day! Here's what…"
+  2026-10-30T21:40:03  p8m2wd  @you · 1 thread, 3 posts · "Thinking about lexicons…"
+```
+
+Enter on `+ new` starts afresh, as does Esc; Ctrl+C quits. A session open in another REPL shows `in use` and can't be opened, and a file the REPL can't read shows `unreadable`, with `d` to delete it. To skip the list, use `bsky -r last`, an id (`bsky -r k3f9xq`) or the start of one (`bsky -r k3f`).
+
+| What's restored | How |
+|---|---|
+| Your posts and their labels | Replayed under `── resumed k3f9xq ──`; numbering carries on |
+| The thread | From its last post, or the nearest one still there if that's been deleted |
+| The mode, the composer and ↑ history | As you left them |
+| Staged files | Those still there; the rest are dropped with a warning |
+| Settings and markers | The session's own, whatever flags you start with |
+| Unsent posts | Each asks `Send · Edit · Discard`, and nothing goes out until you choose |
+
+Unsent posts can include one that was sending when the terminal closed, which may already have gone: check before choosing `Send`.
+
+A session opens under the profile it was started with, and is refused if that profile is logged in to another account. Text you were typing is saved after a second's pause. Sessions are kept in `repl/sessions/` in the config folder, readable only by you, with no tokens in them. Empty sessions aren't kept, and only the newest `keep-sessions` are (50 by default). `-R` saves nothing, skips the list and leaves the resume hint out of the exit summary.
 
 ## Options
 
@@ -163,8 +189,6 @@ The REPL prints what you posted: `7 posts in 2 threads`, and any drafts that fai
 | `-r, --resume [id]` | Resume a saved session (id, prefix or "last") |
 | `--resumable` | Save this session so it can be resumed (default) |
 | `-R, --no-resumable` | Don't save this session |
-
-`-r`, `--resumable` and `-R` belong to resumable sessions, which arrive in a later release; until then they print a note when used.
 
 ## Configuration
 
@@ -188,4 +212,4 @@ Set defaults in the `[repl]` section of the [config file](configuration.md):
 # cut-marker = "<//"
 ```
 
-`ask-to-save = false` stops the offer to save undo and pace answers; choosing "No, don't ask again" sets it for you. `resumable` and `keep-sessions` belong to resumable sessions, which arrive in a later release. Markers must be non-empty text with no spaces, can't start with `/` and a letter (that begins a command), and must differ from each other. Otherwise `bsky repl` stops with an error naming the key and the rule.
+`ask-to-save = false` stops the offer to save undo and pace answers; choosing "No, don't ask again" sets it for you. `resumable = false` is the same as `-R`, and `keep-sessions` sets how many saved sessions to keep. Markers must be non-empty text with no spaces, can't start with `/` and a letter (that begins a command), and must differ from each other. Otherwise `bsky repl` stops with an error naming the key and the rule.
