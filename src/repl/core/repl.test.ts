@@ -272,19 +272,59 @@ describe("submit", () => {
   });
   it("labels posts in the active thread and reserves room for the label", async () => {
     const { repl, posted, flush } = setup({ threadLabel: "append" });
-    expect(repl.limitFor("standalone")).toBe(300);
+    expect(repl.composerLimit()).toBe(300);
     await repl.startThread("one");
     await flush();
-    expect(repl.limitFor("thread")).toBe(298);
+    expect(repl.composerLimit()).toBe(298);
     await repl.post("solo");
     await flush();
     expect(posted.map((p) => p.text)).toEqual(["one\n🧵", "solo"]);
+  });
+  it("labels a reply in the active thread, whichever way it was typed", async () => {
+    const { repl, posted, flush } = setup({ threadLabel: "append" });
+    await repl.startThread("one");
+    await flush();
+    await repl.reply("1", "now");
+    await flush();
+    await repl.reply("1");
+    expect(repl.composerLimit()).toBe(298);
+    await repl.submitText("later");
+    await flush();
+    expect(posted.map((p) => p.text)).toEqual(["one\n🧵", "now\n🧵", "later\n🧵"]);
+  });
+  it("doesn't label a post on its own, even mid-thread", async () => {
+    const { repl, flush } = setup({ threadLabel: "append" });
+    await repl.startThread("one");
+    await flush();
+    await repl.post();
+    expect(repl.composerLimit()).toBe(300);
+  });
+  it("reserves room for the label when plain text will start a thread", async () => {
+    const { repl } = setup({ threadLabel: "append", autoThread: true });
+    expect(repl.composerLimit()).toBe(298);
   });
   it("prepends the label when asked", async () => {
     const { repl, posted, flush } = setup({ threadLabel: "prepend" });
     await repl.startThread("one");
     await flush();
     expect(posted[0].text).toBe("🧵\none");
+  });
+});
+
+describe("once modes", () => {
+  it("go back to the thread even when one replaces another", async () => {
+    const { repl, flush } = setup();
+    await repl.startThread("one");
+    await flush();
+    await repl.post();
+    await repl.reply("1");
+    await repl.submitText("hi");
+    await flush();
+    expect(repl.mode().kind).toBe("thread");
+    await repl.reply("1");
+    await repl.post();
+    expect(repl.escape("")).toBe("handled");
+    expect(repl.mode().kind).toBe("thread");
   });
 });
 

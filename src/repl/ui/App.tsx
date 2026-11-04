@@ -199,13 +199,6 @@ export function App(props: AppProps) {
     }
   })();
 
-  const mode = repl.mode();
-  const limit =
-    mode.kind === "thread"
-      ? repl.limitFor("thread")
-      : mode.kind === "reply-once"
-        ? repl.limitFor("reply", mode.target.root)
-        : repl.limitFor("standalone");
   const countdown = repl.pipeline.countdown();
   const failure = repl.pipeline.lastFailure();
   const pending = countdown?.phase === "counting" ? countdown.item.posts.join(` ${markers.split} `) : undefined;
@@ -223,7 +216,7 @@ export function App(props: AppProps) {
       <Composer
         markers={markers}
         prompt={repl.prompt()}
-        limit={limit}
+        limit={repl.composerLimit()}
         pending={pending}
         active={!overlay}
         restore={restore}

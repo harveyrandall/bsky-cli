@@ -146,13 +146,23 @@ export class Repl {
     }
   }
 
-  private labelled(kind: WriteKind, root?: StrongRef): boolean {
-    if (!this.s.threadLabel || kind === "standalone") return false;
-    return kind === "thread" || (this.current.kind === "thread" && root?.uri === this.threadState?.root.uri);
+  /** In a thread, or in a once mode on top of one. */
+  private inThread(): boolean {
+    const m = this.current;
+    return m.kind === "thread" || (m.kind !== "idle" && m.returnTo === "thread");
   }
 
-  limitFor(kind: WriteKind, root?: StrongRef): 298 | 300 {
-    return this.labelled(kind, root) ? 298 : 300;
+  private labelled(kind: WriteKind, root?: StrongRef): boolean {
+    if (!this.s.threadLabel || kind === "standalone") return false;
+    return kind === "thread" || (this.inThread() && root?.uri === this.threadState?.root.uri);
+  }
+
+  /** The limit for plain text typed now. */
+  composerLimit(): 298 | 300 {
+    const m = this.current;
+    const threads = m.kind === "thread" || (m.kind === "idle" && this.s.autoThread);
+    const labelled = m.kind === "reply-once" ? this.labelled("reply", m.target.root) : this.labelled(threads ? "thread" : "standalone");
+    return labelled ? 298 : 300;
   }
 
   /** Plain text typed in the current mode. */
@@ -279,8 +289,7 @@ export class Repl {
     if (!resolved) return "keep";
     const entry = this.entryFor(resolved, { letter: this.threadState?.letter });
     if (text !== undefined) return this.write({ kind: "reply", target: resolved.ref, root: resolved.root }, text);
-    const returnTo = this.current.kind === "thread" ? "thread" : "idle";
-    this.current = { kind: "reply-once", target: resolved, label: entry.label, returnTo };
+    this.current = { kind: "reply-once", target: resolved, label: entry.label, returnTo: this.inThread() ? "thread" : "idle" };
     this.deps.onChange();
     return "done";
   }
@@ -306,7 +315,7 @@ export class Repl {
   /** `/post [text]`: a standalone post, now or in post-once mode. */
   async post(text?: string): Promise<SubmitOutcome> {
     if (text !== undefined) return this.write({ kind: "standalone" }, text);
-    this.current = { kind: "post-once", returnTo: this.current.kind === "thread" ? "thread" : "idle" };
+    this.current = { kind: "post-once", returnTo: this.inThread() ? "thread" : "idle" };
     this.deps.onChange();
     return "done";
   }
