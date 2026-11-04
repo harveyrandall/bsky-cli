@@ -53,7 +53,7 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["saveSession"] } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["saveSession"]; resume?: AppProps["resume"] } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
@@ -76,6 +76,7 @@ function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["sa
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
       saveSession={o.saveSession}
+      resume={o.resume}
       configName="config.toml"
       onReady={(r) => (session = r)}
     />,
@@ -738,5 +739,32 @@ describe("App session saving", () => {
     await type("/post two", "\r");
     await tick();
     expect(lastFrame().split("Couldn't save this session (ENOSPC)")).toHaveLength(2);
+  });
+});
+
+describe("App resuming", () => {
+  const file = (o: object = {}) =>
+    ({ id: "k3f7xq", posts: [], staged: [], pending: [], mode: { kind: "idle" }, composer: { text: "half a thought", cursor: 4 }, history: ["/thread"], counters: { nextLabel: 1, nextViewed: 0, nextLetter: 0 }, ...o }) as never;
+  it("puts the composer back as it was, cursor and history included", async () => {
+    const { lastFrame, type, shows } = setup({ resume: file() });
+    await shows("── resumed k3f7xq ──");
+    expect(lastFrame()).toContain("bsky › half a thought");
+    await type("X");
+    expect(lastFrame()).toContain("bsky › halfX a thought");
+    await type("\x15\x0b");
+  });
+  it("brings back what you'd submitted for ↑", async () => {
+    const { type, lastFrame, shows } = setup({ resume: file({ composer: { text: "", cursor: 0 } }) });
+    await shows("── resumed k3f7xq ──");
+    await type("\x1b[A");
+    expect(lastFrame()).toContain("bsky › /thread");
+  });
+  it("asks about unsent posts through the keyboard", async () => {
+    const pending = [{ id: 1, intent: { kind: "standalone" }, posts: ["left over"], createdAt: 0 }];
+    const { type, shows, agent } = setup({ resume: file({ composer: { text: "", cursor: 0 }, pending }) });
+    await shows('Unsent from last time: "left over"');
+    await shows("Send");
+    await type("\r");
+    await vi.waitFor(() => expect(agent.post).toHaveBeenCalledWith("left over", undefined, undefined, undefined));
   });
 });

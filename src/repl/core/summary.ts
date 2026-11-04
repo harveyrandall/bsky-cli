@@ -21,6 +21,8 @@ export function exitSummary(r: {
   startedAt: Date;
   endedAt: Date;
   handle: string;
+  /** Set if this session can be resumed. */
+  resumeId?: string;
 }): string[] {
   const own = r.registry.entries().filter((e) => !e.external);
   const byRoot = new Map<string, RegistryEntry[]>();
@@ -30,6 +32,7 @@ export function exitSummary(r: {
   const threads = groups.filter((g) => !isStandalone(g));
   const standalone = groups.filter(isStandalone).flat();
 
+  const hint = r.resumeId ? ` · resume: bsky -r ${r.resumeId}` : "";
   const counts =
     own.length === 0
       ? "No posts this session"
@@ -37,14 +40,15 @@ export function exitSummary(r: {
         ? plural(standalone.length, "standalone post")
         : `${plural(own.length, "post")} in ${plural(threads.length, "thread")}` +
           (standalone.length ? `, ${standalone.length} standalone` : "");
+  const headline = counts + hint;
   const failed = (f: Failure) =>
     f.draftId ? `Failed: ${plural(f.item.posts.length - f.from, "post")} saved as draft ${f.draftId}` : `Failed: ${f.message}`;
-  if (!r.verbose) return [counts, ...r.failures.filter((f) => f.draftId).map(failed)];
+  if (!r.verbose) return [headline, ...r.failures.filter((f) => f.draftId).map(failed)];
 
   const line = (e: RegistryEntry) => `  ${r.registry.format(e, true)} "${e.excerpt}"`;
   const span = `${r.startedAt.toISOString()} – ${r.endedAt.toISOString()}`;
   return [
-    counts,
+    headline,
     `Session ${span} (${duration(r.endedAt.getTime() - r.startedAt.getTime())})${r.handle && ` as @${r.handle}`}`,
     ...threads.flatMap((g) => [`Thread (${g[0].label}):`, ...g.map(line)]),
     ...(standalone.length ? ["Standalone:", ...standalone.map(line)] : []),

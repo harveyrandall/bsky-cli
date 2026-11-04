@@ -1,14 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Command } from "commander";
 import { registerRepl, replAgent } from "@/commands/repl";
 import { applyConfigToProgram } from "@/toml-config";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 
-const { startRepl, smokeFrame } = vi.hoisted(() => ({
+const { startRepl, smokeFrame, pickSession, sessionsHome } = vi.hoisted(() => ({
   startRepl: vi.fn(),
   smokeFrame: vi.fn(() => "FRAME"),
+  pickSession: vi.fn(),
+  sessionsHome: { dir: "/nonexistent-bsky-home" },
 }));
-vi.mock("@/repl", () => ({ startRepl, smokeFrame }));
+vi.mock("@/repl", () => ({ startRepl, smokeFrame, pickSession }));
+vi.mock("@/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/config")>()),
+  bskyDir: () => sessionsHome.dir,
+}));
 vi.mock("@/index", () => ({
   getClient: vi.fn(async () => ({ session: { did: "did:plc:me", handle: "me.bsky.social" } })),
 }));
@@ -102,7 +111,7 @@ describe("bsky repl", () => {
   });
 
   it("parses every flag", async () => {
-    setTTY(true, true);
+    process.env.BSKY_REPL_SMOKE = "1";
     const p = makeProgram();
     await p.parseAsync(
       ["repl", "-t", "-l", "--undo", "5", "--pace", "0", "-f", "--thread-label", "-r", "k3f9xq", "-R"],
@@ -129,16 +138,6 @@ describe("bsky repl", () => {
     setTTY(true, true);
     await expect(makeProgram({ repl }).parseAsync(["repl"], { from: "user" })).rejects.toThrow(message);
     expect(startRepl).not.toHaveBeenCalled();
-  });
-
-  it("says which flags aren't used yet", async () => {
-    setTTY(true, true);
-    await makeProgram().parseAsync(["repl", "--undo", "5", "-R"], { from: "user" });
-    expect(process.stderr.write).toHaveBeenCalledWith(
-      "bsky repl: --no-resumable isn't used yet; it takes effect in a later release.\n",
-    );
-    expect(process.stderr.write).not.toHaveBeenCalledWith(expect.stringContaining("--undo"));
-    expect(startRepl).toHaveBeenCalled();
   });
 
   it("opens for a bare `bsky` in a terminal", async () => {
@@ -197,6 +196,133 @@ describe("bsky repl", () => {
     await expect(
       makeProgram({ repl: { "cut-marker": "" } }).parseAsync(["repl"], { from: "user" }),
     ).rejects.toThrow('Invalid [repl] cut-marker = ""');
+  });
+});
+
+describe("saved sessions", () => {
+  const uri = "at://did:plc:me/app.bsky.feed.post/3lbx7kt5def2a";
+  const file = (o: object = {}) => ({
+    version: 1,
+    id: "k3f7xq",
+    createdAt: "2026-11-04T09:00:00.000Z",
+    updatedAt: "2026-11-04T10:00:00.000Z",
+    handle: "me.bsky.social",
+    did: "did:plc:me",
+    settings: {
+      autoThread: true, prefixThread: false, threadLabel: false, undo: 5, pace: 0, verbose: false, forceAlt: false, askToSave: true,
+      markers: { split: "~~", send: "//>", cut: "<//" },
+    },
+    posts: [{ label: "1", uri, cid: "bafyabc", rkey: "3lbx7kt5def2a", authorDid: "did:plc:me", root: { uri, cid: "bafyabc" }, excerpt: "hi" }],
+    viewed: [],
+    mode: { kind: "idle" },
+    composer: { text: "", cursor: 0 },
+    staged: [],
+    pending: [],
+    history: [],
+    counters: { nextLabel: 2, nextViewed: 0, nextLetter: 0 },
+    ...o,
+  });
+  const sessions = () => join(sessionsHome.dir, "repl", "sessions");
+  const write = (o: object = {}) => {
+    mkdirSync(sessions(), { recursive: true });
+    const f = file(o) as { id: string };
+    writeFileSync(join(sessions(), `${f.id}.json`), JSON.stringify(f));
+  };
+  const session = () => startRepl.mock.lastCall?.[0].session;
+  beforeEach(() => {
+    sessionsHome.dir = mkdtempSync(join(tmpdir(), "bsky-repl-"));
+    setTTY(true, true);
+    pickSession.mockResolvedValue(undefined);
+  });
+  afterEach(() => rmSync(sessionsHome.dir, { recursive: true, force: true }));
+
+  it("starts a new session without asking when none are saved", async () => {
+    await makeProgram().parseAsync(["repl"], { from: "user" });
+    expect(pickSession).not.toHaveBeenCalled();
+    expect(session()).toMatchObject({ saving: true, keep: 50, did: "did:plc:me" });
+    expect(session().id).toMatch(/^[a-z2-7]{6}$/);
+    expect(session().resume).toBeUndefined();
+  });
+  it("offers saved sessions, and + new starts a new one", async () => {
+    write();
+    await makeProgram().parseAsync(["repl"], { from: "user" });
+    expect(pickSession).toHaveBeenCalledOnce();
+    expect(session().resume).toBeUndefined();
+    expect(session().id).not.toBe("k3f7xq");
+  });
+  it("opens the session picked, with its settings and markers", async () => {
+    write();
+    pickSession.mockResolvedValue("k3f7xq");
+    await makeProgram().parseAsync(["repl"], { from: "user" });
+    expect(session()).toMatchObject({ id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", resume: { id: "k3f7xq" } });
+    expect(startRepl.mock.lastCall?.[0]).toMatchObject({ settings: { autoThread: true, undo: 5 }, markers: { split: "~~" } });
+    expect(existsSync(join(sessions(), "k3f7xq.lock"))).toBe(true);
+  });
+  it("stops if you quit the list", async () => {
+    write();
+    pickSession.mockResolvedValue(null);
+    await makeProgram().parseAsync(["repl"], { from: "user" });
+    expect(startRepl).not.toHaveBeenCalled();
+  });
+  it.each([["last"], ["k3f"], ["k3f7xq"]])("skips the list with -r %s", async (id) => {
+    write();
+    await makeProgram().parseAsync(["repl", "-r", id], { from: "user" });
+    expect(pickSession).not.toHaveBeenCalled();
+    expect(session().resume).toMatchObject({ id: "k3f7xq" });
+  });
+  it("shows the list for a bare -r", async () => {
+    write();
+    await makeProgram().parseAsync(["repl", "-r"], { from: "user" });
+    expect(pickSession).toHaveBeenCalledOnce();
+  });
+  it("says when -r finds nothing", async () => {
+    await expect(makeProgram().parseAsync(["repl", "-r", "last"], { from: "user" })).rejects.toThrow("No saved sessions");
+    await expect(makeProgram().parseAsync(["repl", "-r", "zz"], { from: "user" })).rejects.toThrow('No saved session "zz"');
+  });
+  it("won't open a session another REPL has", async () => {
+    write();
+    mkdirSync(sessions(), { recursive: true });
+    writeFileSync(join(sessions(), "k3f7xq.lock"), String(process.pid));
+    await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow("Session k3f7xq is open in another REPL");
+    expect(startRepl).not.toHaveBeenCalled();
+  });
+  it("won't load a bad file", async () => {
+    write({ did: "nope" });
+    await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow("Session file: bad did");
+  });
+  it("uses the session's own profile", async () => {
+    write({ profile: "work" });
+    const p = makeProgram();
+    await p.parseAsync(["repl", "-r", "last"], { from: "user" });
+    expect(p.opts().profile).toBe("work");
+    expect(startRepl.mock.lastCall?.[0].profile).toBe("work");
+  });
+  it("refuses a session from another account, and lets go of it", async () => {
+    write({ did: "did:plc:someoneelse", handle: "other.bsky.social" });
+    await expect(makeProgram().parseAsync(["repl", "-r", "last"], { from: "user" })).rejects.toThrow("@other.bsky.social");
+    expect(startRepl).not.toHaveBeenCalled();
+    expect(existsSync(join(sessions(), "k3f7xq.lock"))).toBe(false);
+  });
+  it("neither offers nor saves with -R, or resumable = false", async () => {
+    write();
+    await makeProgram().parseAsync(["repl", "-R"], { from: "user" });
+    expect(pickSession).not.toHaveBeenCalled();
+    expect(session().saving).toBe(false);
+    await makeProgram({ repl: { resumable: false } }).parseAsync(["repl"], { from: "user" });
+    expect(pickSession).not.toHaveBeenCalled();
+    expect(session().saving).toBe(false);
+  });
+  it("can resume with -R, without saving again", async () => {
+    write();
+    await makeProgram().parseAsync(["repl", "-R", "-r", "last"], { from: "user" });
+    expect(session()).toMatchObject({ saving: false, resume: { id: "k3f7xq" } });
+  });
+  it("reads keep-sessions from the config, and checks it", async () => {
+    await makeProgram({ repl: { "keep-sessions": 5 } }).parseAsync(["repl"], { from: "user" });
+    expect(session().keep).toBe(5);
+    await expect(makeProgram({ repl: { "keep-sessions": "lots" } }).parseAsync(["repl"], { from: "user" })).rejects.toThrow(
+      'Invalid [repl] keep-sessions = "lots"',
+    );
   });
 });
 

@@ -78,6 +78,8 @@ export interface ComposerProps {
   restore?: { id: number; text: string };
   /** The draft, whenever it changes. */
   onEditor(state: EditorState): void;
+  /** Where to start: a resumed session's draft. */
+  initial?: EditorState;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -96,7 +98,7 @@ export function Composer(props: ComposerProps) {
   const { rows: windowRows, columns } = useWindowSize();
   // Editor state lives in a ref so keys that arrive in one stdin chunk (fast
   // typing, slow SSH) each see the text the previous key left behind.
-  const editor = useRef(emptyEditor());
+  const editor = useRef(props.initial ?? emptyEditor());
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const apply = (action: EditorAction) => {
     editor.current = editorReducer(editor.current, action);

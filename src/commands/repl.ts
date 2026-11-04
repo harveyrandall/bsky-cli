@@ -1,13 +1,16 @@
+import { join } from "node:path";
 import { InvalidArgumentError, type Command } from "commander";
 import type { AppBskyFeedDefs, AtpAgent } from "@atproto/api";
+import { bskyDir } from "@/config";
 import { getClient } from "@/index";
 import { createPost } from "@/commands/post";
 import { activeConfigPath } from "@/toml-config";
-import { resolveMarkers } from "@/repl/core/markers";
+import { resolveMarkers, type Markers } from "@/repl/core/markers";
 import { mediaOptions } from "@/repl/core/media";
+import { SessionStore, newSessionId, resolveId, type ReplSessionFile } from "@/repl/core/persist";
 import type { PostLookup } from "@/repl/core/refs";
 import type { ReplAgent, ReplSettings } from "@/repl/core/repl";
-import { isAtUri, isCid, isDid, isHandle, toStrongRef, type StrongRef } from "@/repl/core/types";
+import { isAtUri, isCid, isDid, isHandle, toStrongRef, type IsoUtc, type StrongRef } from "@/repl/core/types";
 
 const COOLDOWNS = [0, 5, 10, 15];
 
@@ -70,8 +73,22 @@ export function replAgent(agent: AtpAgent): ReplAgent {
   };
 }
 
-// Flags whose features land in later releases; the rest are read now.
-const NOT_YET = new Set(["resume", "resumable"]);
+/** The session to open and lock: undefined for a new one, null to quit. */
+async function chooseSession(opts: { resume?: string | boolean; resumable?: boolean }, store: SessionStore): Promise<ReplSessionFile | undefined | null> {
+  if (opts.resumable === false && opts.resume === undefined) return undefined;
+  const listings = await store.list();
+  let id: string | undefined | null;
+  if (typeof opts.resume === "string") {
+    id = resolveId(opts.resume, listings);
+  } else if (listings.length > 0) {
+    const { pickSession } = await import("@/repl");
+    id = await pickSession(store, listings);
+  }
+  if (id === undefined || id === null) return id;
+  const file = await store.load(id as ReplSessionFile["id"]);
+  if (!(await store.lock(file.id))) throw new Error(`Session ${file.id} is open in another REPL`);
+  return file;
+}
 
 export function registerRepl(program: Command): void {
   program
@@ -111,33 +128,60 @@ export function registerRepl(program: Command): void {
         process.stderr.write("bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n");
         cmd.help({ error: true });
       }
-      for (const option of cmd.options) {
-        const name = option.attributeName();
-        // Negatable flags share one value; report only the form that was typed.
-        const typed = cmd.getOptionValueSource(name) === "cli" && option.negate === (cmd.getOptionValue(name) === false);
-        if (typed && NOT_YET.has(name)) {
-          process.stderr.write(`bsky repl: ${option.long} isn't used yet; it takes effect in a later release.\n`);
-        }
+      const keep = opts.keepSessions ?? 50;
+      if (!Number.isInteger(keep) || keep < 1) throw new Error(`Invalid [repl] keep-sessions = ${JSON.stringify(keep)}: must be a whole number above 0`);
+      const store = new SessionStore(join(bskyDir(), "repl", "sessions"));
+      const resume = await chooseSession(opts, store);
+      if (resume === null) return;
+      if (resume) program.setOptionValue("profile", resume.profile);
+      try {
+        await openRepl(program, opts, store, keep, markers, resume);
+      } catch (err) {
+        if (resume) await store.unlock(resume.id);
+        throw err;
       }
-      const agent = await getClient(program);
-      const settings: ReplSettings = {
-        autoThread: opts.autoThread === true,
-        prefixThread: opts.prefixThread === true,
-        threadLabel: opts.prependThreadLabel ? "prepend" : opts.threadLabel ? "append" : false,
-        undo: opts.undo,
-        pace: opts.pace,
-        askToSave: opts.askToSave !== false,
-        verbose: program.opts().verbose === true,
-        forceAlt: opts.forceAlt === true,
-      };
-      const { startRepl } = await import("@/repl");
-      await startRepl({
-        markers,
-        settings,
-        agent: replAgent(agent),
-        handle: agent.session?.handle ?? "",
-        configPath: activeConfigPath(),
-        profile: program.opts().profile,
-      });
     });
+}
+
+async function openRepl(
+  program: Command,
+  opts: Record<string, unknown>,
+  store: SessionStore,
+  keep: number,
+  flagMarkers: Markers,
+  resume: ReplSessionFile | undefined,
+): Promise<void> {
+  const agent = await getClient(program);
+  if (resume && agent.session?.did !== resume.did) {
+    throw new Error(`Session ${resume.id} belongs to @${resume.handle}: log in to that account, then try again`);
+  }
+  const fromFlags: ReplSettings = {
+    autoThread: opts.autoThread === true,
+    prefixThread: opts.prefixThread === true,
+    threadLabel: opts.prependThreadLabel ? "prepend" : opts.threadLabel ? "append" : false,
+    undo: opts.undo as ReplSettings["undo"],
+    pace: opts.pace as ReplSettings["pace"],
+    askToSave: opts.askToSave !== false,
+    verbose: program.opts().verbose === true,
+    forceAlt: opts.forceAlt === true,
+  };
+  const client = replAgent(agent);
+  const { startRepl } = await import("@/repl");
+  await startRepl({
+    markers: resume?.settings.markers ?? flagMarkers,
+    settings: resume?.settings ?? fromFlags,
+    agent: client,
+    handle: agent.session?.handle ?? "",
+    configPath: activeConfigPath(),
+    profile: program.opts().profile,
+    session: {
+      store,
+      id: resume?.id ?? newSessionId(),
+      createdAt: resume?.createdAt ?? (new Date().toISOString() as IsoUtc),
+      did: client.selfDid,
+      keep,
+      saving: opts.resumable !== false,
+      resume,
+    },
+  });
 }

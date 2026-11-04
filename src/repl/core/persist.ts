@@ -175,6 +175,10 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   return raw as unknown as ReplSessionFile;
 }
 
+/** Nothing to come back to, so not worth keeping. */
+export const isEmptySession = (f: ReplSessionFile) =>
+  f.posts.length === 0 && f.composer.text.trim() === "" && f.staged.length === 0 && f.pending.length === 0;
+
 export interface SessionListing {
   id: string;
   updatedAt?: string;

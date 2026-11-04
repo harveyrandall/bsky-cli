@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Static, Text, useApp } from "ink";
 import { basename } from "node:path";
 import type { Markers, SubmitPlan } from "@/repl/core/markers";
+import type { ReplSessionFile } from "@/repl/core/persist";
 import { chips, parseDroppedPaths, type StagedMedia } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
@@ -33,6 +34,8 @@ export interface AppProps {
   schedulerRunning: ReplDeps["schedulerRunning"];
   /** Keep the session on disk, so it can be resumed. */
   saveSession?(repl: Repl, composer: EditorState): Promise<void>;
+  /** A saved session to pick back up. */
+  resume?: ReplSessionFile;
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -75,7 +78,11 @@ export function App(props: AppProps) {
   const [restore, setRestore] = useState<{ id: number; text: string }>();
   const [exitWhenSent, setExitWhenSent] = useState(false);
   const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
-  const composer = useRef(emptyEditor());
+  const [startingDraft] = useState(() => {
+    const saved = props.resume;
+    return saved ? { ...emptyEditor(saved.history), ...saved.composer } : emptyEditor();
+  });
+  const composer = useRef(startingDraft);
   const composerText = () => composer.current.text;
   /** What send now has already saved, so leaving needn't ask about it again. */
   const savedText = useRef<string | undefined>(undefined);
@@ -119,6 +126,7 @@ export function App(props: AppProps) {
   );
   useEffect(() => {
     props.onReady?.(repl);
+    if (props.resume) repl.resume(props.resume).catch((err: unknown) => print(err instanceof Error ? err.message : String(err), "error"));
   }, [repl]);
 
   const saveFailed = useRef(false);
@@ -340,6 +348,7 @@ export function App(props: AppProps) {
         chips={repl.staged().length > 0 ? chips(repl.staged()) : undefined}
         restore={restore}
         onEditor={onEditor}
+        initial={startingDraft}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
         onEscape={(text) => {
           setExitWhenSent(false);
