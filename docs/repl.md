@@ -3,7 +3,7 @@
 `bsky repl` opens an interactive composer for writing posts and threads.
 
 !!! info "Preview"
-    This release ships the composer itself: it opens, edits text, shows the character ring and runs `/help` and `/exit`. Posting from the REPL arrives in the next release; until then, plain text gets a hint and stays in the composer.
+    This release ships the composer itself: it opens, edits text, shows the character ring and runs `/help` and `/exit`. Posting from the REPL arrives in a later release; until then, plain text gets a hint and stays in the composer.
 
 ## Starting
 
@@ -11,16 +11,17 @@
 bsky repl
 ```
 
-The REPL needs an interactive terminal. If stdin or stdout isn't a terminal (for example `bsky repl | tee log`), it prints its help to stderr and exits with status 1.
+The REPL needs an interactive terminal. If stdin or stdout isn't a terminal (for example `bsky repl | tee log`), it says so, prints its help to stderr and exits with status 1. Flags that aren't used yet print a note when you pass them.
 
 ## Keys
 
 | Key | Action |
 |---|---|
 | Enter | Submit |
-| Shift+Enter, Alt+Enter, Ctrl+J, trailing `\` + Enter | Newline |
-| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've sent this session |
-| Ctrl+A / Ctrl+E | Line start / end |
+| Shift+Enter, Alt+Enter, Ctrl+J | Newline |
+| `\` then Enter, at the end of a line | Newline (the `\` is removed) |
+| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through the commands you've run this session, keeping your draft |
+| Ctrl+A / Ctrl+E, Home / End | Line start / end |
 | Alt+←/→ (Alt+B/F) | Word left / right |
 | Ctrl+W, Ctrl+U | Delete word, delete to line start |
 | Backspace, Delete | Delete one character |
@@ -31,7 +32,7 @@ The REPL needs an interactive terminal. If stdin or stdout isn't a terminal (for
 Pasted text is inserted with its newlines; escape sequences and other control characters are dropped. In terminals with bracketed paste (almost all of them), a paste never submits. Without it, a one-line paste that ends in a newline submits, as it would in a shell.
 
 !!! note "Shift+Enter"
-    Shift+Enter needs a terminal that speaks the kitty keyboard protocol, such as iTerm2, Ghostty, kitty or WezTerm. Elsewhere the REPL says so once at start; use Alt+Enter or Ctrl+J instead. In macOS Terminal.app, Alt+Enter needs **Use Option as Meta key** (Settings → Profiles → Keyboard).
+    Shift+Enter needs a terminal that speaks the kitty keyboard protocol, such as iTerm2, Ghostty, kitty or WezTerm (with `enable_kitty_keyboard = true` in its config). Elsewhere the REPL says so once at start; use Alt+Enter or Ctrl+J instead. In macOS Terminal.app, Alt+Enter needs **Use Option as Meta key** (Settings → Profiles → Keyboard).
 
 ## Character ring
 
@@ -52,7 +53,7 @@ Markers change what the ring counts:
 - `///` splits the text into posts. The ring counts the post under the cursor and shows its place, for example `segment 2/3  ◔ 148/300`.
 - `//>` ends what will be sent; the text after it is kept for later, and the ring reads `kept`.
 - `<//` cuts the text after it, up to `//>` if there is one; the ring reads `cut`.
-- A `\` right before a marker makes it plain text: `\///` counts as `///`.
+- A `\` right before a marker makes it plain text: `\///` is the text `///`, and the backslash isn't counted.
 
 The markers can be changed in the config file (see below).
 
@@ -63,7 +64,7 @@ The markers can be changed in the config file (see below).
 | `/help [command]` | List commands, or show help for one |
 | `/exit` (`/quit`) | Leave the REPL (same as Ctrl+D) |
 
-An unknown command suggests the closest match and keeps your text so you can fix it.
+An unknown command suggests a close match, if there is one, and keeps your text so you can fix it. A command name starts with a lowercase letter; anything else after `/` is plain text.
 
 ## Options
 
@@ -105,4 +106,4 @@ Set defaults in the `[repl]` section of the [config file](configuration.md):
 # cut-marker = "<//"
 ```
 
-Markers must be non-empty text with no spaces, can't start with `/` and a letter (that begins a command), and must differ from each other. Otherwise `bsky repl` stops with an error naming the key and the rule.
+`ask-to-save` and `keep-sessions` belong to features that arrive in later releases. Markers must be non-empty text with no spaces, can't start with `/` and a letter (that begins a command), and must differ from each other. Otherwise `bsky repl` stops with an error naming the key and the rule.

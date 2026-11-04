@@ -21,7 +21,7 @@ export function ringCount(count: number, limit: number): string {
   return count > limit ? `${count}/${limit} (−${count - limit})` : `${count}/${limit}`;
 }
 
-/** Status line for the segment under the cursor. PR 2 passes 298 for labelled posts. */
+/** Status line for the segment under the cursor. `limit` drops to 298 for posts that carry the 🧵 thread label. */
 export function Ring({ segment, limit = 300 }: { segment: Segment; limit?: number }) {
   if (segment.region !== "send") return <Text dimColor>{segment.region}</Text>;
   const count = graphemeLength(segment.text);

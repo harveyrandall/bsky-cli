@@ -41,7 +41,7 @@ export function keyToAction(input: string, key: Partial<Key>, s: Pick<EditorStat
   if (key.end) return { type: "lineEnd" };
   if (key.backspace) return { type: "backspace" };
   if (key.delete) return { type: "delete" };
-  // Esc routing arrives in PR 2.
+  // Esc and unbound Alt chords do nothing for now.
   if (key.escape || key.meta) return { type: "ignore" };
   return input ? { type: "insert", text: input } : { type: "ignore" };
 }
@@ -51,9 +51,10 @@ const CONTROL = /([\x00-\x08\x0b\x0c\x0e-\x1f])/;
 /**
  * Ink 8 passes typed text through as one chunk, splitting out only Ctrl+C,
  * Backspace and escape sequences, so keys typed faster than they're read
- * (SSH lag, tmux send-keys) arrive inside text. Split each control byte out as
- * its Ctrl key. A single \r at the very end is Enter; any other \r is
- * unbracketed paste, kept as text for the editor to turn into newlines.
+ * (SSH lag, tmux send-keys) arrive inside text. Other control bytes become
+ * Ctrl+letter; Tab and LF stay as text, and bytes with no letter (NUL,
+ * 0x1B–0x1F) are dropped. A single \r at the very end is Enter; any other \r
+ * is unbracketed paste, kept as text for the editor to turn into newlines.
  */
 export function chunkKeys(input: string): [string, Partial<Key>][] {
   const enter = input.endsWith("\r") && input.indexOf("\r") === input.length - 1;

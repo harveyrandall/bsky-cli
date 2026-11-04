@@ -169,8 +169,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "clear":
       return { ...s, text: "", cursor: 0 };
     case "submitted": {
-      // Record what was sent, never blank. Text typed while it was being
-      // handled stays in the composer.
+      // Record what was sent, unless blank or a repeat of the last entry.
+      // Text typed while it was being handled stays in the composer.
       const keep = action.text.trim() !== "" && s.history[s.history.length - 1] !== action.text;
       const history = keep ? [...s.history, action.text] : s.history;
       return text === action.text ? emptyEditor(history) : { ...s, history, historyIndex: null, scratch: [] };

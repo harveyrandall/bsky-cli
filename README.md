@@ -169,10 +169,11 @@ bsky create-thread --stdin < essay.txt --thread-label
 ### REPL
 
 ```
-bsky repl [-t] [-l] [--undo <seconds>] [--pace <seconds>] [-f] [--thread-label] [-r [id]] [-R]
+bsky repl [-t | --no-auto-thread] [-l] [--undo <seconds>] [--pace <seconds>] [-f]
+          [--thread-label] [--prepend-thread-label] [-r [id]] [--resumable | -R]
 ```
 
-An interactive composer with multi-line editing, a character ring for the post under the cursor, and `/help` and `/exit`. Posting from the REPL arrives in the next release. See [REPL](https://harveyrandall.github.io/bsky-cli/repl/).
+An interactive composer with multi-line editing, a character ring for the post under the cursor, and `/help` and `/exit`. A preview: posting from the REPL arrives in a later release. See [REPL](https://harveyrandall.github.io/bsky-cli/repl/).
 
 ### Drafts
 

@@ -18,8 +18,8 @@ function checkCooldowns(opts: { undo?: unknown; pace?: unknown }): void {
   }
 }
 
-// Only markers are read in PR 1; the other flags exist so config and
-// completions see them, and are used from PR 2 on.
+// Only the marker settings are read so far. The other flags are declared now
+// so `--help` and shell completions list them; each is wired up as its feature lands.
 export function registerRepl(program: Command): void {
   program
     .command("repl")

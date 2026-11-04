@@ -147,7 +147,7 @@ bsky delete <uri1> <uri2> <uri3>
 
 ### `bsky repl`
 
-An interactive composer for posts and threads, with multi-line editing, a character ring and slash commands. See [REPL](repl.md) for keys, markers and options.
+A preview of an interactive composer for posts and threads, with multi-line editing, a character ring and slash commands. See [REPL](repl.md) for keys, markers and options.
 
 ## Drafts
 

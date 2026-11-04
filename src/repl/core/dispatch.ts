@@ -1,6 +1,6 @@
 import { findCommand, tokenize, unknownMessage, type CommandContext } from "./commands";
 
-// PR 2 replaces this once plain text starts a thread.
+// Replaced once plain text starts a thread.
 export const TEXT_HINT = "Posting from the REPL isn't available yet — /help lists commands.";
 
 export type Parsed =
@@ -8,7 +8,11 @@ export type Parsed =
   | { kind: "text"; text: string }
   | { kind: "command"; name: string; rest: string };
 
-/** `/name …` is a command; a leading `\/` escapes it into text. */
+/**
+ * `/name …` is a command; a leading `\/` escapes it into text. Leading
+ * whitespace is ignored, and a name starts with a lowercase letter, so `/`,
+ * `/ x` and `/Help` are text.
+ */
 export function parseInput(input: string): Parsed {
   const trimmed = input.trimStart();
   if (trimmed === "") return { kind: "empty" };

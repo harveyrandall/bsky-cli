@@ -193,7 +193,7 @@ Anything else: `Can't resolve "<x>": use a number, #n, rkey, at:// URI or bsky.a
 
 - Glyph by share of 300: `○` 0–19 %, `◔` 20–49 %, `◑` 50–74 %, `◕` 75–99 %, `●` ≥ 100 %.
 - Colour: green < 260, amber 260–300, red > 300 with `342/300 (−42)`.
-- Status line: `segment 2/3  ◑ 148/300`. In a `//>`-kept or `<//`-cut region the ring dims and reads `kept` / `cut`.
+- Status line: `segment 2/3  ◔ 148/300`. In a `//>`-kept or `<//`-cut region the ring dims and reads `kept` / `cut`.
 - With `thread-label` on, posts in the active thread reserve 2 graphemes for the label, so their limit shows as `/298`.
 
 **Attachment chips** above the text: `📎 chart.png · photo.jpg`.

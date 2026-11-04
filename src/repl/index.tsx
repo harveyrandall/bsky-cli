@@ -8,7 +8,9 @@ export interface ReplOptions {
 }
 
 export async function startRepl(opts: ReplOptions): Promise<void> {
-  // Ink enables the protocol, and restores it on every exit path, when told it's supported.
+  // Probing ourselves rather than using Ink's `mode: "auto"`: that waits a fixed
+  // 200 ms and doesn't report the answer, which the hint needs. Ink enables the
+  // protocol, and restores it on every exit path, when told it's supported.
   const kitty = await detectKittyKeyboard(process.stdin, process.stdout);
   const app = render(<App markers={opts.markers} kittyHint={!kitty} />, {
     exitOnCtrlC: false,

@@ -90,9 +90,10 @@ function unescape(text: string, m: Markers): string {
 }
 
 /**
- * The segment the cursor is in. After the first send marker is kept; from the
- * first cut marker before it is cut; the rest splits into numbered pieces. A
- * cursor at a marker's end belongs to what follows it.
+ * The segment the cursor is in. Text after the first send marker is kept. Text
+ * after the first cut marker before it (up to the send marker) is cut. The rest
+ * splits into numbered pieces at split markers; split markers inside cut or
+ * kept text are ignored. A cursor at a marker's end belongs to what follows it.
  */
 export function segmentAt(text: string, cursor: number, m: Markers): Segment {
   const hits = scanMarkers(text, m);

@@ -3,12 +3,13 @@ const KITTY_REPLY = /\x1b\[\?\d+u/;
 
 /**
  * Ask whether the terminal speaks the kitty keyboard protocol (the only way
- * to tell Shift+Enter from Enter). The query is followed by DA1, which every
- * terminal answers, so we stop at that reply instead of waiting out a timer;
- * `timeoutMs` only covers terminals that answer nothing.
+ * Ink can tell Shift+Enter from Enter). The query is followed by DA1, which
+ * nearly every terminal answers, so we stop at that reply instead of waiting
+ * out a timer; `timeoutMs` only covers terminals that answer nothing.
  *
- * Replies are read with `readable` + `read()`, as Ink reads: under Bun, a
- * `data` listener left stdin unread after the handoff and the REPL exited.
+ * Replies are read with `readable` + `read()`, as Ink reads: under Bun, once a
+ * `data` listener has consumed stdin and been removed, Bun stops reading it,
+ * so Ink's `readable` listener never fires and the process exits.
  */
 export function detectKittyKeyboard(
   stdin: NodeJS.ReadStream,
