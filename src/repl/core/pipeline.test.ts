@@ -33,6 +33,7 @@ function setup(o: { undo?: number; pace?: number } = {}) {
     }),
     onChange: vi.fn(),
     onFailed: vi.fn(),
+    onWarning: vi.fn(),
   } satisfies PipelineDeps;
   return { pipeline: new Pipeline(deps), deps, sent, start: Date.now() };
 }
@@ -173,6 +174,30 @@ describe("Pipeline errors", () => {
     await pipeline.retry();
     await vi.advanceTimersByTimeAsync(0);
     expect(sent.map((s) => s.text)).toEqual(["a"]);
+  });
+  it("treats a draft it can't delete after a retry as a warning, and carries on with the queue", async () => {
+    const { pipeline, deps, sent } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    deps.deleteDraft.mockRejectedValueOnce(new Error("ENOENT"));
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    pipeline.enqueue({ kind: "standalone" }, ["b"]);
+    await vi.advanceTimersByTimeAsync(0);
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map((s) => s.text)).toEqual(["a", "b"]);
+    expect(deps.onFailed).toHaveBeenCalledOnce();
+    expect(deps.onWarning).toHaveBeenCalledWith("Sent, but couldn't delete draft d1: ENOENT");
+  });
+  it("doesn't call a sent post failed when recording it throws", async () => {
+    const { pipeline, deps, sent } = setup();
+    deps.onSent.mockImplementationOnce(() => {
+      throw new Error("bookkeeping broke");
+    });
+    pipeline.enqueue({ kind: "standalone" }, ["a", "b"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map((s) => s.text)).toEqual(["a", "b"]);
+    expect(deps.onFailed).not.toHaveBeenCalled();
+    expect(deps.onWarning).toHaveBeenCalledWith(expect.stringContaining("bookkeeping broke"));
   });
   it("retries once after a rate limit that resets within a minute", async () => {
     const { pipeline, deps, sent } = setup();

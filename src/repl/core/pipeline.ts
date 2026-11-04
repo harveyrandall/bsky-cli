@@ -47,6 +47,8 @@ export interface PipelineDeps {
   onSent(item: QueueItem, index: number, ref: StrongRef, target: SendTarget | undefined): void;
   onChange(): void;
   onFailed(f: Failure): void;
+  /** Something went wrong after a post was sent; the post itself is fine. */
+  onWarning(message: string): void;
 }
 
 interface Active {
@@ -202,21 +204,32 @@ export class Pipeline {
     this.sending = true;
     this.deps.onChange();
     const target = this.target(a);
+    let ref: StrongRef;
+    // Only the send itself can fail a post; what happens after it is bookkeeping.
     try {
-      const ref = await this.deps.send(a.item.posts[a.index], target);
-      this.lastSentAt = this.deps.now();
-      a.last = { parent: ref, root: target?.root ?? ref };
-      this.deps.onSent(a.item, a.index, ref, target);
-      a.index++;
-      a.rateLimited = false;
-      if (a.index >= a.item.posts.length) {
-        if (this.queue[0] === a) this.queue.shift();
-        if (a.draftId) await this.deps.deleteDraft(a.draftId);
-      }
+      ref = await this.deps.send(a.item.posts[a.index], target);
     } catch (err) {
       await this.fail(a, target, err);
-    } finally {
       this.sending = false;
+      this.schedule();
+      return;
+    }
+    this.lastSentAt = this.deps.now();
+    a.last = { parent: ref, root: target?.root ?? ref };
+    const index = a.index++;
+    a.rateLimited = false;
+    const done = a.index >= a.item.posts.length;
+    if (done && this.queue[0] === a) this.queue.shift();
+    this.sending = false;
+    try {
+      this.deps.onSent(a.item, index, ref, target);
+    } catch (err) {
+      this.deps.onWarning(`Sent, but couldn't record it: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (done && a.draftId) {
+      await this.deps.deleteDraft(a.draftId).catch((err: unknown) => {
+        this.deps.onWarning(`Sent, but couldn't delete draft ${a.draftId}: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
     this.schedule();
   }

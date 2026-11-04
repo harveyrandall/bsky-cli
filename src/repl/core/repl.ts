@@ -110,6 +110,7 @@ export class Repl {
       onSent: (item, index, ref, target) => this.onSent(item, index, ref, target),
       onChange: deps.onChange,
       onFailed: (f) => this.onFailed(f),
+      onWarning: (message) => deps.print(message, "error"),
     });
   }
 
