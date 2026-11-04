@@ -171,7 +171,7 @@ export function generateDefaultConfig(): string {
 [repl]
 # auto-thread = false
 # prefix-thread = false
-# undo and pace: 0, 5, 10 or 15 seconds; leave unset to be asked
+# undo and pace take 0, 5, 10 or 15 (seconds); the values below are examples, not defaults
 # undo = 5
 # pace = 0
 # force-alt = false

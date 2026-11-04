@@ -1,9 +1,21 @@
 import { InvalidArgumentError, type Command } from "commander";
 import { resolveMarkers } from "@/repl/core/markers";
 
+const COOLDOWNS = [0, 5, 10, 15];
+
 export function parseCooldown(value: string): number {
-  if (!["0", "5", "10", "15"].includes(value)) throw new InvalidArgumentError("must be 0, 5, 10 or 15");
+  if (!COOLDOWNS.map(String).includes(value)) throw new InvalidArgumentError("must be 0, 5, 10 or 15");
   return Number(value);
+}
+
+/** Config values skip Commander's parsers, so check [repl] undo and pace here. */
+function checkCooldowns(opts: { undo?: unknown; pace?: unknown }): void {
+  for (const key of ["undo", "pace"] as const) {
+    const value = opts[key];
+    if (value !== undefined && !COOLDOWNS.includes(value as number)) {
+      throw new Error(`Invalid [repl] ${key} = ${JSON.stringify(value)}: must be 0, 5, 10 or 15`);
+    }
+  }
 }
 
 // Only markers are read in PR 1; the other flags exist so config and
@@ -32,6 +44,7 @@ export function registerRepl(program: Command): void {
       }
       if (!process.stdin.isTTY || !process.stdout.isTTY) cmd.help({ error: true });
       const markers = resolveMarkers(opts);
+      checkCooldowns(opts);
       const { startRepl } = await import("@/repl");
       await startRepl({ markers });
     });

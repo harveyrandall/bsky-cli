@@ -87,6 +87,15 @@ describe("bsky repl", () => {
     expect(startRepl).toHaveBeenCalledWith({ markers: { ...DEFAULT_MARKERS, split: "~~" } });
   });
 
+  it.each([
+    [{ undo: 7 }, "Invalid [repl] undo = 7: must be 0, 5, 10 or 15"],
+    [{ pace: "soon" }, 'Invalid [repl] pace = "soon": must be 0, 5, 10 or 15'],
+  ])("stops with an error for config %o", async (repl, message) => {
+    setTTY(true, true);
+    await expect(makeProgram({ repl }).parseAsync(["repl"], { from: "user" })).rejects.toThrow(message);
+    expect(startRepl).not.toHaveBeenCalled();
+  });
+
   it("stops with an error for a bad marker", async () => {
     setTTY(true, true);
     await expect(
