@@ -76,7 +76,14 @@ describe("an empty marker", () => {
 describe("parseSubmit", () => {
   const p = (text: string, limit = 300) => parseSubmit(text, m, limit);
   it("sends up to //> and keeps the rest as typed", () => {
-    expect(p("a //> b <// c")).toEqual({ posts: ["a"], keep: "b <// c", autoSplit: false, markersUsed: true, overLimit: [] });
+    expect(p("a //> b <// c")).toEqual({
+      posts: ["a"],
+      source: "a",
+      keep: "b <// c",
+      autoSplit: false,
+      markersUsed: true,
+      overLimit: [],
+    });
   });
   it("discards what follows <// in the send part", () => {
     expect(p("a <// b //> c")).toMatchObject({ posts: ["a"], discard: "b", keep: "c" });

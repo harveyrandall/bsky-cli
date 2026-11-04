@@ -2,8 +2,10 @@ import { stripVTControlCharacters } from "node:util";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
 import { App } from "./App";
-import { TEXT_HINT } from "@/repl/core/dispatch";
+import { offlineProps } from "@/repl";
+import { IDLE_HINT, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
+import type { AtUri, Cid, StrongRef } from "@/repl/core/types";
 
 const { exit } = vi.hoisted(() => ({ exit: vi.fn() }));
 vi.mock("ink", async (importOriginal) => {
@@ -13,8 +15,32 @@ vi.mock("ink", async (importOriginal) => {
 beforeEach(() => exit.mockClear());
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
-function setup() {
-  const app = render(<App markers={DEFAULT_MARKERS} kittyHint={false} />);
+const ref = (n: number): StrongRef => ({
+  uri: `at://did:plc:me/app.bsky.feed.post/3lbx7kt5def${String.fromCharCode(97 + n)}a` as AtUri,
+  cid: `bafy${n}` as Cid,
+});
+
+function setup(o: { settings?: Partial<ReplSettings> } = {}) {
+  let n = 0;
+  const agent = {
+    selfDid: "did:plc:me" as const,
+    resolveHandle: vi.fn(),
+    getPosts: vi.fn(async () => []),
+    post: vi.fn(async () => ref(++n)),
+  };
+  const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
+  const saveConfig = vi.fn(async () => {});
+  const app = render(
+    <App
+      markers={DEFAULT_MARKERS}
+      kittyHint={false}
+      settings={{ ...offlineProps.settings, ...o.settings }}
+      agent={agent}
+      drafts={drafts}
+      saveConfig={saveConfig}
+      configName="config.toml"
+    />,
+  );
   // A fixed height, so results don't depend on the terminal running the tests.
   Object.defineProperty(app.stdout, "rows", { value: 24, configurable: true });
   app.stdout.emit("resize");
@@ -23,14 +49,15 @@ function setup() {
   };
   // Colour codes depend on the terminal running the tests.
   const lastFrame = () => stripVTControlCharacters(app.lastFrame() ?? "");
-  return { ...app, lastFrame, rawFrame: () => app.lastFrame() ?? "", type };
+  return { ...app, lastFrame, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig };
 }
 
 describe("App", () => {
   it("keeps plain text with a hint on Enter", async () => {
     const { type, lastFrame } = setup();
     await type("hello", "\r");
-    expect(lastFrame()).toContain(TEXT_HINT);
+    // The hint wraps at the test terminal's 100 columns.
+    expect(lastFrame().replace(/\n/g, " ")).toContain(IDLE_HINT);
     expect(lastFrame()).toContain("bsky › hello");
   });
   it("Ctrl+C in the same chunk as typed text still clears it", async () => {
@@ -52,7 +79,7 @@ describe("App", () => {
     const { type, lastFrame } = setup();
     await type("a\rb\r");
     expect(lastFrame()).toMatch(/bsky › a\n\s+b/);
-    expect(lastFrame()).not.toContain(TEXT_HINT);
+    expect(lastFrame()).not.toContain(IDLE_HINT);
   });
   it("a paste drops escape sequences and control bytes", async () => {
     const { type, lastFrame, rawFrame } = setup();
@@ -137,7 +164,7 @@ describe("App", () => {
     const { type, lastFrame } = setup();
     await type(...chunks);
     expect(lastFrame()).toMatch(/bsky › a\n\s+b/);
-    expect(lastFrame()).not.toContain(TEXT_HINT);
+    expect(lastFrame()).not.toContain(IDLE_HINT);
   });
   it("shows the ring for the segment under the cursor", async () => {
     const { type, lastFrame } = setup();
@@ -165,6 +192,76 @@ describe("App", () => {
   it("lists the candidates when Tab can't extend the name", async () => {
     const { type, lastFrame } = setup();
     await type("/", "\t");
-    expect(lastFrame()).toContain("/exit  /help  /quit");
+    expect(lastFrame()).toContain("/auto-thread  /exit  /help  /history  /post");
+  });
+});
+
+describe("App threads", () => {
+  it("writes a thread end to end through the keyboard", async () => {
+    const { type, lastFrame, agent } = setup();
+    await type("/thread", "\r");
+    expect(lastFrame()).toMatch(/^thread ›\s*$/m);
+    await type("one", "\r");
+    await tick();
+    expect(lastFrame()).toContain("(1) 3lbx7kt5defba");
+    expect(lastFrame()).toMatch(/^thread \(1\) ›\s*$/m);
+    await type("two", "\r");
+    await tick();
+    expect(agent.post).toHaveBeenLastCalledWith("two", { parent: ref(1), root: ref(1) });
+  });
+  it("previews a split and posts it on y", async () => {
+    const { type, lastFrame, agent } = setup();
+    await type("/thread", "\r", "a /// b", "\r");
+    expect(lastFrame()).toContain("Post 2? [y/N]");
+    await type("y");
+    await tick();
+    expect(agent.post).toHaveBeenCalledTimes(2);
+  });
+  it("puts the text back when the preview is declined", async () => {
+    const { type, lastFrame, agent } = setup();
+    await type("/thread", "\r", "a /// b", "\r", "\r");
+    expect(lastFrame()).not.toContain("[y/N]");
+    expect(lastFrame()).toContain("thread › a /// b");
+    expect(agent.post).not.toHaveBeenCalled();
+  });
+  it("counts down the undo window and cancels on Esc, text back in the composer", async () => {
+    const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });
+    await type("/post hello", "\r");
+    expect(lastFrame()).toContain("Sending in 5s… [Esc] cancel  [Enter] send now");
+    // The waiting post shows, read-only, in place of the composer.
+    expect(lastFrame()).toMatch(/^bsky › hello\s*$/m);
+    await type("more");
+    expect(lastFrame()).not.toContain("more");
+    await type("\x1b");
+    await tick();
+    expect(lastFrame()).not.toContain("Sending in");
+    expect(lastFrame()).toContain("bsky › hello");
+    expect(agent.post).not.toHaveBeenCalled();
+  });
+  it("asks for undo and pace on the first thread, then saves them on Yes", async () => {
+    const { type, lastFrame, saveConfig } = setup({ settings: { undo: undefined, pace: undefined, askToSave: true } });
+    await type("/thread", "\r");
+    expect(lastFrame()).toContain("Undo window before each post?");
+    await type("\x1b[C", "\r");
+    expect(lastFrame()).toContain("Minimum time between posts?");
+    await type("\r");
+    expect(lastFrame()).toContain("Save undo 5s · pace off as your defaults in config.toml?");
+    await type("\r");
+    expect(saveConfig).toHaveBeenCalledWith({ undo: 5, pace: 0 });
+    expect(lastFrame()).toMatch(/^thread ›\s*$/m);
+  });
+  it("asks what to do on Ctrl+D with unsent text, and leaves on x", async () => {
+    const { type, lastFrame } = setup();
+    await type("unsent", "\x04");
+    expect(lastFrame()).toContain("[s]end now · save [d]raft · discard [x] · [Esc] stay");
+    await type("x");
+    expect(exit).toHaveBeenCalledOnce();
+  });
+  it("saves the composer text as a draft on d, then leaves", async () => {
+    const { type, drafts } = setup();
+    await type("unsent", "\x04", "d");
+    await tick();
+    expect(drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "unsent" });
+    expect(exit).toHaveBeenCalledOnce();
   });
 });

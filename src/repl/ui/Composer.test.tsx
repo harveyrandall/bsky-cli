@@ -12,10 +12,15 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 function setup(overrides: Partial<ComposerProps> = {}) {
   const props: ComposerProps = {
     markers: DEFAULT_MARKERS,
+    prompt: "bsky ›",
+    limit: 300,
     onSubmit: vi.fn(async () => "done" as const),
+    onEscape: vi.fn(() => "unhandled" as const),
+    onInterrupt: vi.fn((text: string) => (text ? ("clear" as const) : ("hint" as const))),
+    onEof: vi.fn(),
+    onSendNow: vi.fn(),
     onHint: vi.fn(),
     onError: vi.fn(),
-    onExit: vi.fn(),
     ...overrides,
   };
   const app = render(<Composer {...props} />);
@@ -37,24 +42,33 @@ describe("Composer", () => {
     await type("a");
     expect(lastFrame()).toContain("bsky › a");
   });
-  it("exits on Ctrl+D when the composer is empty", async () => {
+  it("hands Ctrl+D to onEof with the text", async () => {
     const { type, props } = setup();
-    await type("\x04");
-    expect(props.onExit).toHaveBeenCalledOnce();
-  });
-  it("asks for a second Ctrl+D before discarding a draft", async () => {
-    const { type, props, lastFrame } = setup();
     await type("abc", "\x04");
-    expect(props.onExit).not.toHaveBeenCalled();
-    expect(props.onHint).toHaveBeenCalledWith(expect.stringContaining("Ctrl+D again"));
-    expect(lastFrame()).toContain("bsky › abc");
-    await type("\x04");
-    expect(props.onExit).toHaveBeenCalledOnce();
+    expect(props.onEof).toHaveBeenCalledWith("abc");
   });
-  it("forgets the first Ctrl+D once another key is pressed", async () => {
-    const { type, props } = setup();
-    await type("abc", "\x04", "d", "\x04");
-    expect(props.onExit).not.toHaveBeenCalled();
+  it("shows a pending post dimmed, ignores typing, and sends it now on Enter", async () => {
+    const { type, props, lastFrame } = setup({ pending: "waiting post" });
+    expect(lastFrame()).toContain("bsky › waiting post");
+    await type("x", "\r");
+    expect(lastFrame()).not.toContain("x");
+    expect(props.onSendNow).toHaveBeenCalledOnce();
+  });
+  it("replaces the text when asked to restore it", async () => {
+    const { rerender, props, lastFrame } = setup();
+    rerender(<Composer {...props} restore={{ id: 1, text: "back again" }} />);
+    await tick();
+    expect(lastFrame()).toContain("bsky › back again");
+  });
+  it("puts back what Esc returns", async () => {
+    const { type, lastFrame } = setup({ onEscape: () => ({ restore: "cancelled post" }) });
+    await type("\x1b");
+    await tick();
+    expect(lastFrame()).toContain("bsky › cancelled post");
+  });
+  it("uses the prompt it is given", () => {
+    const { lastFrame } = setup({ prompt: "thread (4) ›" });
+    expect(lastFrame()).toContain("thread (4) › ");
   });
   it("draws the cursor on the grapheme under it, or a space at the end", async () => {
     const { type, lastFrame } = setup();

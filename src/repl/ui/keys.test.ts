@@ -31,7 +31,7 @@ describe("keyToAction", () => {
     ["Alt+F", "f", key({ meta: true }), s("x"), { type: "wordRight" }],
     ["Backspace", "", key({ backspace: true }), s("x"), { type: "backspace" }],
     ["Delete", "", key({ delete: true }), s("x"), { type: "delete" }],
-    ["Esc", "", key({ escape: true }), s("x"), { type: "ignore" }],
+    ["Esc", "", key({ escape: true }), s("x"), { type: "escape" }],
     ["unbound Ctrl", "x", key({ ctrl: true }), s("x"), { type: "ignore" }],
     ["text", "hé", key(), s(""), { type: "insert", text: "hé" }],
   ])("%s", (_name, input, k, state, action) => {

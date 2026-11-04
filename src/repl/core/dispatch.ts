@@ -1,7 +1,5 @@
 import { findCommand, tokenize, unknownMessage, type CommandContext } from "./commands";
-
-// Replaced once plain text starts a thread.
-export const TEXT_HINT = "Posting from the REPL isn't available yet — /help lists commands.";
+import type { SubmitOutcome } from "./repl";
 
 export type Parsed =
   | { kind: "empty" }
@@ -22,28 +20,24 @@ export function parseInput(input: string): Parsed {
   return { kind: "text", text: input };
 }
 
-/** "keep" leaves the text in the composer so the user can fix it. */
-export type DispatchResult = "done" | "keep";
+/** "keep" leaves the text in the composer so the user can fix it; `restore` replaces it. */
+export type DispatchResult = SubmitOutcome;
 
 export async function dispatch(input: string, ctx: CommandContext): Promise<DispatchResult> {
   const parsed = parseInput(input);
   if (parsed.kind === "empty") return "done";
-  if (parsed.kind === "text") {
-    ctx.print(TEXT_HINT, "dim");
-    return "keep";
-  }
-  const cmd = findCommand(parsed.name);
-  if (!cmd) {
-    ctx.print(unknownMessage(parsed.name), "error");
-    return "keep";
-  }
   // The REPL never exits on an error: report it and keep the text.
   try {
-    await cmd.run(tokenize(parsed.rest), ctx);
-    return "done";
+    if (parsed.kind === "text") return await ctx.repl.submitText(parsed.text);
+    const cmd = findCommand(parsed.name);
+    if (!cmd) {
+      ctx.print(unknownMessage(parsed.name), "error");
+      return "keep";
+    }
+    return (await cmd.run(cmd.raw ? [] : tokenize(parsed.rest), ctx, parsed.rest)) ?? "done";
   } catch (err) {
     const message = err instanceof Error ? err.message || err.name : String(err);
-    ctx.print(`/${parsed.name}: ${message}`, "error");
+    ctx.print(parsed.kind === "command" ? `/${parsed.name}: ${message}` : message, "error");
     return "keep";
   }
 }

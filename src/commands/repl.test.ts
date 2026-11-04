@@ -9,6 +9,10 @@ const { startRepl, smokeFrame } = vi.hoisted(() => ({
   smokeFrame: vi.fn(() => "FRAME"),
 }));
 vi.mock("@/repl", () => ({ startRepl, smokeFrame }));
+vi.mock("@/index", () => ({
+  getClient: vi.fn(async () => ({ session: { did: "did:plc:me", handle: "me.bsky.social" } })),
+}));
+vi.mock("@/commands/post", () => ({ createPost: vi.fn() }));
 
 const original = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY };
 function setTTY(stdin: boolean | undefined, stdout: boolean | undefined) {
@@ -38,7 +42,7 @@ describe("bsky repl", () => {
   it("starts the REPL with default markers in a terminal", async () => {
     setTTY(true, true);
     await makeProgram().parseAsync(["repl"], { from: "user" });
-    expect(startRepl).toHaveBeenCalledWith({ markers: DEFAULT_MARKERS });
+    expect(startRepl).toHaveBeenCalledWith(expect.objectContaining({ markers: DEFAULT_MARKERS, handle: "me.bsky.social" }));
   });
 
   it.each([[false, true], [true, false]])(
@@ -97,7 +101,7 @@ describe("bsky repl", () => {
     const p = makeProgram({ repl: { undo: 5, pace: 10, "split-marker": "~~" } });
     await p.parseAsync(["repl", "--pace", "15"], { from: "user" });
     expect(replOpts(p)).toMatchObject({ undo: 5, pace: 15 });
-    expect(startRepl).toHaveBeenCalledWith({ markers: { ...DEFAULT_MARKERS, split: "~~" } });
+    expect(startRepl).toHaveBeenCalledWith(expect.objectContaining({ markers: { ...DEFAULT_MARKERS, split: "~~" } }));
   });
 
   it.each([
@@ -113,12 +117,50 @@ describe("bsky repl", () => {
     setTTY(true, true);
     await makeProgram().parseAsync(["repl", "--undo", "5", "-R"], { from: "user" });
     expect(process.stderr.write).toHaveBeenCalledWith(
-      "bsky repl: --undo isn't used yet; it takes effect in a later release.\n",
-    );
-    expect(process.stderr.write).toHaveBeenCalledWith(
       "bsky repl: --no-resumable isn't used yet; it takes effect in a later release.\n",
     );
+    expect(process.stderr.write).not.toHaveBeenCalledWith(expect.stringContaining("--undo"));
     expect(startRepl).toHaveBeenCalled();
+  });
+
+  it("opens for a bare `bsky` in a terminal", async () => {
+    setTTY(true, true);
+    await makeProgram().parseAsync([], { from: "user" });
+    expect(startRepl).toHaveBeenCalled();
+  });
+
+  it("prints the program's help for a bare `bsky` without a terminal, as before", async () => {
+    setTTY(false, false);
+    await expect(makeProgram().parseAsync([], { from: "user" })).rejects.toMatchObject({ exitCode: 1 });
+    expect(process.stderr.write).not.toHaveBeenCalledWith(expect.stringContaining("needs an interactive terminal"));
+    expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Commands:"));
+  });
+
+  it("maps flags and config onto the session's settings", async () => {
+    setTTY(true, true);
+    const p = makeProgram({ repl: { "ask-to-save": false } });
+    await p.parseAsync(["repl", "-t", "-l", "--undo", "5", "--pace", "10", "--prepend-thread-label"], { from: "user" });
+    expect(startRepl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: {
+          autoThread: true,
+          prefixThread: true,
+          threadLabel: "prepend",
+          undo: 5,
+          pace: 10,
+          askToSave: false,
+          verbose: false,
+        },
+      }),
+    );
+  });
+
+  it("leaves undo and pace unset so the REPL asks", async () => {
+    setTTY(true, true);
+    await makeProgram().parseAsync(["repl", "--thread-label"], { from: "user" });
+    expect(startRepl).toHaveBeenCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ undo: undefined, pace: undefined, threadLabel: "append" }) }),
+    );
   });
 
   it("stops with an error for a bad marker", async () => {

@@ -1,5 +1,12 @@
 import { InvalidArgumentError, type Command } from "commander";
+import type { AppBskyFeedDefs, AtpAgent } from "@atproto/api";
+import { getClient } from "@/index";
+import { createPost } from "@/commands/post";
+import { activeConfigPath } from "@/toml-config";
 import { resolveMarkers } from "@/repl/core/markers";
+import type { PostLookup } from "@/repl/core/refs";
+import type { ReplAgent, ReplSettings } from "@/repl/core/repl";
+import { isAtUri, isCid, isDid, isHandle, toStrongRef, type StrongRef } from "@/repl/core/types";
 
 const COOLDOWNS = [0, 5, 10, 15];
 
@@ -18,11 +25,51 @@ function checkCooldowns(opts: { undo?: unknown; pace?: unknown }): void {
   }
 }
 
-// Only the marker settings are read so far. The other flags are declared now
-// so `--help` and shell completions list them; each is wired up as its feature lands.
+const asRef = (r?: { uri: string; cid: string }): StrongRef | undefined =>
+  r && isAtUri(r.uri) && isCid(r.cid) ? { uri: r.uri, cid: r.cid } : undefined;
+
+/** A post from the API, or undefined if any field fails its guard. */
+function toLookup(post: AppBskyFeedDefs.PostView): PostLookup | undefined {
+  const record = post.record as { text?: unknown; reply?: { root?: { uri: string; cid: string }; parent?: { uri: string; cid: string } } };
+  const ref = asRef(post);
+  if (!ref || !isDid(post.author.did) || !isHandle(post.author.handle)) return undefined;
+  return {
+    ...ref,
+    authorDid: post.author.did,
+    authorHandle: post.author.handle,
+    text: typeof record.text === "string" ? record.text : "",
+    root: asRef(record.reply?.root),
+    parent: asRef(record.reply?.parent),
+  };
+}
+
+/** The few agent calls the REPL needs, with every response checked. */
+export function replAgent(agent: AtpAgent): ReplAgent {
+  const did = agent.session?.did;
+  if (!isDid(did)) throw new Error("Not logged in — run `bsky login` first");
+  return {
+    selfDid: did,
+    async resolveHandle(handle) {
+      const res = await agent.resolveHandle({ handle });
+      if (!isDid(res.data.did)) throw new Error(`Unexpected DID for @${handle}: ${res.data.did}`);
+      return res.data.did;
+    },
+    async getPosts(uris) {
+      const res = await agent.getPosts({ uris });
+      return res.data.posts.flatMap((p) => toLookup(p) ?? []);
+    },
+    async post(text, reply) {
+      return toStrongRef(await createPost(agent, text, reply ? { reply: reply.parent, replyRoot: reply.root } : {}));
+    },
+  };
+}
+
+// Flags whose features land in later releases; the rest are read now.
+const NOT_YET = new Set(["forceAlt", "resume", "resumable"]);
+
 export function registerRepl(program: Command): void {
   program
-    .command("repl")
+    .command("repl", { isDefault: true })
     .description("Interactive REPL for writing threads")
     .option("-t, --auto-thread", "Start a thread when you type plain text")
     .option("--no-auto-thread", "Don't start a thread from plain text")
@@ -46,6 +93,8 @@ export function registerRepl(program: Command): void {
         return;
       }
       if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        // Bare `bsky` without a terminal prints the CLI's help, as it always has.
+        if (program.args[0] !== "repl") program.help({ error: true });
         process.stderr.write("bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n");
         cmd.help({ error: true });
       }
@@ -53,9 +102,28 @@ export function registerRepl(program: Command): void {
         const name = option.attributeName();
         // Negatable flags share one value; report only the form that was typed.
         const typed = cmd.getOptionValueSource(name) === "cli" && option.negate === (cmd.getOptionValue(name) === false);
-        if (typed) process.stderr.write(`bsky repl: ${option.long} isn't used yet; it takes effect in a later release.\n`);
+        if (typed && NOT_YET.has(name)) {
+          process.stderr.write(`bsky repl: ${option.long} isn't used yet; it takes effect in a later release.\n`);
+        }
       }
+      const agent = await getClient(program);
+      const settings: ReplSettings = {
+        autoThread: opts.autoThread === true,
+        prefixThread: opts.prefixThread === true,
+        threadLabel: opts.prependThreadLabel ? "prepend" : opts.threadLabel ? "append" : false,
+        undo: opts.undo,
+        pace: opts.pace,
+        askToSave: opts.askToSave !== false,
+        verbose: program.opts().verbose === true,
+      };
       const { startRepl } = await import("@/repl");
-      await startRepl({ markers });
+      await startRepl({
+        markers,
+        settings,
+        agent: replAgent(agent),
+        handle: agent.session?.handle ?? "",
+        configPath: activeConfigPath(),
+        profile: program.opts().profile ?? process.env.BSKY_PROFILE,
+      });
     });
 }

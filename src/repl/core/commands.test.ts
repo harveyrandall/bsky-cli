@@ -30,7 +30,9 @@ describe("completeCommand", () => {
     expect(completeCommand("/e", 2)).toEqual({ text: "/exit ", cursor: 6, candidates: [] });
   });
   it("lists candidates when it can't extend", () => {
-    expect(completeCommand("/", 1)).toEqual({ text: "/", cursor: 1, candidates: ["exit", "help", "quit"] });
+    expect(completeCommand("/re", 3)).toEqual({ text: "/re", cursor: 3, candidates: ["reply", "reply-from", "retry"] });
+    expect(completeCommand("/rep", 4)).toEqual({ text: "/reply", cursor: 6, candidates: [] });
+    expect(completeCommand("/reply", 6)).toEqual({ text: "/reply", cursor: 6, candidates: ["reply", "reply-from"] });
   });
   it("leaves other text alone", () => {
     expect(completeCommand("/x", 2)).toEqual({ text: "/x", cursor: 2, candidates: [] });

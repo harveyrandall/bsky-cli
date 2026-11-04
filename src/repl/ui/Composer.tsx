@@ -1,19 +1,18 @@
-import { useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { Box, Text, useInput, usePaste, useWindowSize, type Key } from "ink";
 import { completeCommand } from "@/repl/core/commands";
-import type { DispatchResult } from "@/repl/core/dispatch";
 import { segmentAt, type Markers } from "@/repl/core/markers";
+import type { EscapeResult, Repl, SubmitOutcome } from "@/repl/core/repl";
 import { editorReducer, emptyEditor, type EditorAction } from "@/repl/ui/editor";
 import { chunkKeys, keyToAction } from "@/repl/ui/keys";
 import { Ring } from "@/repl/ui/Ring";
 
-const PROMPT = "bsky › ";
-const INDENT = " ".repeat(PROMPT.length);
 const segmenter = new Intl.Segmenter();
+const cells = (text: string) => [...segmenter.segment(text)].length;
 
 // East Asian wide characters, emoji and flags take two terminal cells.
 const WIDE =
-  /\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/u;
+  /\p{Extended_Pictographic}|\p{Regional_Indicator}|[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/u;
 
 /** One terminal row of the draft: text[start, end) after `prefix`. */
 interface Row {
@@ -28,20 +27,20 @@ interface Row {
  * truncated to one line, so a misjudged width can cut a row short but never
  * make the frame taller.
  */
-function layoutRows(text: string, width: number): Row[] {
+function layoutRows(text: string, width: number, prompt: string, indent: string): Row[] {
   const rows: Row[] = [];
   let offset = 0;
   text.split("\n").forEach((line, i) => {
-    let prefix = i === 0 ? PROMPT : INDENT;
+    let prefix = i === 0 ? prompt : indent;
     let start = 0;
-    let cells = 0;
+    let used = 0;
     for (const { index, segment } of segmenter.segment(line)) {
       const cellWidth = WIDE.test(segment) ? 2 : 1;
-      if (cells + cellWidth > width) {
+      if (used + cellWidth > width) {
         rows.push({ prefix, start: offset + start, end: offset + index });
-        [prefix, start, cells] = [INDENT, index, 0];
+        [prefix, start, used] = [indent, index, 0];
       }
-      cells += cellWidth;
+      used += cellWidth;
     }
     rows.push({ prefix, start: offset + start, end: offset + line.length });
     offset += line.length + 1;
@@ -63,18 +62,27 @@ function visibleRows(total: number, cursorRow: number, windowRows: number): [num
   return [first, first + budget];
 }
 
-const hidden = (n: number, arrow: string) =>
-  n > 0 && <Text dimColor>{`${INDENT}${arrow} ${n} more line${n === 1 ? "" : "s"}`}</Text>;
-
 export interface ComposerProps {
   markers: Markers;
-  onSubmit(text: string): Promise<DispatchResult>;
+  prompt: string;
+  limit: number;
+  /** A post waiting out its undo window: shown dimmed and read-only; Enter sends it now. */
+  pending?: string;
+  /** False while an overlay has the keyboard. */
+  active?: boolean;
+  /** Replaces the text whenever `id` changes. */
+  restore?: { id: number; text: string };
+  onSubmit(text: string): Promise<SubmitOutcome>;
+  onEscape(text: string): EscapeResult;
+  onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
+  onEof(text: string): void;
+  onSendNow(): void;
   onHint(text: string): void;
   onError(message: string): void;
-  onExit(): void;
 }
 
-export function Composer({ markers, onSubmit, onHint, onError, onExit }: ComposerProps) {
+export function Composer(props: ComposerProps) {
+  const { markers, prompt, limit, pending, active = true, restore } = props;
   const { rows: windowRows, columns } = useWindowSize();
   // Editor state lives in a ref so keys that arrive in one stdin chunk (fast
   // typing, slow SSH) each see the text the previous key left behind.
@@ -85,19 +93,33 @@ export function Composer({ markers, onSubmit, onHint, onError, onExit }: Compose
     rerender();
   };
 
+  useEffect(() => {
+    if (restore) apply({ type: "set", text: restore.text });
+  }, [restore?.id]);
+
   // The REPL never exits on an error: report it and keep the draft.
-  const report = (err: unknown) => onError(err instanceof Error ? err.message || err.name : String(err));
+  const report = (err: unknown) => props.onError(err instanceof Error ? err.message || err.name : String(err));
+
+  const outcome = (text: string, out: SubmitOutcome | EscapeResult | ReturnType<Repl["interrupt"]>) => {
+    if (out === "done") apply({ type: "submitted", text });
+    else if (out === "clear") apply({ type: "clear" });
+    else if (out === "hint") props.onHint("Ctrl+D to exit");
+    else if (typeof out === "object") {
+      if (out.restore !== text) apply({ type: "submitted", text });
+      apply({ type: "set", text: out.restore });
+    }
+  };
 
   const submitting = useRef(false);
   const submit = async (text: string) => {
     if (text.trim() === "") return;
     if (submitting.current) {
-      onHint("Still sending — wait for it to finish.");
+      props.onHint("Still sending — wait for it to finish.");
       return;
     }
     submitting.current = true;
     try {
-      if ((await onSubmit(text)) === "done") apply({ type: "submitted", text });
+      outcome(text, await props.onSubmit(text));
     } catch (err) {
       report(err);
     } finally {
@@ -105,14 +127,22 @@ export function Composer({ markers, onSubmit, onHint, onError, onExit }: Compose
     }
   };
 
-  // Ctrl+D with a draft only exits when pressed twice in a row.
-  const exitArmed = useRef(false);
-
   const handle = (input: string, key: Partial<Key>) => {
     const action = keyToAction(input, key, editor.current);
     const { text, cursor } = editor.current;
-    const armed = exitArmed.current;
-    exitArmed.current = false;
+    switch (action.type) {
+      case "escape":
+        return outcome(text, props.onEscape(text));
+      case "interrupt":
+        return outcome(text, props.onInterrupt(text));
+      case "eof":
+        return props.onEof(text);
+    }
+    // While a post waits out its undo window the composer only sends it now.
+    if (pending !== undefined) {
+      if (action.type === "submit") props.onSendNow();
+      return;
+    }
     switch (action.type) {
       case "ignore":
         return;
@@ -122,54 +152,60 @@ export function Composer({ markers, onSubmit, onHint, onError, onExit }: Compose
       case "complete": {
         const completed = completeCommand(text, cursor);
         if (completed.text !== text) apply({ type: "set", text: completed.text });
-        else if (completed.candidates.length > 1) onHint(completed.candidates.map((c) => `/${c}`).join("  "));
+        else if (completed.candidates.length > 1) props.onHint(completed.candidates.map((c) => `/${c}`).join("  "));
         return;
       }
-      case "interrupt":
-        if (text) apply({ type: "clear" });
-        else onHint("Ctrl+D to exit");
-        return;
-      case "eof":
-        if (text.trim() === "" || armed) {
-          onExit();
-        } else {
-          exitArmed.current = true;
-          onHint("Press Ctrl+D again to discard this draft and exit.");
-        }
-        return;
       default:
         apply(action);
     }
   };
 
-  useInput((input, key) => {
-    try {
-      if (input.length > 1 && /[\x00-\x1f]/.test(input)) {
-        for (const [part, partKey] of chunkKeys(input)) handle(part, partKey);
-      } else {
-        handle(input, key);
+  useInput(
+    (input, key) => {
+      try {
+        if (input.length > 1 && /[\x00-\x1f]/.test(input)) {
+          for (const [part, partKey] of chunkKeys(input)) handle(part, partKey);
+        } else {
+          handle(input, key);
+        }
+      } catch (err) {
+        report(err);
       }
-    } catch (err) {
-      report(err);
-    }
-  });
-  usePaste((text) => {
-    try {
-      apply({ type: "insert", text });
-    } catch (err) {
-      report(err);
-    }
-  });
+    },
+    { isActive: active },
+  );
+  usePaste(
+    (text) => {
+      try {
+        if (pending === undefined) apply({ type: "insert", text });
+      } catch (err) {
+        report(err);
+      }
+    },
+    { isActive: active },
+  );
+
+  const promptText = `${prompt} `;
+  const indent = " ".repeat(cells(promptText));
+  if (pending !== undefined) {
+    return (
+      <Text dimColor wrap="truncate">
+        {promptText + pending.split("\n")[0]}
+      </Text>
+    );
+  }
 
   const { text, cursor } = editor.current;
   // One cell stays free at the end of each row for the cursor.
-  const rows = layoutRows(text, Math.max(1, columns - PROMPT.length - 1));
+  const rows = layoutRows(text, Math.max(1, columns - cells(promptText) - 1), promptText, indent);
   // At a wrap point the cursor belongs to the row that starts there.
   let cursorRow = 0;
   rows.forEach((row, i) => {
     if (row.start <= cursor) cursorRow = i;
   });
   const [first, last] = visibleRows(rows.length, cursorRow, windowRows);
+  const hidden = (n: number, arrow: string) =>
+    n > 0 && <Text dimColor>{`${indent}${arrow} ${n} more line${n === 1 ? "" : "s"}`}</Text>;
   return (
     <Box flexDirection="column">
       {hidden(first, "↑")}
@@ -193,7 +229,7 @@ export function Composer({ markers, onSubmit, onHint, onError, onExit }: Compose
         );
       })}
       {hidden(rows.length - last, "↓")}
-      <Ring segment={segmentAt(text, cursor, markers)} />
+      <Ring segment={segmentAt(text, cursor, markers)} limit={limit} />
     </Box>
   );
 }

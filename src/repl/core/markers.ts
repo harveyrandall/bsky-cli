@@ -122,6 +122,8 @@ export function segmentAt(text: string, cursor: number, m: Markers): Segment {
 export interface SubmitPlan {
   /** Trimmed, empty pieces dropped. */
   posts: string[];
+  /** The text being sent, before splitting (for trim hints). */
+  source: string;
   /** Text after the first send marker, as typed, for the composer. */
   keep?: string;
   /** Text after the first cut marker in the send part. */
@@ -160,6 +162,7 @@ export function parseSubmit(text: string, m: Markers, limit: number): SubmitPlan
   const overLimit = splits.length === 0 ? [] : posts.flatMap((p, i) => (graphemeLength(p) > limit ? [i] : []));
   return {
     posts,
+    source: unescape(text.slice(0, piecesEnd), m).trim(),
     ...(keep && { keep }),
     ...(discard && { discard }),
     autoSplit,

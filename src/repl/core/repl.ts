@@ -314,6 +314,19 @@ export class Repl {
     this.cooldownsSettled ||= this.s.undo !== undefined && this.s.pace !== undefined;
   }
 
+  /** `/settings` with no arguments: ask for each; dismissing keeps the current value. */
+  async askSettings(): Promise<void> {
+    for (const kind of ["undo", "pace"] as const) {
+      const value = await this.deps.ask.cooldown(kind);
+      if (value !== undefined) this.setCooldown(kind, value);
+    }
+  }
+
+  settingsLine(): string {
+    const show = (v?: Cooldown) => (v === undefined ? "ask" : v === 0 ? "off" : `${v}s`);
+    return `undo ${show(this.s.undo)} · pace ${show(this.s.pace)} · auto-thread ${this.s.autoThread ? "on" : "off"}`;
+  }
+
   async retry(): Promise<void> {
     if (await this.pipeline.retry()) this.deps.print("Retrying…", "dim");
     else this.deps.print("Nothing to retry", "dim");
@@ -381,13 +394,16 @@ export class Repl {
     const direct = plan.posts.length === 1 && !plan.markersUsed && !plan.autoSplit;
     if (!direct && !(await this.deps.ask.confirm(plan, labelled))) return { restore: text };
 
-    const posts = labelled
-      ? plan.posts.map((p) => (this.s.threadLabel === "prepend" ? `${LABEL}\n${p}` : `${p}\n${LABEL}`))
-      : plan.posts;
+    const posts = labelled ? this.labelPosts(plan.posts) : plan.posts;
     const item = this.pipeline.enqueue(intent, posts);
     this.letters.set(item.id, this.letterFor(intent));
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
+  }
+
+  /** Posts with the thread label added, as they will be sent. */
+  labelPosts(posts: readonly string[]): string[] {
+    return posts.map((p) => (this.s.threadLabel === "prepend" ? `${LABEL}\n${p}` : `${p}\n${LABEL}`));
   }
 
   private letterFor(intent: Intent): ThreadLetter | undefined {
