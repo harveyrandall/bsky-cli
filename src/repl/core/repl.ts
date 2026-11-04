@@ -1,10 +1,11 @@
 import { basename } from "node:path";
+import { formatLocalDateTime, parseDate, parseTime, resolveAmPm, toUtcIso } from "@/lib/date-prompt";
 import { graphemeLength } from "@/lib/split-thread";
-import type { Draft } from "@/lib/types";
+import type { Draft, ScheduledPost } from "@/lib/types";
 import type { LineStyle } from "./commands";
 import { escapeMarkers, parseSubmit, type Markers, type SubmitPlan } from "./markers";
-import { canStage, expandHome, inspectMedia, nodeMediaFs, type MediaFs, type StagedMedia } from "./media";
-import { Pipeline, draftOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
+import { canStage, chips, expandHome, inspectMedia, mediaOptions, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
+import { Pipeline, draftOf, quoteOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
 import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
 import type { Cooldown, StrongRef, ThreadLetter } from "./types";
 
@@ -14,11 +15,15 @@ const WAIT = "Wait for pending posts, or Esc to cancel them";
 const LABEL = "🧵";
 const ALT_INTRO = "Alt text tells people using screen readers what's in your image — without it, they're left out of the post.";
 
+const NEW_ITEMS = ["Post", "Thread", "Image post", "Video post", "Quote post", "Scheduled post", "Draft"] as const;
+
+type ReturnTo = "idle" | "thread";
+
 export type ReplMode =
   | { kind: "idle" }
   | { kind: "thread" }
-  | { kind: "reply-once"; target: ResolvedRef; label: string; returnTo: "idle" | "thread" }
-  | { kind: "post-once"; returnTo: "idle" | "thread" };
+  | { kind: "reply-once" | "quote-once"; target: ResolvedRef; label: string; returnTo: ReturnTo }
+  | { kind: "post-once" | "schedule-once" | "draft-once"; returnTo: ReturnTo };
 
 export interface ReplSettings {
   autoThread: boolean;
@@ -42,10 +47,14 @@ export interface ReplAsk {
   confirm(plan: SubmitPlan, labelled: boolean, media: readonly StagedMedia[]): Promise<boolean>;
   /** Alt text for a file: undefined when skipped, null on Esc. */
   alt(file: string, required: boolean): Promise<string | undefined | null>;
+  /** undefined when dismissed. */
+  choose(label: string, options: readonly string[]): Promise<number | undefined>;
+  /** A line of text; undefined when dismissed. */
+  text(label: string): Promise<string | undefined>;
 }
 
 export interface ReplAgent extends RefAgent {
-  post(text: string, reply?: SendTarget, media?: readonly StagedMedia[]): Promise<StrongRef>;
+  post(text: string, reply?: SendTarget, media?: readonly StagedMedia[], quote?: StrongRef): Promise<StrongRef>;
 }
 
 export interface ReplDeps {
@@ -58,6 +67,7 @@ export interface ReplDeps {
   saveDraft(d: Omit<Draft, "id" | "createdAt">): Promise<{ id: string }>;
   deleteDraft(id: string): Promise<void>;
   saveConfig(values: Record<string, string | number | boolean>): Promise<void>;
+  saveScheduled(p: Omit<ScheduledPost, "id" | "createdAt">): Promise<{ id: string }>;
   timers?: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   fs?: MediaFs;
 }
@@ -74,10 +84,11 @@ export interface ThreadState {
   count: number;
 }
 
-type WriteKind = "thread" | "reply" | "standalone";
+type WriteKind = Intent["kind"];
 
 const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
-const manualDraft = (item: Unsent) => draftOf("manual", item.posts.map(stripLabel), item.target, item.media);
+const manualDraft = (item: Unsent) =>
+  draftOf("manual", item.posts.map(stripLabel), { target: item.target, media: item.media, quote: quoteOf(item.intent) });
 
 /**
  * The session: mode, active thread, settings, the post registry and the send
@@ -114,7 +125,7 @@ export class Repl {
     };
     this.pipeline = new Pipeline({
       ...timers,
-      send: (text, reply, media) => deps.agent.post(text, reply, media),
+      send: (text, reply, media, quote) => deps.agent.post(text, reply, media, quote),
       threadTarget: () => this.threadState && { parent: this.threadState.cursor, root: this.threadState.root },
       saveDraft: deps.saveDraft,
       deleteDraft: deps.deleteDraft,
@@ -159,7 +170,7 @@ export class Repl {
   /** The composer's text and whatever's staged, as a draft; undefined if there's neither. */
   composerDraft(text: string): Omit<Draft, "id" | "createdAt"> | undefined {
     if (text.trim() === "" && this.media.length === 0) return undefined;
-    return draftOf("manual", [text], undefined, this.media);
+    return draftOf("manual", [text], { media: this.media });
   }
 
   /** What paused the queue, while it's paused. */
@@ -187,8 +198,14 @@ export class Repl {
         return "bsky ›";
       case "post-once":
         return "post ›";
+      case "schedule-once":
+        return "scheduled ›";
+      case "draft-once":
+        return "draft ›";
       case "reply-once":
         return `reply→${this.current.label} ›`;
+      case "quote-once":
+        return `quote→${this.current.label} ›`;
       case "thread": {
         const cursor = this.threadState && this.registry.byUri(this.threadState.cursor.uri);
         if (!cursor) return "thread ›";
@@ -205,7 +222,7 @@ export class Repl {
 
   /** Thread posts are labelled, and so are replies that stay in the active thread. */
   private labelled(kind: WriteKind, root?: StrongRef): boolean {
-    if (!this.s.threadLabel || kind === "standalone") return false;
+    if (!this.s.threadLabel || kind === "standalone" || kind === "quote") return false;
     return kind === "thread" || (this.inThread() && root?.uri === this.threadState?.root.uri);
   }
 
@@ -227,17 +244,28 @@ export class Repl {
         return "keep";
       case "thread":
         return this.write({ kind: "thread" }, text);
-      case "reply-once": {
-        const out = await this.write({ kind: "reply", target: mode.target.ref, root: mode.target.root }, text);
-        if (out !== "keep") this.current = { kind: mode.returnTo };
-        return out;
-      }
-      case "post-once": {
-        const out = await this.write({ kind: "standalone" }, text);
-        if (out !== "keep") this.current = { kind: mode.returnTo };
-        return out;
-      }
+      case "reply-once":
+        return this.once(mode, this.write({ kind: "reply", target: mode.target.ref, root: mode.target.root }, text));
+      case "quote-once":
+        return this.once(mode, this.write({ kind: "quote", target: mode.target.ref }, text));
+      case "post-once":
+        return this.once(mode, this.write({ kind: "standalone" }, text));
+      case "schedule-once":
+        return this.once(mode, this.schedule(text));
+      case "draft-once":
+        return this.once(mode, this.saveAsDraft(text));
     }
+  }
+
+  /** A once mode ends when what was typed has gone somewhere. */
+  private async once(mode: { returnTo: ReturnTo }, submitted: Promise<SubmitOutcome>): Promise<SubmitOutcome> {
+    const out = await submitted;
+    if (out !== "keep") this.current = { kind: mode.returnTo };
+    return out;
+  }
+
+  private isOnce(): boolean {
+    return this.current.kind !== "idle" && this.current.kind !== "thread";
   }
 
   /** Posts are queued, or paused after a failure. */
@@ -432,6 +460,103 @@ export class Repl {
     }
   }
 
+  /** `/quote <ref> [text]`: quote once, now or in quote-once mode. */
+  async quote(ref: string, text?: string): Promise<SubmitOutcome> {
+    const resolved = await this.resolve(ref);
+    if (!resolved) return "keep";
+    const entry = this.entryFor(resolved, { letter: this.threadState?.letter });
+    if (text !== undefined) return this.write({ kind: "quote", target: resolved.ref }, text);
+    this.current = { kind: "quote-once", target: resolved, label: entry.label, returnTo: this.inThread() ? "thread" : "idle" };
+    this.deps.onChange();
+    return "done";
+  }
+
+  /** `/new`: pick what to write next, which ends the thread. */
+  async newMenu(): Promise<SubmitOutcome> {
+    if (this.blockedByPending()) return "keep";
+    const pick = await this.deps.ask.choose("New:", NEW_ITEMS);
+    if (pick === undefined) return "keep";
+    if (this.threadState) this.stopThread();
+    this.current = { kind: "idle" };
+    this.deps.onChange();
+    switch (NEW_ITEMS[pick]) {
+      case "Post":
+        return this.post();
+      case "Thread":
+        return this.startThread();
+      case "Image post":
+      case "Video post": {
+        const path = await this.deps.ask.text("Path to the file:");
+        if (path === undefined) return "keep";
+        await this.attach(parseDroppedPaths(path) ?? [path.trim()]);
+        return this.media.length > 0 ? this.post() : "keep";
+      }
+      case "Quote post": {
+        const ref = await this.deps.ask.text("Post to quote (number, link or at:// URI):");
+        return ref === undefined ? "keep" : this.quote(ref);
+      }
+      case "Scheduled post":
+        this.current = { kind: "schedule-once", returnTo: "idle" };
+        break;
+      case "Draft":
+        this.current = { kind: "draft-once", returnTo: "idle" };
+    }
+    this.deps.onChange();
+    return "done";
+  }
+
+  /** A future date and time from the person, as ISO UTC; undefined when dismissed. */
+  private async askDateTime(): Promise<string | undefined> {
+    for (;;) {
+      const dateInput = await this.deps.ask.text("Date (DD-MM or DD-MM-YYYY):");
+      if (dateInput === undefined) return undefined;
+      const date = parseDate(dateInput);
+      if (!date) {
+        this.deps.print("Invalid date. Use DD-MM or DD-MM-YYYY format (e.g. 26-03 or 26-03-2026).", "error");
+        continue;
+      }
+      const timeInput = await this.deps.ask.text("Time (HH:MM):");
+      if (timeInput === undefined) return undefined;
+      const time = parseTime(timeInput);
+      if (!time) {
+        this.deps.print("Invalid time. Use HH:MM format (e.g. 15:30 or 9:00).", "error");
+        continue;
+      }
+      let { hours } = time;
+      if (time.ambiguous) {
+        const half = await this.deps.ask.choose("AM or PM?", ["AM", "PM"]);
+        if (half === undefined) return undefined;
+        hours = resolveAmPm(hours, half === 0 ? "am" : "pm");
+      }
+      const iso = toUtcIso(date.day, date.month, date.year, hours, time.minutes);
+      if (new Date(iso) > new Date()) return iso;
+      this.deps.print("Date must be in the future.", "error");
+    }
+  }
+
+  private async schedule(text: string): Promise<SubmitOutcome> {
+    const plan = parseSubmit(text, this.markers, 300);
+    if (plan.posts.length !== 1) {
+      this.deps.print("A scheduled post is a single post of up to 300 characters", "error");
+      return "keep";
+    }
+    const scheduledAt = await this.askDateTime();
+    if (scheduledAt === undefined) return "keep";
+    const saved = await this.deps.saveScheduled({ scheduledAt, text: plan.posts[0], ...mediaOptions(this.media) });
+    this.media = [];
+    this.deps.print(`Scheduled for ${formatLocalDateTime(scheduledAt)} (${saved.id})`, "dim");
+    return plan.keep ? { restore: plan.keep } : "done";
+  }
+
+  private async saveAsDraft(text: string): Promise<SubmitOutcome> {
+    const plan = parseSubmit(text, this.markers, 300);
+    if (plan.posts.length === 0) return "keep";
+    const saved = await this.deps.saveDraft(draftOf("manual", plan.posts, { media: this.media }));
+    this.media = [];
+    this.deps.print(`Saved as draft ${saved.id}`, "dim");
+    return plan.keep ? { restore: plan.keep } : "done";
+  }
+
   setAutoThread(on = !this.s.autoThread): void {
     this.s.autoThread = on;
     this.deps.print(`Auto-thread ${on ? "on" : "off"}`, "dim");
@@ -469,7 +594,7 @@ export class Repl {
   /** Esc below any overlay (spec §10). */
   escape(composerText: string): EscapeResult {
     if (this.busy()) return this.cancelPending(composerText);
-    if (this.current.kind === "reply-once" || this.current.kind === "post-once") {
+    if (this.current.kind !== "idle" && this.current.kind !== "thread") {
       this.current = { kind: this.current.returnTo };
       this.deps.onChange();
       return "handled";
@@ -484,8 +609,7 @@ export class Repl {
 
   /** Ctrl+C below any overlay: like Esc for pending posts and once modes; otherwise it clears text before stopping a thread, and hints when idle. */
   interrupt(composerText: string): "clear" | "handled" | "hint" | { restore: string } {
-    const once = this.current.kind === "reply-once" || this.current.kind === "post-once";
-    if (this.busy() || once) {
+    if (this.busy() || this.isOnce()) {
       const r = this.escape(composerText);
       return r === "unhandled" ? "hint" : r;
     }
@@ -552,14 +676,20 @@ export class Repl {
       }
       return "keep";
     }
+    const quoting = intent.kind === "quote";
+    if (quoting && plan.posts.length > 1) {
+      this.deps.print("A quote is a single post: shorten it, or quote the first part and reply to it", "error");
+      return "keep";
+    }
     const direct = plan.posts.length === 1 && !plan.markersUsed && !plan.autoSplit;
-    if (!direct && !(await this.deps.ask.confirm(plan, labelled, this.media))) return "keep";
+    if (!direct && !(await this.deps.ask.confirm(plan, labelled, quoting ? [] : this.media))) return "keep";
 
     const posts = labelled ? this.labelPosts(plan.posts) : plan.posts;
     // A question may have been answered after the REPL started closing.
     if (this.closed) return "keep";
-    const media = this.media;
-    this.media = [];
+    const media = quoting ? [] : this.media;
+    if (quoting && this.media.length > 0) this.deps.print(`Quote posts can't have media; ${chips(this.media)} stays for the next post`, "dim");
+    if (!quoting) this.media = [];
     const item = this.pipeline.enqueue(intent, posts, media.length > 0 ? media : undefined);
     this.letters.set(item.id, this.letterFor(intent));
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
@@ -623,6 +753,7 @@ export class Repl {
     const text = this.join(item.posts);
     const { kind } = item.intent;
     if (kind === "thread" && this.current.kind === "thread") return text;
+    if (kind === "quote") return `/quote ${this.registry.byUri(item.intent.target.uri)?.label ?? item.intent.target.uri} ${text}`;
     const parent = item.target && this.registry.byUri(item.target.parent.uri);
     if (parent) return `/reply ${parent.label} ${text}`;
     return `/${kind === "thread" ? "thread" : "post"} ${text}`;

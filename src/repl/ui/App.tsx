@@ -25,6 +25,7 @@ export interface AppProps {
   agent: ReplAgent;
   drafts: { save: ReplDeps["saveDraft"]; delete: ReplDeps["deleteDraft"] };
   saveConfig: ReplDeps["saveConfig"];
+  saveScheduled: ReplDeps["saveScheduled"];
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -67,6 +68,8 @@ export function App(props: AppProps) {
           saveOffer: (values) => new Promise((resolve) => setOverlay({ kind: "save", values, resolve })),
           confirm: (plan, labelled) => new Promise((resolve) => setOverlay({ kind: "preview", plan, labelled, resolve })),
           alt: async () => undefined,
+          choose: async () => undefined,
+          text: async () => undefined,
         },
         print,
         onChange: rerender,
@@ -78,6 +81,7 @@ export function App(props: AppProps) {
         saveDraft: props.drafts.save,
         deleteDraft: props.drafts.delete,
         saveConfig: props.saveConfig,
+        saveScheduled: props.saveScheduled,
       }),
   );
   useEffect(() => props.onReady?.(repl), [repl]);

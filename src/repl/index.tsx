@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { render, renderToString } from "ink";
 import { deleteDraft, saveDraft } from "@/drafts";
+import { saveScheduledPost } from "@/scheduled";
 import { setConfigValues } from "@/toml-config";
 import { App, LEFT, type AppProps } from "@/repl/ui/App";
 import { DEFAULT_MARKERS, type Markers } from "@/repl/core/markers";
@@ -33,6 +34,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       agent={opts.agent}
       drafts={{ save: (d) => saveDraft(d, opts.profile), delete: (id) => deleteDraft(id, opts.profile) }}
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
+      saveScheduled={(p) => saveScheduledPost(p, opts.profile)}
       configName={basename(opts.configPath)}
       onReady={(r) => (repl = r)}
     />,
@@ -86,6 +88,7 @@ export const offlineProps: Omit<AppProps, "markers" | "kittyHint"> = {
   agent: { selfDid: "did:plc:offline", resolveHandle: offline, getPosts: offline, post: offline },
   drafts: { save: offline, delete: offline },
   saveConfig: offline,
+  saveScheduled: offline,
   configName: "config.toml",
 };
 

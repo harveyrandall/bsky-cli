@@ -31,6 +31,7 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
   const saveConfig = vi.fn(async () => {});
+  const saveScheduled = vi.fn(async () => ({ id: "s1" }));
   const app = render(
     <App
       markers={DEFAULT_MARKERS}
@@ -39,6 +40,7 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
       agent={agent}
       drafts={drafts}
       saveConfig={saveConfig}
+      saveScheduled={saveScheduled}
       configName="config.toml"
       onReady={(r) => (session = r)}
     />,
@@ -209,7 +211,7 @@ describe("App threads", () => {
     expect(lastFrame()).toMatch(/^thread \(1\) ›\s*$/m);
     await type("two", "\r");
     await tick();
-    expect(agent.post).toHaveBeenLastCalledWith("two", { parent: ref(1), root: ref(1) }, undefined);
+    expect(agent.post).toHaveBeenLastCalledWith("two", { parent: ref(1), root: ref(1) }, undefined, undefined);
   });
   it("previews a split and posts it on y", async () => {
     const { type, lastFrame, agent } = setup();

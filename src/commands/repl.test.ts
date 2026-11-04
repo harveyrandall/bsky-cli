@@ -207,7 +207,7 @@ describe("replAgent", () => {
     const parent = { uri: `${uri}p`, cid: "bafyp" } as never;
     const root = { uri: `${uri}r`, cid: "bafyr" } as never;
     await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
-    expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
+    expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root, quote: undefined });
   });
   it("won't start without a session", () => {
     expect(() => replAgent({} as never)).toThrow("Not logged in");
@@ -217,7 +217,7 @@ describe("replAgent", () => {
     vi.mocked(createPost).mockResolvedValueOnce({ uri, cid: "bafyabc" } as never);
     const agent = { session: { did: "did:plc:me" } } as never;
     await replAgent(agent).post("hi", undefined, [{ path: "/x/a.png", kind: "image", alt: "A chart" }]);
-    expect(createPost).toHaveBeenCalledWith(agent, "hi", { images: ["/x/a.png"], imageAlts: ["A chart"] });
+    expect(createPost).toHaveBeenCalledWith(agent, "hi", { images: ["/x/a.png"], imageAlts: ["A chart"], quote: undefined });
   });
   it("keeps a post with no reply as its own root", async () => {
     await expect(lookup({ text: "hi" })).resolves.toMatchObject([{ uri, text: "hi", root: undefined }]);

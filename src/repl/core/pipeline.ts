@@ -3,7 +3,11 @@ import type { Draft } from "@/lib/types";
 import { mediaOptions, type StagedMedia } from "./media";
 import type { StrongRef } from "./types";
 
-export type Intent = { kind: "thread" } | { kind: "reply"; target: StrongRef; root: StrongRef } | { kind: "standalone" };
+export type Intent =
+  | { kind: "thread" }
+  | { kind: "reply"; target: StrongRef; root: StrongRef }
+  | { kind: "standalone" }
+  | { kind: "quote"; target: StrongRef };
 
 export interface QueueItem {
   id: number;
@@ -48,7 +52,7 @@ export interface PipelineDeps {
   now(): number;
   setTimer(fn: () => void, ms: number): unknown;
   clearTimer(handle: unknown): void;
-  send(text: string, reply?: SendTarget, media?: readonly StagedMedia[]): Promise<StrongRef>;
+  send(text: string, reply?: SendTarget, media?: readonly StagedMedia[], quote?: StrongRef): Promise<StrongRef>;
   /** Where the next thread post goes, read at send time. */
   threadTarget(): SendTarget | undefined;
   saveDraft(d: Omit<Draft, "id" | "createdAt">): Promise<{ id: string }>;
@@ -61,22 +65,24 @@ export interface PipelineDeps {
   onWarning(message: string): void;
 }
 
-/** The draft that sends `posts`, with `media` on the first, to `target`. */
+/** The draft that sends `posts`, with `media` on the first, to `target` or quoting `quote`. */
 export function draftOf(
   reason: Draft["reason"],
   posts: readonly string[],
-  target?: SendTarget,
-  media?: readonly StagedMedia[],
+  { target, media, quote }: { target?: SendTarget; media?: readonly StagedMedia[]; quote?: StrongRef } = {},
 ): Omit<Draft, "id" | "createdAt"> {
   const thread = posts.length > 1;
   return {
     reason,
-    type: thread ? "thread" : target ? "reply" : "post",
+    type: thread ? "thread" : quote ? "quote" : target ? "reply" : "post",
     text: posts[0],
     ...(target && { replyUri: target.parent.uri }),
+    ...(quote && { quoteUri: quote.uri }),
     ...(thread ? { posts: posts.map((text, i) => ({ text, ...(i === 0 && mediaOptions(media)) })) } : mediaOptions(media)),
   };
 }
+
+export const quoteOf = (intent: Intent) => (intent.kind === "quote" ? intent.target : undefined);
 
 /** An item's media, if its first post is among those from `from`. */
 const mediaFrom = (item: QueueItem, from: number) => (from === 0 ? item.media : undefined);
@@ -237,7 +243,7 @@ export class Pipeline {
     let ref: StrongRef;
     // Only the send itself can fail a post; what happens after it is bookkeeping.
     try {
-      ref = await this.deps.send(a.item.posts[a.index], target, mediaFrom(a.item, a.index));
+      ref = await this.deps.send(a.item.posts[a.index], target, mediaFrom(a.item, a.index), quoteOf(a.item.intent));
     } catch (err) {
       await this.fail(a, target, err);
       this.sending = false;
@@ -299,7 +305,8 @@ export class Pipeline {
     this.failure = failure;
     const rest = a.item.posts.slice(a.index);
     try {
-      const draft = await this.deps.saveDraft(draftOf("network", rest, target, mediaFrom(a.item, a.index)));
+      const media = mediaFrom(a.item, a.index);
+      const draft = await this.deps.saveDraft(draftOf("network", rest, { target, media, quote: quoteOf(a.item.intent) }));
       failure.draftId = draft.id;
       if (this.queue[0] === a) this.queue.shift();
       await this.dropDraft(a);

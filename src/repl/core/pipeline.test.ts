@@ -19,7 +19,7 @@ function setup(o: { undo?: number; pace?: number } = {}) {
     now: () => Date.now(),
     setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimer: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
-    send: vi.fn(async (text: string, target?: SendTarget, _media?: readonly StagedMedia[]) => {
+    send: vi.fn(async (text: string, target?: SendTarget, _media?: readonly StagedMedia[], _quote?: StrongRef) => {
       sent.push({ text, target, at: Date.now() });
       return ref(++n);
     }),
@@ -136,23 +136,42 @@ const chart: StagedMedia = { path: "/x/chart.png", kind: "image", alt: "A chart"
 
 describe("draftOf", () => {
   it("puts media on a lone post", () => {
-    expect(draftOf("network", ["a"], undefined, [chart, { path: "/x/b.png", kind: "image" }])).toEqual({
+    expect(draftOf("network", ["a"], { media: [chart, { path: "/x/b.png", kind: "image" }] })).toEqual({
       reason: "network",
       type: "post",
       text: "a",
       images: ["/x/chart.png", "/x/b.png"],
       imageAlts: ["A chart", "b.png"],
     });
-    expect(draftOf("network", ["a"], undefined, [{ path: "/x/c.mp4", kind: "video", alt: "A clip" }])).toMatchObject({
+    expect(draftOf("network", ["a"], { media: [{ path: "/x/c.mp4", kind: "video", alt: "A clip" }] })).toMatchObject({
       video: "/x/c.mp4",
       videoAlt: "A clip",
     });
   });
   it("puts media on a thread's first post", () => {
-    expect(draftOf("manual", ["a", "b"], undefined, [chart]).posts).toEqual([
+    expect(draftOf("manual", ["a", "b"], { media: [chart] }).posts).toEqual([
       { text: "a", images: ["/x/chart.png"], imageAlts: ["A chart"] },
       { text: "b" },
     ]);
+  });
+  it("marks a quote", () => {
+    expect(draftOf("network", ["a"], { quote: ref(1) })).toEqual({ reason: "network", type: "quote", text: "a", quoteUri: ref(1).uri });
+  });
+});
+
+describe("Pipeline quotes", () => {
+  it("send the quoted post with the text", async () => {
+    const { pipeline, deps } = setup();
+    pipeline.enqueue({ kind: "quote", target: ref(7) }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.send).toHaveBeenCalledExactlyOnceWith("a", undefined, undefined, ref(7));
+  });
+  it("stay quotes in their draft", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "quote", target: ref(7) }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ type: "quote", quoteUri: ref(7).uri }));
   });
 });
 
@@ -171,7 +190,7 @@ describe("Pipeline media", () => {
     expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ images: ["/x/chart.png"] }));
     await pipeline.retry();
     await vi.advanceTimersByTimeAsync(0);
-    expect(deps.send).toHaveBeenLastCalledWith("a", undefined, [chart]);
+    expect(deps.send).toHaveBeenLastCalledWith("a", undefined, [chart], undefined);
   });
   it("isn't sent again when a later post fails", async () => {
     const { pipeline, deps } = setup();

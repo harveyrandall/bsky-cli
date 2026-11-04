@@ -20,13 +20,13 @@ const fs: MediaFs = {
 
 function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> = {}) {
   let n = 0;
-  const posted: { text: string; reply?: SendTarget; media?: readonly StagedMedia[] }[] = [];
+  const posted: { text: string; reply?: SendTarget; media?: readonly StagedMedia[]; quote?: StrongRef }[] = [];
   const agent = {
     selfDid: me,
     resolveHandle: vi.fn(async () => me),
     getPosts: vi.fn(async () => []),
-    post: vi.fn(async (text: string, reply?: SendTarget, media?: readonly StagedMedia[]) => {
-      posted.push({ text, reply, media });
+    post: vi.fn(async (text: string, reply?: SendTarget, media?: readonly StagedMedia[], quote?: StrongRef) => {
+      posted.push({ text, reply, media, quote });
       return ref(++n);
     }),
   };
@@ -35,6 +35,8 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     saveOffer: vi.fn(async () => "no" as const),
     confirm: vi.fn(async () => true),
     alt: vi.fn(async () => undefined),
+    choose: vi.fn(async () => undefined),
+    text: vi.fn(async () => undefined),
     ...answers,
   };
   const lines: [string, LineStyle | undefined][] = [];
@@ -47,6 +49,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     saveDraft: vi.fn(async () => ({ id: "d1" })),
     deleteDraft: vi.fn(async () => {}),
     saveConfig: vi.fn(async () => {}),
+    saveScheduled: vi.fn(async () => ({ id: "s1" })),
     fs,
   };
   const repl = new Repl(
@@ -551,6 +554,182 @@ describe("media", () => {
   it("leaves nothing to save when there's no text or media", () => {
     const { repl } = setup();
     expect(repl.composerDraft("  ")).toBeUndefined();
+  });
+});
+
+describe("/quote", () => {
+  const withPost = async (s: ReturnType<typeof setup>) => {
+    await s.repl.post("first");
+    await s.flush();
+    return s;
+  };
+  it("quotes with text straight away", async () => {
+    const { repl, posted, flush } = await withPost(setup());
+    expect(await repl.quote("1", "look")).toBe("done");
+    await flush();
+    expect(posted[1]).toMatchObject({ text: "look", quote: ref(1) });
+    expect(posted[1].reply).toBeUndefined();
+  });
+  it("leaves staged media for the next post, and says so", async () => {
+    const { repl, posted, flush, printed } = await withPost(setup());
+    await repl.attach(["/x/a.png"]);
+    await repl.quote("1", "look");
+    await flush();
+    expect(posted[1].media).toBeUndefined();
+    expect(repl.staged()).toHaveLength(1);
+    expect(printed()).toContain("Quote posts can't have media; 📎 a.png stays for the next post");
+  });
+  it("waits for the text in quote-once mode, then goes back", async () => {
+    const { repl, posted, flush } = await withPost(setup());
+    await repl.startThread();
+    expect(await repl.quote("1")).toBe("done");
+    expect(repl.prompt()).toBe("quote→1 ›");
+    await repl.submitText("look");
+    await flush();
+    expect(posted[1].quote).toEqual(ref(1));
+    expect(repl.mode().kind).toBe("thread");
+  });
+  it("is one post", async () => {
+    const { repl, ask, printed } = await withPost(setup());
+    expect(await repl.quote("1", "a /// b")).toBe("keep");
+    expect(ask.confirm).not.toHaveBeenCalled();
+    expect(printed()).toContain("A quote is a single post");
+  });
+  it("comes back as /quote when rejected", async () => {
+    const { repl, agent, deps, flush } = await withPost(setup());
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.quote("1", "bad");
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/quote 1 bad");
+  });
+  it("is left alone by Esc like the other once modes", async () => {
+    const { repl } = await withPost(setup());
+    await repl.quote("1");
+    expect(repl.escape("")).toBe("handled");
+    expect(repl.mode().kind).toBe("idle");
+  });
+});
+
+describe("/new", () => {
+  const pick = (item: string) => ({ choose: vi.fn(async (_: string, options: readonly string[]) => options.indexOf(item)) });
+  it("offers every kind of post", async () => {
+    const { repl, ask } = setup();
+    await repl.newMenu();
+    expect(ask.choose).toHaveBeenCalledWith("New:", ["Post", "Thread", "Image post", "Video post", "Quote post", "Scheduled post", "Draft"]);
+  });
+  it("leaves the thread alone if you dismiss it", async () => {
+    const { repl, flush } = setup();
+    await repl.startThread("one");
+    await flush();
+    await repl.newMenu();
+    expect(repl.mode().kind).toBe("thread");
+    expect(repl.thread()).toBeDefined();
+  });
+  it("stops the thread when you pick something", async () => {
+    const { repl, flush, printed } = setup({}, pick("Post"));
+    await repl.startThread("one");
+    await flush();
+    expect(await repl.newMenu()).toBe("done");
+    expect(printed()).toContain("Thread stopped");
+    expect(repl.mode()).toEqual({ kind: "post-once", returnTo: "idle" });
+  });
+  it("waits for pending posts", async () => {
+    const { repl, ask } = setup({ undo: 5 });
+    await repl.post("waiting");
+    expect(await repl.newMenu()).toBe("keep");
+    expect(ask.choose).not.toHaveBeenCalled();
+  });
+  it("starts a thread", async () => {
+    const { repl } = setup({}, pick("Thread"));
+    await repl.newMenu();
+    expect(repl.mode().kind).toBe("thread");
+  });
+  it.each([["Image post", "/x/a b.png"], ["Video post", "/x/a b.mp4"]])("%s asks for a path, attaches it and waits for the text", async (item, path) => {
+    const { repl, ask } = setup({}, { ...pick(item), text: vi.fn(async () => path) });
+    await repl.newMenu();
+    expect(ask.text).toHaveBeenCalledWith("Path to the file:");
+    expect(repl.staged().map((m) => m.path)).toEqual([path]);
+    expect(repl.prompt()).toBe("post ›");
+  });
+  it("stays idle if nothing could be attached", async () => {
+    const { repl, printed } = setup({}, { ...pick("Image post"), text: vi.fn(async () => "/x/missing.png") });
+    await repl.newMenu();
+    expect(printed()).toContain("missing.png not found");
+    expect(repl.mode().kind).toBe("idle");
+  });
+  it("asks which post to quote", async () => {
+    const s = setup({}, { ...pick("Quote post"), text: vi.fn(async () => "1") });
+    await s.repl.post("first");
+    await s.flush();
+    await s.repl.newMenu();
+    expect(s.ask.text).toHaveBeenCalledWith("Post to quote (number, link or at:// URI):");
+    expect(s.repl.prompt()).toBe("quote→1 ›");
+  });
+  it("writes a draft", async () => {
+    const { repl, deps, printed } = setup({}, pick("Draft"));
+    await repl.attach(["/x/a.png"]);
+    await repl.newMenu();
+    expect(repl.prompt()).toBe("draft ›");
+    expect(await repl.submitText("later")).toBe("done");
+    expect(deps.saveDraft).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "later", images: ["/x/a.png"], imageAlts: ["a.png"] });
+    expect(printed()).toContain("Saved as draft d1");
+    expect(repl.staged()).toEqual([]);
+    expect(repl.mode().kind).toBe("idle");
+  });
+  it("keeps a thread's shape in a draft", async () => {
+    const { repl, deps } = setup({}, pick("Draft"));
+    await repl.newMenu();
+    await repl.submitText("a /// b");
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ type: "thread", posts: [{ text: "a" }, { text: "b" }] }));
+  });
+});
+
+describe("scheduled posts", () => {
+  const when = new Date(2026, 10, 5, 15, 30).toISOString();
+  const answers = (...texts: (string | undefined)[]) => ({
+    choose: vi.fn(async (label: string, options: readonly string[]) => (label === "New:" ? options.indexOf("Scheduled post") : 1)),
+    text: vi.fn(async () => texts.shift()),
+  });
+  it("save the text and media for the time you give", async () => {
+    const { repl, deps, printed } = setup({}, answers("05-11-2026", "15:30"));
+    await repl.attach(["/x/a.png"]);
+    await repl.newMenu();
+    expect(repl.prompt()).toBe("scheduled ›");
+    expect(await repl.submitText("later")).toBe("done");
+    expect(deps.saveScheduled).toHaveBeenCalledWith({ scheduledAt: when, text: "later", images: ["/x/a.png"], imageAlts: ["a.png"] });
+    expect(printed()).toContain("Scheduled for 5 Nov 2026, 15:30 (s1)");
+    expect(repl.staged()).toEqual([]);
+    expect(repl.mode().kind).toBe("idle");
+  });
+  it("ask AM or PM when the hour could be either", async () => {
+    const { repl, deps, ask } = setup({}, answers("05-11-2026", "3:30"));
+    await repl.newMenu();
+    await repl.submitText("later");
+    expect(ask.choose).toHaveBeenCalledWith("AM or PM?", ["AM", "PM"]);
+    expect(deps.saveScheduled).toHaveBeenCalledWith(expect.objectContaining({ scheduledAt: when }));
+  });
+  it("ask again after a bad date, a bad time or a time in the past", async () => {
+    const { repl, deps, printed } = setup({}, answers("nonsense", "05-11-2026", "25:00", "01-01-2026", "15:30", "05-11-2026", "15:30"));
+    await repl.newMenu();
+    await repl.submitText("later");
+    expect(printed()).toContain("Invalid date. Use DD-MM or DD-MM-YYYY format");
+    expect(printed()).toContain("Invalid time. Use HH:MM format");
+    expect(printed()).toContain("Date must be in the future.");
+    expect(deps.saveScheduled).toHaveBeenCalledOnce();
+  });
+  it("keep the text and the mode if you back out", async () => {
+    const { repl, deps } = setup({}, answers(undefined));
+    await repl.newMenu();
+    expect(await repl.submitText("later")).toBe("keep");
+    expect(deps.saveScheduled).not.toHaveBeenCalled();
+    expect(repl.mode().kind).toBe("schedule-once");
+  });
+  it("are one post", async () => {
+    const { repl, deps, printed } = setup({}, answers("05-11-2026", "15:30"));
+    await repl.newMenu();
+    expect(await repl.submitText("a /// b")).toBe("keep");
+    expect(printed()).toContain("A scheduled post is a single post");
+    expect(deps.saveScheduled).not.toHaveBeenCalled();
   });
 });
 

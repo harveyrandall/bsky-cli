@@ -63,9 +63,9 @@ export function replAgent(agent: AtpAgent): ReplAgent {
       const res = await agent.getPosts({ uris });
       return res.data.posts.flatMap((p) => toLookup(p) ?? []);
     },
-    async post(text, reply, media) {
+    async post(text, reply, media, quote) {
       const target = reply ? { reply: reply.parent, replyRoot: reply.root } : {};
-      return toStrongRef(await createPost(agent, text, { ...target, ...mediaOptions(media) }));
+      return toStrongRef(await createPost(agent, text, { ...target, ...mediaOptions(media), quote }));
     },
   };
 }
