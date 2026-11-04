@@ -32,4 +32,23 @@ describe("Composer", () => {
     await type("a");
     expect(lastFrame()).toContain("bsky › a");
   });
+  it("exits on Ctrl+D when the composer is empty", async () => {
+    const { type, props } = setup();
+    await type("\x04");
+    expect(props.onExit).toHaveBeenCalledOnce();
+  });
+  it("asks for a second Ctrl+D before discarding a draft", async () => {
+    const { type, props, lastFrame } = setup();
+    await type("abc", "\x04");
+    expect(props.onExit).not.toHaveBeenCalled();
+    expect(props.onHint).toHaveBeenCalledWith(expect.stringContaining("Ctrl+D again"));
+    expect(lastFrame()).toContain("bsky › abc");
+    await type("\x04");
+    expect(props.onExit).toHaveBeenCalledOnce();
+  });
+  it("forgets the first Ctrl+D once another key is pressed", async () => {
+    const { type, props } = setup();
+    await type("abc", "\x04", "d", "\x04");
+    expect(props.onExit).not.toHaveBeenCalled();
+  });
 });

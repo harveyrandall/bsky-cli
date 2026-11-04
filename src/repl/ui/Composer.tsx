@@ -101,9 +101,14 @@ export function Composer({ markers, onSubmit, onHint, onError, onExit }: Compose
     }
   };
 
+  // Ctrl+D with a draft only exits when pressed twice in a row.
+  const exitArmed = useRef(false);
+
   const handle = (input: string, key: Partial<Key>) => {
     const action = keyToAction(input, key, editor.current);
     const { text, cursor } = editor.current;
+    const armed = exitArmed.current;
+    exitArmed.current = false;
     switch (action.type) {
       case "ignore":
         return;
@@ -121,7 +126,12 @@ export function Composer({ markers, onSubmit, onHint, onError, onExit }: Compose
         else onHint("Ctrl+D to exit");
         return;
       case "eof":
-        onExit();
+        if (text.trim() === "" || armed) {
+          onExit();
+        } else {
+          exitArmed.current = true;
+          onHint("Press Ctrl+D again to discard this draft and exit.");
+        }
         return;
       default:
         apply(action);

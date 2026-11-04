@@ -26,7 +26,7 @@ The REPL needs an interactive terminal. If stdin or stdout isn't a terminal (for
 | Backspace, Delete | Delete one character |
 | Tab | Complete command names |
 | Ctrl+C | Clear the text (on an empty composer, a reminder that Ctrl+D exits) |
-| Ctrl+D | Exit |
+| Ctrl+D | Exit; with a draft in the composer, press it twice |
 
 Pasted text is inserted as-is, newlines included, and never submits.
 
