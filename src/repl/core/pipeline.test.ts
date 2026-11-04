@@ -184,6 +184,16 @@ describe("Pipeline errors", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sent.map((s) => s.target)).toEqual([parent]);
   });
+  it("forgets a paused failure when the queue is cancelled", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    pipeline.cancelAll();
+    expect(pipeline.isPaused()).toBe(false);
+    expect(pipeline.lastFailure()).toBeUndefined();
+    await expect(pipeline.retry()).resolves.toBe(false);
+  });
   it("keeps a post it couldn't save as a draft at the head of the paused queue", async () => {
     const { pipeline, deps, sent } = setup();
     deps.send.mockRejectedValueOnce(fetchFailed());

@@ -318,6 +318,19 @@ describe("App threads", () => {
     expect(exit).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("Can't send now: the queue is paused after an error");
   });
+  it("says what a pause needs: a retry after a network error, a login after an expired session", async () => {
+    const offline = setup();
+    offline.agent.post.mockRejectedValueOnce(new Error("fetch failed"));
+    await offline.type("/post a", "\r");
+    await tick();
+    expect(offline.lastFrame()).toContain("Paused after a network error — /retry");
+    const expired = setup();
+    expired.agent.post.mockRejectedValueOnce(Object.assign(new Error("expired"), { status: 401 }));
+    await expired.type("/post a", "\r");
+    await tick();
+    expect(expired.lastFrame()).toContain("Paused: session expired");
+    expect(expired.lastFrame()).not.toContain("network error");
+  });
   it("stays if a post comes back while it's sending everything to leave", async () => {
     const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });
     agent.post.mockRejectedValueOnce(Object.assign(new Error("Invalid record"), { status: 400 }));

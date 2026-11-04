@@ -331,6 +331,51 @@ describe("pending posts", () => {
     await repl.replyFrom("1");
     expect(printed()).toContain("Wait for pending posts, or Esc to cancel them");
   });
+  it("include a paused failure, even once its posts are in a draft", async () => {
+    const { repl, agent, flush, printed } = setup();
+    agent.post.mockRejectedValueOnce(new Error("fetch failed"));
+    await repl.startThread("one");
+    await flush();
+    expect(await repl.startThread()).toBe("keep");
+    expect(printed()).toContain("Wait for pending posts, or Esc to cancel them");
+  });
+});
+
+describe("a paused failure", () => {
+  const paused = async (failure: Error = new Error("fetch failed")) => {
+    const s = setup();
+    s.agent.post.mockRejectedValueOnce(failure);
+    await s.repl.post("one");
+    await s.flush();
+    return s;
+  };
+  it("is cleared by Esc, which leaves its draft in place", async () => {
+    const { repl, deps, printed } = await paused();
+    expect(repl.escape("")).toBe("handled");
+    expect(printed()).toContain("Left in draft d1");
+    expect(deps.deleteDraft).not.toHaveBeenCalled();
+    await repl.retry();
+    expect(printed()).toContain("Nothing to retry");
+  });
+  it("is cleared by Ctrl+C too", async () => {
+    const { repl } = await paused();
+    expect(repl.interrupt("text")).toBe("handled");
+    expect(repl.interrupt("")).toBe("hint");
+  });
+  it("loses nothing on exit once it's in a draft", async () => {
+    const { repl } = await paused();
+    expect(repl.wouldLose("")).toBe(false);
+  });
+  it("doesn't claim a draft that couldn't be saved when the session expires", async () => {
+    const s = setup();
+    s.deps.saveDraft.mockRejectedValueOnce(new Error("EACCES"));
+    s.agent.post.mockRejectedValueOnce(Object.assign(new Error("expired"), { status: 401 }));
+    await s.repl.post("one");
+    await s.flush();
+    expect(s.printed()).not.toContain("draft undefined");
+    expect(s.printed()).toContain("EACCES");
+    expect(s.repl.wouldLose("")).toBe(true);
+  });
 });
 
 describe("keys", () => {

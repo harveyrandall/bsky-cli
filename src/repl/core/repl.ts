@@ -178,8 +178,13 @@ export class Repl {
     }
   }
 
+  /** Posts are queued, or paused after a failure. */
+  private busy(): boolean {
+    return this.pipeline.pending().length > 0 || this.pipeline.isPaused();
+  }
+
   private blockedByPending(): boolean {
-    if (this.pipeline.pending().length === 0) return false;
+    if (!this.busy()) return false;
     this.deps.print(WAIT, "error");
     return true;
   }
@@ -336,7 +341,7 @@ export class Repl {
 
   /** Esc below any overlay (spec §10). */
   escape(composerText: string): EscapeResult {
-    if (this.pipeline.pending().length) return this.cancelPending(composerText);
+    if (this.busy()) return this.cancelPending(composerText);
     if (this.current.kind === "reply-once" || this.current.kind === "post-once") {
       this.current = { kind: this.current.returnTo };
       this.deps.onChange();
@@ -353,7 +358,7 @@ export class Repl {
   /** Ctrl+C below any overlay: like Esc, but it clears text first and hints when idle. */
   interrupt(composerText: string): "clear" | "handled" | "hint" | { restore: string } {
     const once = this.current.kind === "reply-once" || this.current.kind === "post-once";
-    if (this.pipeline.pending().length || once) {
+    if (this.busy() || once) {
       const r = this.escape(composerText);
       return r === "unhandled" ? "hint" : r;
     }
@@ -376,6 +381,8 @@ export class Repl {
   }
 
   private cancelPending(composerText: string): EscapeResult {
+    const draftId = this.pipeline.lastFailure()?.draftId;
+    if (draftId) this.deps.print(`Left in draft ${draftId}`, "dim");
     const texts = this.pipeline.cancelAll().flatMap((i) => i.posts.map(stripLabel));
     if (texts.length === 0) return "handled";
     const joined = texts.join(` ${this.markers.split} `);
@@ -459,7 +466,8 @@ export class Repl {
       this.deps.print(`Couldn't reach Bluesky; saved as draft ${f.draftId}. /retry to send it now.`, "error");
     } else if (f.kind === "expired") {
       this.deps.print("Session expired — exit and run `bsky login`", "error");
-      this.deps.print(`Unsent posts are saved as draft ${f.draftId}.`, "dim");
+      if (f.draftId) this.deps.print(`Unsent posts are saved as draft ${f.draftId}.`, "dim");
+      else this.deps.print(f.message, "error");
     } else {
       this.deps.print(f.message, "error");
       this.deps.restore(this.asResend(f));

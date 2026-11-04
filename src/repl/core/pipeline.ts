@@ -81,7 +81,7 @@ export class Pipeline {
   private lastSentAt = -Infinity;
   private timer: unknown;
   private sending = false;
-  private paused = false;
+  /** Set while paused after a network failure, waiting for retry() or cancelAll(). */
   private failure?: Failure;
 
   constructor(private readonly deps: PipelineDeps) {}
@@ -97,14 +97,13 @@ export class Pipeline {
     return this.queue.map((a) => ({ ...a.item, posts: a.item.posts.slice(a.index) }));
   }
 
-  /** Paused after a network failure, waiting for retry() or cancelAll(). */
   isPaused(): boolean {
-    return this.paused;
+    return this.failure !== undefined;
   }
 
   countdown(): Countdown | undefined {
     const head = this.queue[0];
-    if (!head || this.paused) return undefined;
+    if (!head || this.failure) return undefined;
     const sendAt = this.sendAt(head);
     const now = this.deps.now();
     const inUndo = head.index === 0 && !head.immediate && now < head.item.createdAt + this.deps.settings().undo * 1000;
@@ -118,7 +117,7 @@ export class Pipeline {
 
   sendNow(): void {
     const head = this.queue[0];
-    if (!head || this.sending || this.paused) return;
+    if (!head || this.sending || this.failure) return;
     head.immediate = true;
     this.clear();
     void this.sendHead();
@@ -136,7 +135,7 @@ export class Pipeline {
     // its length when the send returns.
     if (inFlight) inFlight.item = { ...inFlight.item, posts: inFlight.item.posts.slice(0, inFlight.index + 1) };
     this.queue = inFlight ? [inFlight] : [];
-    this.paused = false;
+    this.failure = undefined;
     this.deps.onChange();
     return cancelled;
   }
@@ -144,18 +143,13 @@ export class Pipeline {
   /** Resend the last network failure; its draft is deleted once it all sends. */
   async retry(): Promise<boolean> {
     const f = this.failure;
-    if (!f || f.kind === "rejected" || !this.paused) return false;
-    if (f.draftId === undefined) {
-      // The failed posts never left the queue (their draft couldn't be saved).
-      this.failure = undefined;
-      this.paused = false;
-      this.schedule();
-      return true;
+    if (!f) return false;
+    // Without a draft, the failed posts never left the queue.
+    if (f.draftId !== undefined) {
+      const item = { ...f.item, posts: f.item.posts.slice(f.from) };
+      this.queue.unshift({ item, index: 0, last: f.target, draftId: f.draftId, immediate: true });
     }
-    const item = { ...f.item, posts: f.item.posts.slice(f.from) };
-    this.queue.unshift({ item, index: 0, last: f.target, draftId: f.draftId, immediate: true });
     this.failure = undefined;
-    this.paused = false;
     this.schedule();
     return true;
   }
@@ -176,7 +170,7 @@ export class Pipeline {
   private schedule(): void {
     this.deps.onChange();
     const head = this.queue[0];
-    if (!head || this.sending || this.paused || this.timer !== undefined) return;
+    if (!head || this.sending || this.failure || this.timer !== undefined) return;
     const wait = this.sendAt(head) - this.deps.now();
     if (wait <= 0) {
       void this.sendHead();
@@ -265,7 +259,6 @@ export class Pipeline {
       await this.dropDraft(a);
       return;
     }
-    this.paused = true;
     this.failure = failure;
     const rest = a.item.posts.slice(a.index);
     try {

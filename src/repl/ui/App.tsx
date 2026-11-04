@@ -207,6 +207,7 @@ export function App(props: AppProps) {
         ? repl.limitFor("reply", mode.target.root)
         : repl.limitFor("standalone");
   const countdown = repl.pipeline.countdown();
+  const failure = repl.pipeline.lastFailure();
   const pending = countdown?.phase === "counting" ? countdown.item.posts.join(` ${markers.split} `) : undefined;
 
   return (
@@ -240,8 +241,12 @@ export function App(props: AppProps) {
       />
       {countdown && <Countdown countdown={countdown} now={Date.now()} />}
       {exitWhenSent && <Text dimColor>Leaving once everything is sent — Esc to stay</Text>}
-      {repl.pipeline.isPaused() && (
-        <Text color="yellow">Paused after a network error — /retry to resend it, Esc to cancel what's queued</Text>
+      {failure && (
+        <Text color="yellow">
+          {failure.kind === "expired"
+            ? "Paused: session expired — exit and run `bsky login`, or Esc to cancel what's queued"
+            : "Paused after a network error — /retry to resend it, Esc to cancel what's queued"}
+        </Text>
       )}
     </>
   );
