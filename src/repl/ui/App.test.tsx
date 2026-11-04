@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
 import { App } from "./App";
 import { offlineProps } from "@/repl";
-import { IDLE_HINT, type ReplSettings } from "@/repl/core/repl";
+import { IDLE_HINT, type Repl, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import type { AtUri, Cid, StrongRef } from "@/repl/core/types";
 
@@ -21,6 +21,7 @@ const ref = (n: number): StrongRef => ({
 });
 
 function setup(o: { settings?: Partial<ReplSettings> } = {}) {
+  let session: Repl | undefined;
   let n = 0;
   const agent = {
     selfDid: "did:plc:me" as const,
@@ -39,6 +40,7 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
       drafts={drafts}
       saveConfig={saveConfig}
       configName="config.toml"
+      onReady={(r) => (session = r)}
     />,
   );
   // A fixed height, so results don't depend on the terminal running the tests.
@@ -49,7 +51,7 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
   };
   // Colour codes depend on the terminal running the tests.
   const lastFrame = () => stripVTControlCharacters(app.lastFrame() ?? "");
-  return { ...app, lastFrame, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig };
+  return { ...app, lastFrame, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, repl: () => session! };
 }
 
 describe("App", () => {
@@ -263,5 +265,19 @@ describe("App threads", () => {
     await tick();
     expect(drafts.save).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "unsent" });
     expect(exit).toHaveBeenCalledOnce();
+  });
+  it("leaves nothing queued when you discard and exit", async () => {
+    const { type, repl } = setup({ settings: { undo: 5 } });
+    await type("/post hello", "\r", "\x04", "x");
+    expect(exit).toHaveBeenCalledOnce();
+    expect(repl().pipeline.pending()).toEqual([]);
+  });
+  it("asks before /exit leaves posts unsent", async () => {
+    const { type, lastFrame } = setup({ settings: { pace: 10 } });
+    await type("/post one", "\r");
+    await tick();
+    await type("/post two", "\r", "/exit", "\r");
+    expect(exit).not.toHaveBeenCalled();
+    expect(lastFrame()).toContain("[s]end now · save [d]raft · discard [x] · [Esc] stay");
   });
 });

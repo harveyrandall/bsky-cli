@@ -53,7 +53,6 @@ export function App(props: AppProps) {
     (text: string, style: LineStyle = "normal") => setLog((l) => [...l, { id: l.length, text, style }]),
     [],
   );
-  const leave = useCallback(() => exit(LEFT), [exit]);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const [overlay, setOverlay] = useState<Overlay>();
   const [restore, setRestore] = useState<{ id: number; text: string }>();
@@ -77,6 +76,13 @@ export function App(props: AppProps) {
       }),
   );
   useEffect(() => props.onReady?.(repl), [repl]);
+  // Leaving always stops the queue, so nothing is posted after the REPL closes.
+  const leave = useCallback(() => {
+    repl.close();
+    exit(LEFT);
+  }, [exit, repl]);
+  // Ctrl+D on an empty composer and /exit: ask first if posts are still waiting.
+  const requestExit = (text: string) => (repl.wouldLose(text) ? setOverlay({ kind: "exit", text }) : leave());
 
   const pendingCount = repl.pipeline.pending().length;
   // Tick the countdown while anything is queued.
@@ -185,10 +191,10 @@ export function App(props: AppProps) {
         pending={pending}
         active={!overlay}
         restore={restore}
-        onSubmit={(text) => dispatch(text, { print, exit: leave, repl })}
+        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), repl })}
         onEscape={(text) => repl.escape(text)}
         onInterrupt={(text) => repl.interrupt(text)}
-        onEof={(text) => (repl.wouldLose(text) ? setOverlay({ kind: "exit", text }) : leave())}
+        onEof={requestExit}
         onSendNow={() => repl.pipeline.sendNow()}
         onHint={(text) => print(text, "dim")}
         onError={(text) => print(text, "error")}

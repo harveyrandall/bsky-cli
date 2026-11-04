@@ -293,6 +293,18 @@ describe("keys", () => {
   });
 });
 
+describe("closing", () => {
+  it("cancels what's queued and refuses new posts", async () => {
+    const { repl, agent, flush } = setup({ undo: 5 });
+    await repl.post("waiting");
+    expect(repl.close().map((i) => i.posts)).toEqual([["waiting"]]);
+    expect(await repl.post("after")).toBe("keep");
+    await vi.advanceTimersByTimeAsync(20_000);
+    await flush();
+    expect(agent.post).not.toHaveBeenCalled();
+  });
+});
+
 describe("failures", () => {
   it("saves a network failure as a draft and resends it on /retry", async () => {
     const { repl, agent, posted, flush, printed } = setup();

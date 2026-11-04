@@ -60,6 +60,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   } finally {
     process.off("uncaughtException", crash);
     process.off("unhandledRejection", crash);
+    // However Ink stopped, nothing may be posted after the REPL has gone.
+    repl?.close();
   }
   if (repl) {
     const lines = exitSummary({

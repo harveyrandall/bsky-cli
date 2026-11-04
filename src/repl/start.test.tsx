@@ -98,7 +98,7 @@ describe("startRepl", () => {
     const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     const [element] = render.mock.calls[0];
-    element.props.onReady({ registry: new Registry(false), failures: () => [] });
+    element.props.onReady({ registry: new Registry(false), failures: () => [], close: () => [] });
     app.exit(LEFT);
     await running;
     expect(write).toHaveBeenCalledWith("No posts this session\n");

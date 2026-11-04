@@ -84,6 +84,7 @@ export class Repl {
   private threadLetter?: ThreadLetter;
   private readonly s: ReplSettings;
   private cooldownsSettled = false;
+  private closed = false;
   private readonly failed: Failure[] = [];
   private readonly letters = new Map<number, ThreadLetter | undefined>();
 
@@ -363,6 +364,12 @@ export class Repl {
     return "hint";
   }
 
+  /** The REPL is going away: stop sending and refuse new posts. Returns what was still queued. */
+  close(): QueueItem[] {
+    this.closed = true;
+    return this.pipeline.cancelAll();
+  }
+
   wouldLose(composerText: string): boolean {
     return composerText.trim() !== "" || this.pipeline.pending().length > 0;
   }
@@ -379,6 +386,7 @@ export class Repl {
   }
 
   private async write(intent: Intent, text: string): Promise<SubmitOutcome> {
+    if (this.closed) return "keep";
     const kind: WriteKind = intent.kind;
     const root = intent.kind === "reply" ? intent.root : undefined;
     const labelled = this.labelled(kind, root);
@@ -395,6 +403,8 @@ export class Repl {
     if (!direct && !(await this.deps.ask.confirm(plan, labelled))) return { restore: text };
 
     const posts = labelled ? this.labelPosts(plan.posts) : plan.posts;
+    // A question may have been answered after the REPL started closing.
+    if (this.closed) return "keep";
     const item = this.pipeline.enqueue(intent, posts);
     this.letters.set(item.id, this.letterFor(intent));
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
