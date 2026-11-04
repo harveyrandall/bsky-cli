@@ -41,6 +41,14 @@ describe("editorReducer", () => {
     s = r(s, { type: "down" }); expect(s.text).toBe("second");
     s = r(s, { type: "down" }); expect(s).toMatchObject({ text: "draft", cursor: 5 });
   });
+  it("keeps the draft and each edited entry while walking history", () => {
+    let s = { ...emptyEditor(["first", "second"]), text: "draft", cursor: 5 };
+    s = r(s, { type: "up" });
+    s = r(s, { type: "insert", text: "!" }); expect(s.text).toBe("second!");
+    s = r(s, { type: "up" }); expect(s.text).toBe("first");
+    s = r(s, { type: "down" }); expect(s.text).toBe("second!");
+    s = r(s, { type: "down" }); expect(s).toMatchObject({ text: "draft", cursor: 5 });
+  });
   it("submitted records history and clears", () => {
     expect(r(at("/help"), { type: "submitted", text: "/help" })).toMatchObject({ text: "", cursor: 0, history: ["/help"] });
   });

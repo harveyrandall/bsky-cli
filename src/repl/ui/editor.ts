@@ -5,14 +5,14 @@ export interface EditorState {
   text: string;
   cursor: number;
   history: string[];
-  /** Entry being shown while walking history, or null when editing. */
+  /** Entry shown while walking history (history.length is the draft), or null when not walking. */
   historyIndex: number | null;
-  /** Text the user had typed before walking history. */
-  draft: string;
+  /** While walking: the history entries plus the draft, with any edits made to them. */
+  scratch: string[];
 }
 
 export function emptyEditor(history: string[] = []): EditorState {
-  return { text: "", cursor: 0, history, historyIndex: null, draft: "" };
+  return { text: "", cursor: 0, history, historyIndex: null, scratch: [] };
 }
 
 export type EditorAction =
@@ -103,12 +103,12 @@ function up(s: EditorState): EditorState {
     const col = graphemes(s.text.slice(start, s.cursor)).length;
     return { ...s, cursor: atColumn(s.text, lineStart(s.text, start - 1), start - 1, col) };
   }
-  if (s.history.length === 0) return s;
-  if (s.historyIndex === null) {
-    return { ...show(s, s.history[s.history.length - 1], s.history.length - 1), draft: s.text };
-  }
-  const index = Math.max(0, s.historyIndex - 1);
-  return show(s, s.history[index], index);
+  const index = s.historyIndex ?? s.history.length;
+  if (index === 0) return s;
+  // Keep what is showing, edits included, so walking back returns to it.
+  const scratch = s.historyIndex === null ? [...s.history, s.text] : [...s.scratch];
+  scratch[index] = s.text;
+  return show({ ...s, scratch }, scratch[index - 1], index - 1);
 }
 
 function down(s: EditorState): EditorState {
@@ -117,17 +117,18 @@ function down(s: EditorState): EditorState {
     const col = graphemes(s.text.slice(lineStart(s.text, s.cursor), s.cursor)).length;
     return { ...s, cursor: atColumn(s.text, end + 1, lineEnd(s.text, end + 1), col) };
   }
-  if (s.historyIndex === null) return s;
-  if (s.historyIndex === s.history.length - 1) return show(s, s.draft, null);
-  return show(s, s.history[s.historyIndex + 1], s.historyIndex + 1);
+  if (s.historyIndex === null || s.historyIndex === s.history.length) return s;
+  const scratch = [...s.scratch];
+  scratch[s.historyIndex] = s.text;
+  return show({ ...s, scratch }, scratch[s.historyIndex + 1], s.historyIndex + 1);
 }
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   if (action.type === "up") return up(state);
   if (action.type === "down") return down(state);
 
-  // Anything but up/down leaves history mode.
-  const s = { ...state, historyIndex: null };
+  // Edits while walking history change the shown entry; up/down keep them.
+  const s = state;
   const { text, cursor } = s;
   switch (action.type) {
     case "insert":
@@ -165,7 +166,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // handled stays in the composer.
       const keep = action.text.trim() !== "" && s.history[s.history.length - 1] !== action.text;
       const history = keep ? [...s.history, action.text] : s.history;
-      return text === action.text ? emptyEditor(history) : { ...s, history };
+      return text === action.text ? emptyEditor(history) : { ...s, history, historyIndex: null, scratch: [] };
     }
   }
 }
