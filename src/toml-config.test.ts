@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, unlinkSync, mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, unlinkSync, mkdtempSync, readFileSync, rmSync, readdirSync, renameSync, statSync, chmodSync, symlinkSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
@@ -7,6 +7,10 @@ import { Command } from "commander";
 vi.mock("@/config", () => ({
   bskyDir: vi.fn(() => "/mock/bsky-cli"),
 }));
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, renameSync: vi.fn(fs.renameSync) };
+});
 
 import {
   activeConfigPath,
@@ -326,6 +330,13 @@ describe("activeConfigPath", () => {
     expect(activeConfigPath(["node", "bsky", "-c", "/x.toml"])).toBe("/x.toml");
     expect(activeConfigPath(["node", "bsky", "--config", "/y.toml", "repl"])).toBe("/y.toml");
   });
+  it("reads the path joined to its flag", () => {
+    expect(activeConfigPath(["node", "bsky", "--config=/z.toml"])).toBe("/z.toml");
+    expect(activeConfigPath(["node", "bsky", "-c/w.toml", "repl"])).toBe("/w.toml");
+  });
+  it("stops at --, where text can look like a flag", () => {
+    expect(activeConfigPath(["node", "bsky", "post", "--", "-cool"])).toBe(configFilePath());
+  });
   it("otherwise uses the usual lookup", () => {
     expect(activeConfigPath(["node", "bsky", "repl"])).toBe(configFilePath());
   });
@@ -371,8 +382,41 @@ describe("setConfigValues", () => {
   });
   it("refuses to write a file that wouldn't parse, leaving the old one", async () => {
     writeFileSync(file(), "[repl\nundo = 5\n");
-    await expect(setConfigValues(file(), "repl", { pace: 5 })).rejects.toThrow();
+    await expect(setConfigValues(file(), "repl", { pace: 5 })).rejects.toThrow(`Couldn't update ${file()}`);
     expect(read()).toBe("[repl\nundo = 5\n");
-    expect(existsSync(`${file()}.tmp`)).toBe(false);
+    expect(readdirSync(dir)).toEqual(["config.toml"]);
+  });
+  it("finds a header with spaces or a comment", async () => {
+    writeFileSync(file(), "[ repl ] # mine\nundo = 5\n");
+    await setConfigValues(file(), "repl", { undo: 10 });
+    expect(read()).toBe("[ repl ] # mine\nundo = 10\n");
+  });
+  it("keeps a comment at the end of a replaced line", async () => {
+    writeFileSync(file(), '[repl]\nundo = 5 # quick\nsplit-marker = "#" # odd\n');
+    await setConfigValues(file(), "repl", { undo: 10, "split-marker": "~~" });
+    expect(read()).toBe('[repl]\nundo = 10 # quick\nsplit-marker = "~~" # odd\n');
+  });
+  it("writes through a symlink", async () => {
+    const real = join(dir, "real.toml");
+    writeFileSync(real, "[repl]\nundo = 5\n");
+    symlinkSync(real, file());
+    await setConfigValues(file(), "repl", { undo: 10 });
+    expect(lstatSync(file()).isSymbolicLink()).toBe(true);
+    expect(readFileSync(real, "utf-8")).toBe("[repl]\nundo = 10\n");
+  });
+  it("keeps the file's permissions", async () => {
+    writeFileSync(file(), "[repl]\nundo = 5\n");
+    chmodSync(file(), 0o600);
+    await setConfigValues(file(), "repl", { undo: 10 });
+    expect(statSync(file()).mode & 0o777).toBe(0o600);
+  });
+  it("names the config, and cleans up, when it can't put the new file in place", async () => {
+    writeFileSync(file(), "[repl]\nundo = 5\n");
+    vi.mocked(renameSync).mockImplementationOnce(() => {
+      throw new Error("EXDEV");
+    });
+    await expect(setConfigValues(file(), "repl", { undo: 10 })).rejects.toThrow(`Couldn't update ${file()}: EXDEV`);
+    expect(read()).toBe("[repl]\nundo = 5\n");
+    expect(readdirSync(dir)).toEqual(["config.toml"]);
   });
 });

@@ -142,7 +142,7 @@ Set defaults in the `[repl]` section of the [config file](configuration.md):
 [repl]
 # auto-thread = false
 # prefix-thread = false
-# undo and pace take 0, 5, 10 or 15 (seconds); the values below are examples, not defaults
+# undo and pace take 0, 5, 10 or 15 (seconds); left unset, the first thread asks
 # undo = 5
 # pace = 0
 # force-alt = false

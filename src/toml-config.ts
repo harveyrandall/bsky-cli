@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse } from "smol-toml";
 import { Command } from "commander";
@@ -36,11 +36,34 @@ export function configFilePath(overridePath?: string): string {
 
 /** The config file this run uses: -c/--config from argv, then the usual lookup. */
 export function activeConfigPath(argv: string[] = process.argv): string {
-  const i = argv.findIndex((a) => a === "--config" || a === "-c");
-  return configFilePath(i === -1 ? undefined : argv[i + 1]);
+  for (const [i, arg] of argv.entries()) {
+    if (arg === "--") break;
+    if (arg === "--config" || arg === "-c") return configFilePath(argv[i + 1]);
+    const joined = /^(?:--config=|-c)(.+)$/.exec(arg);
+    if (joined) return configFilePath(joined[1]);
+  }
+  return configFilePath();
 }
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The comment after a `key = value` line's value. */
+const TRAILING_COMMENT = /^[^=]*=\s*(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^#\s]*)(\s*#.*)$/;
+
+/** Replace a file in one step, through a symlink and keeping its permissions. */
+function replaceFile(path: string, text: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const exists = existsSync(path);
+  const target = exists ? realpathSync(path) : path;
+  const tmp = `${target}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, text, exists ? { mode: statSync(target).mode } : {});
+    renameSync(tmp, target);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
 
 /**
  * Set keys in one section of a TOML file without disturbing anything else.
@@ -56,9 +79,10 @@ export async function setConfigValues(
   values: Record<string, string | number | boolean>,
 ): Promise<void> {
   const lines = (existsSync(path) ? readFileSync(path, "utf-8") : generateDefaultConfig()).split("\n");
+  const isHeader = new RegExp(`^\\s*\\[\\s*${escapeRegExp(section)}\\s*\\]\\s*(#.*)?$`);
   for (const [key, value] of Object.entries(values)) {
     const line = `${key} = ${typeof value === "string" ? JSON.stringify(value) : String(value)}`;
-    const header = lines.findIndex((l) => l.trim() === `[${section}]`);
+    const header = lines.findIndex((l) => isHeader.test(l));
     if (header === -1) {
       if (lines[lines.length - 1] === "") lines.pop();
       lines.push("", `[${section}]`, line, "");
@@ -71,16 +95,17 @@ export async function setConfigValues(
       i > header && i < end && isKey.test(l) && (want === "commented") === /^\s*#/.test(l);
     const at = lines.findIndex(inSection("set"));
     const commented = lines.findIndex(inSection("commented"));
-    if (at !== -1) lines[at] = line;
+    if (at !== -1) lines[at] = line + (TRAILING_COMMENT.exec(lines[at])?.[1] ?? "");
     else if (commented !== -1) lines[commented] = line;
     else lines.splice(header + 1, 0, line);
   }
   const text = lines.join("\n");
-  parse(text); // throws, leaving the file untouched
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, path);
+  try {
+    parse(text); // throws, leaving the file untouched
+    replaceFile(path, text);
+  } catch (err) {
+    throw new Error(`Couldn't update ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -220,7 +245,7 @@ export function generateDefaultConfig(): string {
 [repl]
 # auto-thread = false
 # prefix-thread = false
-# undo and pace take 0, 5, 10 or 15 (seconds); the values below are examples, not defaults
+# undo and pace take 0, 5, 10 or 15 (seconds); left unset, the first thread asks
 # undo = 5
 # pace = 0
 # force-alt = false
