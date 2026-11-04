@@ -173,7 +173,7 @@ bsky repl [-t | --no-auto-thread] [-l] [--undo <seconds>] [--pace <seconds>] [-f
           [--thread-label] [--prepend-thread-label] [-r [id]] [--resumable | -R]
 ```
 
-An interactive composer with multi-line editing, a character ring for the post under the cursor, and `/help` and `/exit`. A preview: posting from the REPL arrives in a later release. See [REPL](https://harveyrandall.github.io/bsky-cli/repl/).
+An interactive composer for writing threads: start one with `/thread`, branch with `/reply` and `/reply-from`, split with `///`, and take back a post during its undo window. In a terminal, plain `bsky` opens it too. See [REPL](https://harveyrandall.github.io/bsky-cli/repl/).
 
 ### Drafts
 
