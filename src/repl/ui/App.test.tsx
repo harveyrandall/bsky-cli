@@ -513,6 +513,19 @@ describe("App media", () => {
     expect(lastFrame()).toContain(`bsky › ${image}`.slice(0, 40));
     expect(repl().staged()).toEqual([]);
   });
+  it("says why a dropped file is too big, rather than pasting its path", async () => {
+    const big = join(dir, "phone.png");
+    writeFileSync(big, new Uint8Array([0x89, 0x50, 0x4e, 0x47, ...new Array(1_000_000).fill(0)]));
+    const { type, lastFrame, repl } = setup();
+    await type(paste(big));
+    await tick();
+    expect(lastFrame()).toContain("Attach phone.png? [Y/n]");
+    await type("\r");
+    await tick();
+    expect(lastFrame()).toContain("phone.png is over the 1 MB image limit");
+    expect(lastFrame()).not.toContain(`bsky › ${dir}`.slice(0, 30));
+    expect(repl().staged()).toEqual([]);
+  });
   it("treats a path pasted into text as text", async () => {
     const { type, lastFrame } = setup();
     await type("see ", paste(image));

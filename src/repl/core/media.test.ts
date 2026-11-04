@@ -27,8 +27,8 @@ describe("inspectMedia", () => {
   });
   it("holds images and video to their limits", async () => {
     await expect(inspectMedia("/x/a.png", fs(1_000_000))).resolves.toEqual({ kind: "image" });
-    await expect(inspectMedia("/x/a.png", fs(1_000_001))).resolves.toEqual({ error: "a.png is over the 1 MB image limit" });
-    await expect(inspectMedia("/x/a.mp4", fs(100_000_001, mp4))).resolves.toEqual({ error: "a.mp4 is over the 100 MB video limit" });
+    await expect(inspectMedia("/x/a.png", fs(1_000_001))).resolves.toEqual({ kind: "image", error: "a.png is over the 1 MB image limit" });
+    await expect(inspectMedia("/x/a.mp4", fs(100_000_001, mp4))).resolves.toEqual({ kind: "video", error: "a.mp4 is over the 100 MB video limit" });
   });
 });
 

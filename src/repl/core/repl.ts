@@ -438,8 +438,8 @@ export class Repl {
       // Absolute, because drafts and scheduled posts are sent from somewhere else.
       const path = resolve(expandHome(raw));
       const found = await inspectMedia(path, this.deps.fs ?? nodeMediaFs);
-      if ("error" in found) {
-        this.deps.print(found.error, "error");
+      if (found.error !== undefined || found.kind === undefined) {
+        this.deps.print(found.error ?? `${basename(path)} can't be attached`, "error");
         continue;
       }
       const refused = canStage(this.media, found.kind);
@@ -474,10 +474,10 @@ export class Repl {
     }
   }
 
-  /** Whether every path is a file that could be attached. */
+  /** Whether every path is media, even if too big, so that attaching it can say so. */
   async areMedia(paths: readonly string[]): Promise<boolean> {
-    const found = await Promise.all(paths.map((p) => inspectMedia(expandHome(p), this.deps.fs ?? nodeMediaFs)));
-    return found.every((f) => !("error" in f));
+    const found = await Promise.all(paths.map((p) => inspectMedia(resolve(expandHome(p)), this.deps.fs ?? nodeMediaFs)));
+    return found.every((f) => f.kind !== undefined);
   }
 
   /** `/detach [n|all]`: unstage one file (from 1) or all of them. */

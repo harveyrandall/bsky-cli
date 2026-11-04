@@ -41,15 +41,15 @@ function kindOf(head: Uint8Array): MediaKind | undefined {
   return isMp4(head) ? "video" : undefined;
 }
 
-/** What a file is, or why it can't be attached. */
-export async function inspectMedia(path: string, fs: MediaFs): Promise<{ kind: MediaKind } | { error: string }> {
+/** What a file is, and why it can't be attached if it can't. */
+export async function inspectMedia(path: string, fs: MediaFs): Promise<{ kind?: MediaKind; error?: string }> {
   const name = basename(path);
   const size = await fs.size(path);
   if (size === undefined) return { error: `${name} not found` };
   const kind = kindOf(await fs.head(path));
   if (!kind) return { error: `${name} isn't an image or MP4 video` };
   const limit = kind === "image" ? maxImageBytes() : maxVideoBytes();
-  return size > limit ? { error: `${name} is over the ${megabytes(limit)} ${kind} limit` } : { kind };
+  return size > limit ? { kind, error: `${name} is over the ${megabytes(limit)} ${kind} limit` } : { kind };
 }
 
 /** Why `kind` can't join what's staged, if it can't. */
