@@ -53,7 +53,7 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["saveSession"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]> } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]> } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
@@ -75,7 +75,7 @@ function setup(o: { settings?: Partial<ReplSettings>; saveSession?: AppProps["sa
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
-      saveSession={o.saveSession}
+      keeper={o.keeper}
       resume={o.resume}
       configName="config.toml"
       onReady={(r) => (session = r)}
@@ -706,39 +706,62 @@ describe("App media", () => {
 });
 
 describe("App session saving", () => {
-  const saving = () => vi.fn(async () => {});
+  const keeper = () => ({ track: vi.fn(), save: vi.fn(async () => {}) });
   it("saves whenever the session changes", async () => {
-    const saveSession = saving();
-    const { type } = setup({ saveSession });
+    const k = keeper();
+    const { type } = setup({ keeper: k });
     await type("/post hello", "\r");
     await tick();
-    expect(saveSession).toHaveBeenCalled();
-    saveSession.mockClear();
+    expect(k.save).toHaveBeenCalled();
+    k.save.mockClear();
     await type("/thread", "\r");
     await tick();
-    expect(saveSession).toHaveBeenCalled();
+    expect(k.save).toHaveBeenCalled();
+    await type(`/attach ${image}`, "\r");
+    await tick();
+    k.save.mockClear();
+    await type("\r");
+    await tick();
+    expect(k.save).toHaveBeenCalled();
   });
-  it("saves typing once it pauses, with the cursor and history", async () => {
-    const saveSession = saving();
-    const { type, repl } = setup({ saveSession });
+  it("tracks the composer at once, but saves typing only when it pauses", async () => {
+    const k = keeper();
+    const { type, repl } = setup({ keeper: k });
     await type("/thread", "\r");
     await tick();
-    saveSession.mockClear();
+    k.save.mockClear();
     await type("h", "i");
-    expect(saveSession).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(saveSession).toHaveBeenCalledOnce(), { timeout: 2000 });
-    expect(saveSession).toHaveBeenCalledWith(repl(), expect.objectContaining({ text: "hi", cursor: 2, history: ["/thread"] }));
+    expect(k.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "hi", cursor: 2, history: ["/thread"] }));
+    expect(k.save).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(k.save).toHaveBeenCalledOnce(), { timeout: 2000 });
+    expect(k.save).toHaveBeenCalledWith(repl());
   });
-  it("says once if saving fails, and carries on", async () => {
-    const saveSession = vi.fn(async () => {
-      throw new Error("ENOSPC");
-    });
-    const { type, lastFrame } = setup({ saveSession });
+  it("saves at once when a submit clears the composer, so a post is never long in the file twice", async () => {
+    const k = keeper();
+    const { type } = setup({ keeper: k });
+    await type("/post hello");
+    k.save.mockClear();
+    await type("\r");
+    await tick();
+    expect(k.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "" }));
+    expect(k.save).toHaveBeenCalled();
+  });
+  it("saves at once on a paste", async () => {
+    const k = keeper();
+    const { type } = setup({ keeper: k });
+    await type("x", paste("a longer paste"));
+    expect(k.save).toHaveBeenCalled();
+  });
+  it("says if saving fails, once, and says when it's back", async () => {
+    const k = keeper();
+    k.save.mockRejectedValueOnce(new Error("ENOSPC")).mockRejectedValueOnce(new Error("ENOSPC"));
+    const { type, lastFrame } = setup({ keeper: k });
     await type("/post one", "\r");
     await tick();
     await type("/post two", "\r");
     await tick();
     expect(lastFrame().split("Couldn't save this session (ENOSPC)")).toHaveLength(2);
+    expect(lastFrame()).toContain("Saving this session again");
   });
 });
 

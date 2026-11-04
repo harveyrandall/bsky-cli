@@ -247,13 +247,18 @@ export class Repl {
     }
   }
 
-  /** getPosts, for as long as a person should be kept waiting. */
-  private lookUp(uris: AtUri[]) {
+  /** `work`, for as long as a person should be kept waiting. */
+  private within<T>(work: Promise<T>, ms: number): Promise<T> {
     let timer: unknown;
     const timeout = new Promise<never>((_, reject) => {
-      timer = this.timers.setTimer(() => reject(new Error("timed out")), 10_000);
+      timer = this.timers.setTimer(() => reject(new Error("timed out")), ms);
     });
-    return Promise.race([this.deps.agent.getPosts(uris), timeout]).finally(() => this.timers.clearTimer(timer));
+    return Promise.race([work, timeout]).finally(() => this.timers.clearTimer(timer));
+  }
+
+  /** When a post already going has landed, or five seconds, whichever's first. */
+  settled(): Promise<void> {
+    return this.within(this.pipeline.drained(), 5000).catch(() => {});
   }
 
   /** The cursor, or the nearest of its ancestors that's still there. */
@@ -262,7 +267,7 @@ export class Repl {
     for (let uri: string | undefined = saved.cursor.uri; uri && chain.length < 25; uri = this.registry.byUri(uri)?.parent) chain.push(uri);
     let found: Set<string>;
     try {
-      found = new Set((await this.lookUp(chain as AtUri[])).map((p) => p.uri));
+      found = new Set((await this.within(this.deps.agent.getPosts(chain as AtUri[]), 10_000)).map((p) => p.uri));
     } catch (err) {
       this.deps.print(`Couldn't check the thread (${err instanceof Error ? err.message : String(err)}); carrying on from where it was`, "error");
       return;

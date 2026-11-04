@@ -174,14 +174,17 @@ async function openRepl(
     handle: agent.session?.handle ?? "",
     configPath: activeConfigPath(),
     profile: program.opts().profile,
-    session: {
-      store,
-      id: resume?.id ?? newSessionId(),
-      createdAt: resume?.createdAt ?? (new Date().toISOString() as IsoUtc),
-      did: client.selfDid,
-      keep,
-      saving: opts.resumable !== false,
-      resume,
-    },
+    // A resumed session keeps saving even with -R, or what you answer would be asked again.
+    session:
+      resume || opts.resumable !== false
+        ? {
+            store,
+            id: resume?.id ?? newSessionId(),
+            createdAt: resume?.createdAt ?? (new Date().toISOString() as IsoUtc),
+            did: client.selfDid,
+            keep,
+            resume,
+          }
+        : undefined,
   });
 }

@@ -260,6 +260,7 @@ export class SessionStore {
   }
 
   async delete(id: string): Promise<void> {
+    await this.saving.catch(() => {}); // or a save still waiting would bring it back
     await rm(this.path(id), { force: true });
     await rm(this.path(id, "lock"), { force: true });
   }

@@ -143,8 +143,6 @@ describe("startRepl", () => {
     write.mockRestore();
   });
   describe("with a saved session", () => {
-    const composer = { text: "hi", cursor: 2, history: ["/thread"], historyIndex: null, scratch: [] };
-    const fileOf = (o: object = {}) => ({ id: "k3f7xq", posts: [], staged: [], pending: [], composer: { text: "", cursor: 0 }, ...o });
     const store = () => ({
       save: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
@@ -152,110 +150,73 @@ describe("startRepl", () => {
       unlock: vi.fn(async () => {}),
       prune: vi.fn(async () => {}),
     });
-    /** Starts the REPL and hands back what it gave the App. */
-    const start = async (session: object, snapshot = vi.fn((_m: object, c: { text: string }) => fileOf({ composer: c }))) => {
+    const fileOf = (o: object = {}) => ({ posts: [{}], staged: [], pending: [], composer: { text: "", cursor: 0 }, ...o });
+    const fakeRepl = () => ({ registry: new Registry(false), failures: () => [], close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => fileOf()) });
+    const start = async (session: object, settings = options.settings) => {
       const app = fakeInstance();
       render.mockReturnValue(app);
-      const running = startRepl({ ...options, session: { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", did: "did:plc:me", keep: 50, saving: true, ...session } as never });
+      const running = startRepl({ ...options, settings, profile: "work", session: { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", did: "did:plc:me", keep: 7, ...session } as never });
       await vi.waitFor(() => expect(render).toHaveBeenCalled());
       const { props } = render.mock.calls[0][0];
-      const repl = { registry: new Registry(false), failures: () => [], close: vi.fn(() => []), snapshot };
+      const repl = fakeRepl();
       props.onReady(repl);
-      return { app, running, props, repl, snapshot };
+      return { app, running, props, repl };
     };
-    it("saves through the store, locking the session on the first save", async () => {
-      const s = store();
-      const { app, running, props, repl, snapshot } = await start({ store: s });
-      await props.saveSession(repl, composer);
-      await props.saveSession(repl, composer);
-      expect(snapshot).toHaveBeenCalledWith(expect.objectContaining({ id: "k3f7xq", handle: "me.bsky.social" }), { text: "hi", cursor: 2 }, ["/thread"]);
-      expect(s.save).toHaveBeenCalledTimes(2);
-      expect(s.lock).toHaveBeenCalledOnce();
-      app.exit(LEFT);
-      await running;
-    });
-    it("doesn't save a session with nothing in it", async () => {
+    it("gives the session's details to what saves it", async () => {
       const s = store();
       const { app, running, props, repl } = await start({ store: s });
-      await props.saveSession(repl, { ...composer, text: " " });
-      expect(s.save).not.toHaveBeenCalled();
+      await props.keeper.save(repl);
+      expect(repl.snapshot).toHaveBeenCalledWith(
+        { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: "did:plc:me", profile: "work" },
+        { text: "", cursor: 0 },
+        [],
+      );
       app.exit(LEFT);
       await running;
-    });
-    it("clears the composer from the file when you leave, having dealt with it, and prunes", async () => {
-      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const s = store();
-      const snapshot = vi.fn((_m: object, c: { text: string }) => fileOf({ composer: c, posts: [{}] }));
-      const { app, running, props, repl } = await start({ store: s, keep: 7 }, snapshot);
-      await props.saveSession(repl, composer);
-      app.exit(LEFT);
-      await running;
-      expect(snapshot).toHaveBeenLastCalledWith(expect.anything(), { text: "", cursor: 0 }, ["/thread"]);
-      expect(s.unlock).toHaveBeenCalledWith("k3f7xq");
       expect(s.prune).toHaveBeenCalledWith(7);
+    });
+    it("says how to resume, once it's safely saved", async () => {
+      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const { app, running } = await start({ store: store() });
+      app.exit(LEFT);
+      await running;
       expect(write).toHaveBeenCalledWith(expect.stringContaining("resume: bsky -r k3f7xq"));
       write.mockRestore();
     });
-    it("deletes a session with nothing to resume, and offers no hint", async () => {
-      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    it("says why it couldn't save, and offers no hint", async () => {
+      const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
       const s = store();
+      s.save.mockRejectedValue(new Error("ENOSPC"));
       const { app, running } = await start({ store: s });
       app.exit(LEFT);
       await running;
-      expect(s.delete).toHaveBeenCalledWith("k3f7xq");
-      expect(write).toHaveBeenCalledWith("No posts this session\n");
-      write.mockRestore();
+      expect(err).toHaveBeenCalledWith("Couldn't save this session (ENOSPC)\n");
+      expect(out).not.toHaveBeenCalledWith(expect.stringContaining("resume:"));
+      out.mockRestore();
     });
-    it("keeps what's unsent when the REPL stops without you leaving, saving before the queue closes", async () => {
-      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    it("ends the session on a crash, and keeps listening for errors until it has", async () => {
       const s = store();
-      const order: string[] = [];
-      const snapshot = vi.fn((_m: object, c: { text: string }) => {
-        order.push("snapshot");
-        return fileOf({ composer: c, pending: [{}] });
-      });
-      const { app, running, props, repl } = await start({ store: s }, snapshot);
-      repl.close.mockImplementation(() => {
-        order.push("close");
-        return [];
-      });
-      await props.saveSession(repl, composer);
-      order.length = 0;
-      app.unmount();
-      await running;
-      expect(order).toEqual(["snapshot", "close"]);
-      expect(snapshot).toHaveBeenLastCalledWith(expect.anything(), { text: "hi", cursor: 2 }, ["/thread"]);
-      expect(s.unlock).toHaveBeenCalled();
-    });
-    it("releases the lock if the REPL crashes", async () => {
-      const s = store();
+      let finish = () => {};
+      s.save.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
       const before = process.listeners("uncaughtException");
       const { running } = await start({ store: s });
       added("uncaughtException", before)[0](new Error("boom"));
+      await vi.waitFor(() => expect(s.save).toHaveBeenCalled());
+      expect(added("uncaughtException", before)).toHaveLength(1);
+      finish();
       await expect(running).rejects.toThrow("boom");
       expect(s.unlock).toHaveBeenCalled();
+      expect(added("uncaughtException", before)).toHaveLength(0);
     });
-    it("saves nothing with -R, and offers no hint", async () => {
-      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const s = store();
-      const { app, running, props } = await start({ store: s, saving: false });
-      expect(props.saveSession).toBeUndefined();
+    it("counts a resumed session's time from when it began", async () => {
+      const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const resume = { composer: { text: "", cursor: 0 }, history: [] };
+      const { app, running } = await start({ store: store(), resume }, { ...options.settings, verbose: true });
       app.exit(LEFT);
       await running;
-      expect(s.delete).not.toHaveBeenCalled();
-      expect(s.save).not.toHaveBeenCalled();
-      expect(write).toHaveBeenCalledWith("No posts this session\n");
-      write.mockRestore();
-    });
-    it("hands the App a session to resume, and holds its lock from the start", async () => {
-      const s = store();
-      const resume = fileOf({ history: ["/thread"], composer: { text: "hi", cursor: 1 } });
-      const { app, running, props, repl } = await start({ store: s, resume });
-      expect(props.resume).toBe(resume);
-      await props.saveSession(repl, composer);
-      expect(s.lock).not.toHaveBeenCalled();
-      app.exit(LEFT);
-      await running;
+      expect(out).toHaveBeenCalledWith(expect.stringContaining("Session 2026-11-04T09:00:00.000Z"));
+      out.mockRestore();
     });
   });
 
@@ -266,7 +227,7 @@ describe("startRepl", () => {
     const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     const [element] = render.mock.calls[0];
-    element.props.onReady({ registry: new Registry(false), failures: () => [], close: () => [] });
+    element.props.onReady({ registry: new Registry(false), failures: () => [], close: () => [], settled: async () => {} });
     app.exit(LEFT);
     await running;
     expect(write).toHaveBeenCalledWith("No posts this session\n");

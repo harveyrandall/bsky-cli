@@ -239,7 +239,7 @@ describe("saved sessions", () => {
   it("starts a new session without asking when none are saved", async () => {
     await makeProgram().parseAsync(["repl"], { from: "user" });
     expect(pickSession).not.toHaveBeenCalled();
-    expect(session()).toMatchObject({ saving: true, keep: 50, did: "did:plc:me" });
+    expect(session()).toMatchObject({ keep: 50, did: "did:plc:me" });
     expect(session().id).toMatch(/^[a-z2-7]{6}$/);
     expect(session().resume).toBeUndefined();
   });
@@ -307,15 +307,15 @@ describe("saved sessions", () => {
     write();
     await makeProgram().parseAsync(["repl", "-R"], { from: "user" });
     expect(pickSession).not.toHaveBeenCalled();
-    expect(session().saving).toBe(false);
+    expect(session()).toBeUndefined();
     await makeProgram({ repl: { resumable: false } }).parseAsync(["repl"], { from: "user" });
     expect(pickSession).not.toHaveBeenCalled();
-    expect(session().saving).toBe(false);
+    expect(session()).toBeUndefined();
   });
-  it("can resume with -R, without saving again", async () => {
+  it("keeps saving a session resumed with -R, or what you answered would be asked again", async () => {
     write();
     await makeProgram().parseAsync(["repl", "-R", "-r", "last"], { from: "user" });
-    expect(session()).toMatchObject({ saving: false, resume: { id: "k3f7xq" } });
+    expect(session()).toMatchObject({ id: "k3f7xq", resume: { id: "k3f7xq" } });
   });
   it("reads keep-sessions from the config, and checks it", async () => {
     await makeProgram({ repl: { "keep-sessions": 5 } }).parseAsync(["repl"], { from: "user" });

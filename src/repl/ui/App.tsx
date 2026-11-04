@@ -8,6 +8,7 @@ import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
 import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
+import type { SessionKeeper } from "@/repl/core/session";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
 import { emptyEditor, type EditorState } from "@/repl/ui/editor";
@@ -32,8 +33,8 @@ export interface AppProps {
   saveConfig: ReplDeps["saveConfig"];
   saveScheduled: ReplDeps["saveScheduled"];
   schedulerRunning: ReplDeps["schedulerRunning"];
-  /** Keep the session on disk, so it can be resumed. */
-  saveSession?(repl: Repl, composer: EditorState): Promise<void>;
+  /** Keeps the session on disk, so it can be resumed. */
+  keeper?: Pick<SessionKeeper, "track" | "save">;
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
   /** The config file's name, for the save offer. */
@@ -137,18 +138,28 @@ export function App(props: AppProps) {
 
   const saveFailed = useRef(false);
   const save = () => {
-    props.saveSession?.(repl, composer.current).catch((err: unknown) => {
-      if (!saveFailed.current) print(`Couldn't save this session (${err instanceof Error ? err.message : String(err)})`, "error");
-      saveFailed.current = true;
-    });
+    props.keeper?.save(repl).then(
+      () => {
+        if (saveFailed.current) print("Saving this session again", "dim");
+        saveFailed.current = false;
+      },
+      (err: unknown) => {
+        if (!saveFailed.current) print(`Couldn't save this session (${err instanceof Error ? err.message : String(err)})`, "error");
+        saveFailed.current = true;
+      },
+    );
   };
   changed.current = save;
-  // Typing is saved once it pauses; everything else as it happens.
+  // Typing is saved once it pauses. A submit, a paste or text coming back is saved at
+  // once: a post must never be in the file both as text and as queued for long.
   const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onEditor = (state: EditorState) => {
+    const jumped = state.text === "" || Math.abs(state.text.length - composer.current.text.length) > 1;
     composer.current = state;
+    props.keeper?.track(state);
     clearTimeout(typing.current);
-    typing.current = setTimeout(save, 1000);
+    if (jumped) save();
+    else typing.current = setTimeout(save, 1000);
   };
   useEffect(() => () => clearTimeout(typing.current), []);
   // Leaving always stops the queue, so nothing is posted after the REPL closes.

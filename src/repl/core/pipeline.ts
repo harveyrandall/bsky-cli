@@ -117,6 +117,8 @@ export class Pipeline {
   private lastSentAt = -Infinity;
   private timer: unknown;
   private sending = false;
+  /** The post being sent, until it lands or fails. */
+  private flight?: Promise<void>;
   /** Set while paused, waiting for retry() or cancelAll(). */
   private failure?: Failure;
 
@@ -132,6 +134,11 @@ export class Pipeline {
 
   pending(): readonly Unsent[] {
     return this.queue.map((a) => this.remaining(a, a.index));
+  }
+
+  /** When a post already being sent has landed or failed. */
+  drained(): Promise<void> {
+    return this.flight ?? Promise.resolve();
   }
 
   /** What can still be stopped: everything but a post already being sent. */
@@ -240,9 +247,16 @@ export class Pipeline {
     return undefined;
   }
 
-  private async sendHead(): Promise<void> {
+  private sendHead(): Promise<void> {
     const a = this.queue[0];
-    if (!a || this.sending) return;
+    if (!a || this.sending) return Promise.resolve();
+    this.flight = this.send(a).finally(() => {
+      this.flight = undefined;
+    });
+    return this.flight;
+  }
+
+  private async send(a: Active): Promise<void> {
     this.sending = true;
     this.deps.onChange();
     const target = this.target(a);

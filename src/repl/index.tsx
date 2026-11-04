@@ -1,15 +1,14 @@
 import { basename } from "node:path";
 import { render, renderToString } from "ink";
-import type { EditorState } from "@/repl/ui/editor";
 import { LaunchList } from "@/repl/ui/LaunchList";
 import { deleteDraft, saveDraft } from "@/drafts";
 import { getSchedulerStatus } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
 import { setConfigValues } from "@/toml-config";
 import { App, LEFT, type AppProps } from "@/repl/ui/App";
-import { emptyEditor } from "@/repl/ui/editor";
 import { DEFAULT_MARKERS, type Markers } from "@/repl/core/markers";
-import { isEmptySession, type ReplSessionFile, type SessionListing, type SessionStore } from "@/repl/core/persist";
+import type { ReplSessionFile, SessionListing, SessionStore } from "@/repl/core/persist";
+import { SessionKeeper } from "@/repl/core/session";
 import type { Repl, ReplAgent, ReplSettings } from "@/repl/core/repl";
 import { exitSummary } from "@/repl/core/summary";
 import type { Did, Handle, IsoUtc, SessionId } from "@/repl/core/types";
@@ -30,8 +29,6 @@ export interface ReplOptions {
     did: Did;
     /** Sessions to keep when pruning. */
     keep: number;
-    /** False with -R: nothing is written. */
-    saving: boolean;
     resume?: ReplSessionFile;
   };
 }
@@ -67,42 +64,17 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // 200 ms and doesn't report the answer, which the hint needs. Ink enables the
   // protocol, and restores it on every exit path, when told it's supported.
   const kitty = await detectKittyKeyboard(process.stdin, process.stdout);
-  const startedAt = new Date();
-  let repl: Repl | undefined;
   const session = opts.session;
-  // A resumed session was locked before it opened; a new id is ours until there's a file to protect.
-  let locked = session?.resume !== undefined;
-  let latest: EditorState = emptyEditor(session?.resume?.history);
-  const toFile = (r: Repl, c: Pick<EditorState, "text" | "cursor" | "history">) =>
-    r.snapshot(
-      { id: session!.id, createdAt: session!.createdAt, handle: opts.handle as Handle, did: session!.did, profile: opts.profile },
-      { text: c.text, cursor: c.cursor },
-      c.history,
+  const startedAt = session?.resume ? new Date(session.createdAt) : new Date();
+  let repl: Repl | undefined;
+  const keeper =
+    session &&
+    new SessionKeeper(
+      session.store,
+      { id: session.id, createdAt: session.createdAt, handle: opts.handle as Handle, did: session.did, profile: opts.profile },
+      session.keep,
+      session.resume,
     );
-  const write = async (file: ReplSessionFile) => {
-    if (isEmptySession(file)) return;
-    if (!locked) locked = await session!.store.lock(session!.id);
-    await session!.store.save(file);
-  };
-  const saveSession = (r: Repl, c: EditorState) => {
-    latest = c;
-    return write(toFile(r, c));
-  };
-  /** True if there's something to come back to. */
-  const endSession = async (r: Repl, left: boolean): Promise<boolean> => {
-    const { store, id, saving, keep } = session!;
-    if (!saving) {
-      await store.unlock(id);
-      return false;
-    }
-    // Leaving dealt with what was unsent; anything else keeps it for next time.
-    const file = toFile(r, left ? { ...latest, text: "", cursor: 0 } : latest);
-    if (isEmptySession(file)) await store.delete(id);
-    else await write(file);
-    await store.unlock(id);
-    await store.prune(keep);
-    return !isEmptySession(file);
-  };
   const app = render(
     <App
       markers={opts.markers}
@@ -113,7 +85,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
       saveScheduled={(p) => saveScheduledPost(p, opts.profile)}
       schedulerRunning={schedulerRunning}
-      saveSession={session?.saving ? saveSession : undefined}
+      keeper={keeper}
       resume={session?.resume}
       configName={basename(opts.configPath)}
       onReady={(r) => (repl = r)}
@@ -143,11 +115,17 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       process.exitCode = 1;
     }
   } finally {
+    // However Ink stopped, nothing may be posted after the REPL has gone.
+    if (repl && keeper) {
+      const end = await keeper.end(repl, left);
+      resumable = end.resumable;
+      if (end.error) process.stderr.write(`Couldn't save this session (${end.error})\n`);
+    } else if (repl) {
+      repl.close();
+      if (left) await repl.settled();
+    }
     process.off("uncaughtException", crash);
     process.off("unhandledRejection", crash);
-    if (repl && session) resumable = await endSession(repl, left).catch(() => false);
-    // However Ink stopped, nothing may be posted after the REPL has gone.
-    repl?.close();
   }
   if (repl) {
     const lines = exitSummary({
