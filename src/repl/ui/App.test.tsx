@@ -15,6 +15,9 @@ beforeEach(() => exit.mockClear());
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 function setup() {
   const app = render(<App markers={DEFAULT_MARKERS} kittyHint={false} />);
+  // A fixed height, so results don't depend on the terminal running the tests.
+  Object.defineProperty(app.stdout, "rows", { value: 24, configurable: true });
+  app.stdout.emit("resize");
   const type = async (...chunks: string[]) => {
     for (const chunk of chunks) { app.stdin.write(chunk); await tick(); }
   };
@@ -153,5 +156,15 @@ describe("App", () => {
     const { type, lastFrame } = setup();
     await type("/he", "\t");
     expect(lastFrame()).toContain("bsky › /help");
+  });
+  it("stores a pasted CRLF as one newline", async () => {
+    const { type, lastFrame } = setup();
+    await type("\x1b[200~a\r\nb\x1b[201~");
+    expect(lastFrame()).toContain("○ 3/300");
+  });
+  it("lists the candidates when Tab can't extend the name", async () => {
+    const { type, lastFrame } = setup();
+    await type("/", "\t");
+    expect(lastFrame()).toContain("/exit  /help  /quit");
   });
 });

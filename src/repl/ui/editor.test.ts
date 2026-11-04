@@ -69,4 +69,19 @@ describe("editorReducer", () => {
       history: ["/help"],
     });
   });
+  it("drops a lone control byte that isn't part of an escape sequence", () => {
+    expect(r(at(""), { type: "insert", text: "a\x07b" })).toMatchObject({ text: "ab" });
+  });
+  it("records a repeated submit once", () => {
+    let s = r(at("/help"), { type: "submitted", text: "/help" });
+    s = r({ ...s, text: "/help", cursor: 5 }, { type: "submitted", text: "/help" });
+    expect(s.history).toEqual(["/help"]);
+  });
+  it("does nothing on ↑ with no history", () => {
+    expect(r(at("draft"), { type: "up" })).toMatchObject({ text: "draft", cursor: 5, historyIndex: null });
+  });
+  it("jumps words across newlines", () => {
+    expect(r(at("one\ntwo", 4), { type: "wordLeft" }).cursor).toBe(0);
+    expect(r(at("one\ntwo", 3), { type: "wordRight" }).cursor).toBe(7);
+  });
 });

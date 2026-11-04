@@ -63,12 +63,27 @@ describe("detectKittyKeyboard", () => {
     expect(t.input.listenerCount("readable")).toBe(0);
     expect(t.input.isPaused()).toBe(true);
   });
+  it("turns raw mode on before asking, so the reply isn't echoed or line-buffered", async () => {
+    const t = fakeTerminal("\x1b[?62c");
+    const write = vi.spyOn(t.stdout, "write");
+    await detectKittyKeyboard(t.stdin, t.stdout);
+    expect(t.input.setRawMode.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
+    expect(t.input.setRawMode.mock.calls[0]).toEqual([true]);
+  });
+  it("detects support when the ?u reply and DA1 arrive in separate reads", async () => {
+    const t = fakeTerminal();
+    const result = detectKittyKeyboard(t.stdin, t.stdout);
+    t.input.write("\x1b[?0u");
+    await new Promise((resolve) => setImmediate(resolve));
+    t.input.write("\x1b[?62c");
+    await expect(result).resolves.toBe(true);
+  });
   // Bun stops reading stdin for good once a data listener has consumed it and
   // gone, so Ink's later readable listener gets nothing and the process exits.
   it("reads the reply the way Ink does, never through a data listener", async () => {
     const t = fakeTerminal("\x1b[?62c");
-    const on = vi.spyOn(t.input, "on");
+    const calls = ["on", "addListener", "prependListener", "once"].map((m) => vi.spyOn(t.input, m as "on"));
     await detectKittyKeyboard(t.stdin, t.stdout);
-    expect(on.mock.calls.map(([event]) => event)).not.toContain("data");
+    expect(calls.flatMap((spy) => spy.mock.calls.map(([event]) => event))).not.toContain("data");
   });
 });

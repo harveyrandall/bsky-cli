@@ -38,6 +38,10 @@ describe("segmentAt", () => {
   it("marks text after <// in the send part as cut", () => {
     expect(segmentAt("post <// scrap //> later", 11, m)).toMatchObject({ region: "cut", text: "scrap" });
   });
+  it("ignores a cut marker after the send marker", () => {
+    expect(segmentAt("a //> b <// c", 0, m)).toEqual({ index: 1, total: 1, text: "a", region: "send" });
+    expect(segmentAt("a //> b <// c", 12, m)).toMatchObject({ region: "kept", text: "b <// c" });
+  });
   it("counts only send pieces", () => {
     expect(segmentAt("a /// b <// c", 0, m)).toEqual({ index: 1, total: 2, text: "a", region: "send" });
   });

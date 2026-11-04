@@ -1,4 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+
+// Colour on, so the cursor's inverse cell and the ring's colour show in frames.
+vi.hoisted(() => {
+  process.env.FORCE_COLOR = "1";
+});
 import { render } from "ink-testing-library";
 import { Composer, type ComposerProps } from "./Composer";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
@@ -50,5 +55,17 @@ describe("Composer", () => {
     const { type, props } = setup();
     await type("abc", "\x04", "d", "\x04");
     expect(props.onExit).not.toHaveBeenCalled();
+  });
+  it("draws the cursor on the grapheme under it, or a space at the end", async () => {
+    const { type, lastFrame } = setup();
+    await type("abc");
+    expect(lastFrame()).toContain("abc\x1b[7m \x1b[27m");
+    await type("\x1b[D");
+    expect(lastFrame()).toContain("ab\x1b[7mc\x1b[27m");
+  });
+  it("colours the ring by count", async () => {
+    const { type, lastFrame } = setup();
+    await type(`\x1b[200~${"a".repeat(270)}\x1b[201~`);
+    expect(lastFrame()).toContain("\x1b[33m◕ 270/300");
   });
 });
