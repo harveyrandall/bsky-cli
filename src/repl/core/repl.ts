@@ -495,6 +495,11 @@ export class Repl {
     this.media = this.media.filter((m) => !saved.includes(m));
   }
 
+  /** Whether media coming back can join what's been staged since. */
+  private fits(media: readonly StagedMedia[]): boolean {
+    return media.every((m, i) => !canStage([...this.media, ...media.slice(0, i)], m.kind));
+  }
+
   /** Media coming back with its text; what's been staged since can get in the way. */
   private restage(media: readonly StagedMedia[] = []): void {
     for (const m of media) {
@@ -693,11 +698,14 @@ export class Repl {
     if (draftId) this.deps.print(`Left in draft ${draftId}`, "dim");
     const items = this.pipeline.cancelAll();
     if (items.length === 0) return "handled";
-    if (composerText.trim() !== "") {
+    // One text can't hold items going to different places, or say which post has the media.
+    const oneText = items.length === 1 || items.every((i) => i.intent.kind === "thread" && !i.media);
+    const media = items.flatMap((i) => i.media ?? []);
+    if (composerText.trim() !== "" || !oneText || !this.fits(media)) {
       void this.saveToDrafts(items, (id) => `Saved as draft ${id}`);
       return "handled";
     }
-    for (const item of items) this.restage(item.media);
+    this.restage(media);
     return { restore: items.length === 1 ? this.asResend(items[0]) : this.join(items.flatMap((i) => i.posts)) };
   }
 
@@ -710,8 +718,10 @@ export class Repl {
         // Never lose it: show the text so it can be copied.
         this.deps.print(`Couldn't save these posts as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
         this.deps.print(this.join(item.posts));
+        this.restage(item.media);
       }
     }
+    this.deps.onChange();
   }
 
   /** Posts as one text for the composer. */
@@ -795,7 +805,7 @@ export class Repl {
       const n = f.item.posts.length;
       this.deps.print(n > 1 ? `Post ${f.from + 1} of ${n} wasn't sent: ${f.message}` : f.message, "error");
       const back: Unsent = { ...f.item, posts: f.item.posts.slice(f.from), media: f.from === 0 ? f.item.media : undefined, target: f.target };
-      if (this.deps.composerBusy()) {
+      if (this.deps.composerBusy() || !this.fits(back.media ?? [])) {
         // A draft keeps its text, media and destination together.
         void this.saveToDrafts([back], (id) => `A post came back while you were typing; saved it as draft ${id}`);
       } else {

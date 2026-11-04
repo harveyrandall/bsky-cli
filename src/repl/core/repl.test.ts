@@ -240,11 +240,31 @@ describe("puts text back", () => {
     await flush();
     expect(deps.restore).toHaveBeenCalledWith("bad /// three");
   });
-  it("joined with the split marker when several items are cancelled", async () => {
+  it("joined with the split marker when several thread posts are cancelled", async () => {
     const { repl } = setup({ undo: 5 });
+    await repl.startThread();
+    await repl.submitText("a");
+    await repl.submitText("b");
+    expect(repl.escape("")).toEqual({ restore: "a /// b" });
+  });
+  it("as drafts when cancelled items are going to different places", async () => {
+    const { repl, deps, flush } = setup({ undo: 5 });
     await repl.post("a");
     await repl.post("b");
-    expect(repl.escape("")).toEqual({ restore: "a /// b" });
+    expect(repl.escape("")).toBe("handled");
+    await flush();
+    expect(deps.saveDraft).toHaveBeenCalledTimes(2);
+  });
+  it("as drafts when one of several cancelled items has media, which would move to the first post", async () => {
+    const { repl, deps, flush } = setup({ undo: 5 });
+    await repl.startThread();
+    await repl.submitText("a");
+    await repl.attach(["/x/a.png"]);
+    await repl.submitText("b");
+    expect(repl.escape("")).toBe("handled");
+    await flush();
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ text: "b", images: ["/x/a.png"] }));
+    expect(repl.staged()).toEqual([]);
   });
   it("as what you typed when pending posts are cancelled with an empty composer", async () => {
     const { repl } = setup({ undo: 5 });
@@ -540,14 +560,35 @@ describe("media", () => {
     expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ images: ["/x/a.png"] }));
     expect(repl.staged()).toEqual([]);
   });
-  it("won't return more than a post can hold", async () => {
-    const { repl, printed } = setup({ undo: 5 });
+  it("goes to a draft with its text if it can't join what's been staged since", async () => {
+    const { repl, deps, flush } = setup({ undo: 5 });
     await repl.attach(["/x/a.png"]);
     await repl.post("waiting");
     await repl.attach(["/x/b.mp4"]);
-    repl.escape("");
+    expect(repl.escape("")).toBe("handled");
+    await flush();
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.mp4"]);
-    expect(printed()).toContain("Couldn't keep a.png: A post can have images or one video, not both");
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ text: "waiting", images: ["/x/a.png"] }));
+  });
+  it("goes back to being staged if its draft can't be saved", async () => {
+    const { repl, deps, flush, printed } = setup({ undo: 5 });
+    deps.saveDraft.mockRejectedValueOnce(new Error("EACCES"));
+    await repl.attach(["/x/a.png"]);
+    await repl.post("waiting");
+    repl.escape("typing");
+    await flush();
+    expect(printed()).toContain("waiting");
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/a.png"]);
+  });
+  it("goes to a draft with a rejected post if it can't join what's been staged since", async () => {
+    const { repl, agent, deps, flush } = setup({ undo: 5 });
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.attach(["/x/a.png"]);
+    await repl.post("bad");
+    await repl.attach(["/x/b.mp4"]);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ text: "bad", images: ["/x/a.png"] }));
+    expect(deps.restore).not.toHaveBeenCalled();
   });
   it("checks the limits again after the alt prompt, in case something came back meanwhile", async () => {
     const s = setup({ undo: 5 });
