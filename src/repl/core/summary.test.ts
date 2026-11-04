@@ -26,6 +26,10 @@ describe("exitSummary", () => {
       "No posts this session",
     ]);
   });
+  it("leaves out the handle when it isn't known", () => {
+    const lines = exitSummary({ registry: sample(), failures: [], verbose: true, handle: "", ...times });
+    expect(lines[1]).toBe("Session 2026-11-04T10:00:00.000Z – 2026-11-04T10:12:05.000Z (12m 5s)");
+  });
   it("lists every post with its URI when verbose", () => {
     const lines = exitSummary({ registry: sample(), failures: [], verbose: true, handle: "me.bsky.social", ...times });
     expect(lines[0]).toBe("3 posts in 1 thread, 1 standalone");

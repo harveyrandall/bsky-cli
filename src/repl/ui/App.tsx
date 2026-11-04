@@ -200,7 +200,6 @@ export function App(props: AppProps) {
 
   const countdown = repl.countdown();
   const failure = repl.pausedBy();
-  const pending = countdown?.phase === "counting" ? countdown.item.posts.join(` ${markers.split} `) : undefined;
 
   return (
     <>
@@ -216,7 +215,7 @@ export function App(props: AppProps) {
         markers={markers}
         prompt={repl.prompt()}
         limit={repl.composerLimit()}
-        pending={pending}
+        pending={repl.waiting()}
         active={!overlay}
         restore={restore}
         onRestoreBusy={(text) => void keepAsDraft(text)}

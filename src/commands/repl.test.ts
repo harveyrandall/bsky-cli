@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
-import { registerRepl } from "@/commands/repl";
+import { registerRepl, replAgent } from "@/commands/repl";
 import { applyConfigToProgram } from "@/toml-config";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 
@@ -186,5 +186,20 @@ describe("bsky repl", () => {
     await expect(
       makeProgram({ repl: { "cut-marker": "" } }).parseAsync(["repl"], { from: "user" }),
     ).rejects.toThrow('Invalid [repl] cut-marker = ""');
+  });
+});
+
+describe("replAgent", () => {
+  const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5def2x";
+  const lookup = (record: unknown) => {
+    const post = { uri, cid: "bafyabc", author: { did: "did:plc:alice", handle: "alice.bsky.social" }, record };
+    const agent = { session: { did: "did:plc:me" }, getPosts: vi.fn(async () => ({ data: { posts: [post] } })) };
+    return replAgent(agent as never).getPosts([uri as never]);
+  };
+  it("drops a post whose reply refs can't be trusted, rather than calling it a thread root", async () => {
+    await expect(lookup({ text: "hi", reply: { root: { uri: "nonsense", cid: "x" }, parent: { uri, cid: "bafyabc" } } })).resolves.toEqual([]);
+  });
+  it("keeps a post with no reply as its own root", async () => {
+    await expect(lookup({ text: "hi" })).resolves.toMatchObject([{ uri, text: "hi", root: undefined }]);
   });
 });

@@ -1,9 +1,9 @@
 import { graphemeLength } from "@/lib/split-thread";
 import type { Draft } from "@/lib/types";
 import type { LineStyle } from "./commands";
-import { parseSubmit, type Markers, type SubmitPlan } from "./markers";
+import { escapeMarkers, parseSubmit, type Markers, type SubmitPlan } from "./markers";
 import { Pipeline, draftOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
-import { Registry, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
+import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
 import type { Cooldown, StrongRef, ThreadLetter } from "./types";
 
 export const IDLE_HINT =
@@ -68,7 +68,6 @@ export interface ThreadState {
 
 type WriteKind = "thread" | "reply" | "standalone";
 
-const REF_SHAPE = /^(\d+|[A-Za-z]{1,3}\d+|#\d+|at:\/\/\S+|https:\/\/bsky\.app\/profile\/\S+|[2-7a-z]{13})$/;
 const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
 const manualDraft = (item: Unsent) => draftOf("manual", item.posts.map(stripLabel), item.target);
 
@@ -83,6 +82,8 @@ export class Repl {
   private current: ReplMode = { kind: "idle" };
   private threadState?: ThreadState;
   private threadLetter?: ThreadLetter;
+  /** What a bare number means once the thread has stopped. */
+  private lastThreadLetter?: ThreadLetter;
   private readonly s: ReplSettings;
   private cooldownsSettled = false;
   private closed = false;
@@ -95,7 +96,7 @@ export class Repl {
     private readonly deps: ReplDeps,
   ) {
     this.s = { ...settings };
-    this.registry = new Registry(settings.prefixThread);
+    this.registry = new Registry(settings.prefixThread, deps.agent.selfDid);
     const timers = deps.timers ?? {
       now: () => Date.now(),
       setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
@@ -137,6 +138,12 @@ export class Repl {
 
   countdown(): Countdown | undefined {
     return this.pipeline.countdown();
+  }
+
+  /** The post waiting out its undo window. */
+  waiting(): string | undefined {
+    const c = this.pipeline.countdown();
+    return c?.phase === "counting" ? this.join(c.item.posts) : undefined;
   }
 
   /** What paused the queue, while it's paused. */
@@ -227,7 +234,7 @@ export class Repl {
       return await resolveRef(input, {
         registry: this.registry,
         agent: this.deps.agent,
-        letter: this.threadState?.letter ?? this.threadLetter,
+        letter: this.threadState?.letter ?? this.threadLetter ?? this.lastThreadLetter,
       });
     } catch (err) {
       this.deps.print(err instanceof Error ? err.message : String(err), "error");
@@ -272,6 +279,7 @@ export class Repl {
       t && root ? `Thread stopped (${t.count} posts, root (${root.label}) ${root.rkey.slice(0, 4)}…)` : "Thread stopped",
       "dim",
     );
+    this.lastThreadLetter = t?.letter ?? this.threadLetter;
     this.threadState = undefined;
     this.threadLetter = undefined;
     this.current = { kind: "idle" };
@@ -287,13 +295,13 @@ export class Repl {
     if (opts.undo !== undefined) this.s.undo = opts.undo;
     if (opts.pace !== undefined) this.s.pace = opts.pace;
     // The whole argument shaped like a ref continues that thread; anything else is the first post.
-    const asRef = arg !== undefined && !opts.asText && REF_SHAPE.test(arg.trim());
+    const asRef = arg !== undefined && !opts.asText && looksLikeRef(arg);
     const resolved = asRef ? await this.resolve(arg) : undefined;
     if (asRef && !resolved) return "keep";
     const firstPost = asRef ? undefined : arg;
     if (!(await this.settleCooldowns())) return "keep";
 
-    if (this.current.kind === "thread" && this.threadState) this.stopThread();
+    if (this.inThread() && this.threadState) this.stopThread();
     this.current = { kind: "thread" };
     this.threadState = undefined;
     this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
@@ -318,10 +326,10 @@ export class Repl {
   }
 
   /** `/reply-from <ref>`: continue the thread from another post. */
-  async replyFrom(ref: string): Promise<void> {
-    if (this.blockedByPending()) return;
+  async replyFrom(ref: string): Promise<SubmitOutcome> {
+    if (this.blockedByPending()) return "keep";
     const resolved = await this.resolve(ref);
-    if (!resolved || !(await this.settleCooldowns())) return;
+    if (!resolved || !(await this.settleCooldowns())) return "keep";
     const entry = this.entryFor(resolved, { letter: this.threadState?.letter });
     const sameThread = this.threadState?.root.uri === resolved.root.uri;
     this.threadState = {
@@ -333,6 +341,7 @@ export class Repl {
     this.current = { kind: "thread" };
     this.deps.print(`Continuing from (${entry.label})`, "dim");
     this.deps.onChange();
+    return "done";
   }
 
   /** `/post [text]`: a standalone post, now or in post-once mode. */
@@ -439,7 +448,7 @@ export class Repl {
 
   /** Posts as one text for the composer. */
   private join(posts: readonly string[]): string {
-    return posts.map(stripLabel).join(` ${this.markers.split} `);
+    return posts.map((p) => escapeMarkers(stripLabel(p), this.markers)).join(` ${this.markers.split} `);
   }
 
   private async write(intent: Intent, text: string): Promise<SubmitOutcome> {

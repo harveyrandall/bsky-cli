@@ -126,5 +126,7 @@ describe("Registry.format", () => {
   it("marks external posts with their author", () => {
     const reg = new Registry(false);
     expect(reg.format(reg.addExternal(alicePost, {}), false)).toBe("(1) 3lbx7kt5def2x ext @alice.bsky.social");
+    const yours = new Registry(false, alice);
+    expect(yours.format(yours.addExternal(alicePost, {}), false)).toBe("(1) 3lbx7kt5def2x");
   });
 });

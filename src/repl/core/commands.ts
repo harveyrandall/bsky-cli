@@ -1,3 +1,4 @@
+import { looksLikeRef } from "./refs";
 import type { Repl, SubmitOutcome } from "./repl";
 import { isCooldown, type Cooldown } from "./types";
 
@@ -61,9 +62,9 @@ export const COMMANDS: readonly ReplCommand[] = [
         text = text.slice(m[0].length);
       }
       text = text.trim();
-      // Quotes make the argument text even when it looks like a ref: /thread "42".
+      // Quotes turn something that looks like a ref into text: /thread "42". Any others are part of the post.
       const quoted = /^(["'])([\s\S]*)\1$/.exec(text);
-      if (quoted) return ctx.repl.startThread(quoted[2], { ...opts, asText: true });
+      if (quoted && looksLikeRef(quoted[2])) return ctx.repl.startThread(quoted[2], { ...opts, asText: true });
       return ctx.repl.startThread(text === "" ? undefined : text, opts);
     },
   },
@@ -84,9 +85,9 @@ export const COMMANDS: readonly ReplCommand[] = [
     aliases: [],
     usage: "/reply-from <ref>",
     summary: "Continue the thread from another post",
-    async run([ref], ctx) {
+    run([ref], ctx) {
       if (ref === undefined) throw new Error("Usage: /reply-from <ref>");
-      await ctx.repl.replyFrom(ref);
+      return ctx.repl.replyFrom(ref);
     },
   },
   {

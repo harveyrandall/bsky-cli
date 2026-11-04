@@ -389,6 +389,65 @@ describe("once modes", () => {
   });
 });
 
+describe("refs and labels", () => {
+  it("keeps escaped markers escaped when a post comes back", async () => {
+    const { repl, agent, deps, flush } = setup();
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.post("a \\/// b");
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/post a \\/// b");
+  });
+  it("keeps escaped markers escaped in text kept for later", async () => {
+    const { repl } = setup();
+    await repl.startThread();
+    expect(await repl.submitText("a //> b \\/// c")).toEqual({ restore: "b \\/// c" });
+  });
+  it("reads a bare number as the last thread's, even after a post on its own", async () => {
+    const { repl, flush } = setup({ prefixThread: true });
+    await repl.startThread("one");
+    await flush();
+    await repl.submitText("two");
+    await flush();
+    repl.escape("");
+    await repl.post("solo");
+    await flush();
+    await repl.reply("2");
+    expect(repl.prompt()).toBe("reply→A2 ›");
+  });
+  it("posts a long word as text rather than reading it as a record key", async () => {
+    const { repl, agent, posted, flush } = setup();
+    expect(await repl.startThread("unfortunately")).toBe("done");
+    await flush();
+    expect(posted.map((p) => p.text)).toEqual(["unfortunately"]);
+    expect(agent.getPosts).not.toHaveBeenCalled();
+  });
+  it("still reads a record key as a ref", async () => {
+    const { repl, agent } = setup();
+    expect(await repl.startThread("3lbx7kt5defza")).toBe("keep");
+    expect(agent.getPosts).toHaveBeenCalledOnce();
+  });
+  it("keeps /reply-from in the composer when it can't go ahead", async () => {
+    const { repl, flush } = setup();
+    expect(await repl.replyFrom("9")).toBe("keep");
+    await repl.post("first");
+    await flush();
+    expect(await repl.replyFrom("1")).toBe("done");
+  });
+  it("says the thread stopped when /thread is used from a once mode on top of it", async () => {
+    const { repl, flush, printed } = setup();
+    await repl.startThread("one");
+    await flush();
+    await repl.post();
+    await repl.startThread();
+    expect(printed()).toContain("Thread stopped");
+  });
+  it("shows a waiting post without its label, even when the label goes first", async () => {
+    const { repl } = setup({ undo: 5, threadLabel: "prepend" });
+    await repl.startThread("one");
+    expect(repl.waiting()).toBe("one");
+  });
+});
+
 describe("cooldowns", () => {
   it("asks for undo and pace on the first thread, then offers to save them", async () => {
     const answers = [5, 0];

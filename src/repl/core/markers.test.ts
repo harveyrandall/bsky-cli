@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { graphemeLength } from "@/lib/split-thread";
-import { DEFAULT_MARKERS, DEFAULT_MARKERS as m, parseSubmit, resolveMarkers, scanMarkers, segmentAt } from "./markers";
+import { DEFAULT_MARKERS, DEFAULT_MARKERS as m, escapeMarkers, parseSubmit, resolveMarkers, scanMarkers, segmentAt } from "./markers";
 
 describe("scanMarkers", () => {
   it("finds each marker kind with offsets", () => {
@@ -70,6 +70,14 @@ describe("resolveMarkers", () => {
 describe("an empty marker", () => {
   it("is never matched, so scanning can't stall", () => {
     expect(segmentAt("hi", 2, { ...m, split: "" })).toEqual({ index: 1, total: 1, text: "hi", region: "send" });
+  });
+});
+
+describe("escapeMarkers", () => {
+  it("makes every marker plain, so the text parses back to itself", () => {
+    const text = "a /// b //> c <// d";
+    expect(escapeMarkers(text, m)).toBe("a \\/// b \\//> c \\<// d");
+    expect(parseSubmit(escapeMarkers(text, m), m, 300).posts).toEqual([text]);
   });
 });
 

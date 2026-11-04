@@ -7,7 +7,7 @@ function fakeRepl() {
     submitText: vi.fn(async () => "keep" as const),
     startThread: vi.fn(async () => "done" as const),
     reply: vi.fn(async () => "done" as const),
-    replyFrom: vi.fn(async () => {}),
+    replyFrom: vi.fn(async (): Promise<"done" | "keep"> => "done"),
     post: vi.fn(async () => "done" as const),
     setAutoThread: vi.fn(),
     setCooldown: vi.fn(),
@@ -36,6 +36,18 @@ describe("parseInput", () => {
 });
 
 describe("dispatch", () => {
+  it("/thread takes quotes off a ref-shaped argument and leaves other quotes in the post", async () => {
+    const c = ctx();
+    await dispatch('/thread "42"', c);
+    expect(c.fake.startThread).toHaveBeenLastCalledWith("42", { asText: true });
+    await dispatch('/thread "Hello," she said, "hi"', c);
+    expect(c.fake.startThread).toHaveBeenLastCalledWith('"Hello," she said, "hi"', {});
+  });
+  it("/reply-from keeps the text when it can't go ahead", async () => {
+    const c = ctx();
+    c.fake.replyFrom.mockResolvedValueOnce("keep");
+    expect(await dispatch("/reply-from 9", c)).toBe("keep");
+  });
   it("/exit and /quit exit", async () => {
     for (const input of ["/exit", "/quit"]) {
       const c = ctx();

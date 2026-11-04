@@ -44,7 +44,7 @@ export function exitSummary(r: {
   const span = `${r.startedAt.toISOString()} – ${r.endedAt.toISOString()}`;
   return [
     counts,
-    `Session ${span} (${duration(r.endedAt.getTime() - r.startedAt.getTime())}) as @${r.handle}`,
+    `Session ${span} (${duration(r.endedAt.getTime() - r.startedAt.getTime())})${r.handle && ` as @${r.handle}`}`,
     ...threads.flatMap((g) => [`Thread (${g[0].label}):`, ...g.map(line)]),
     ...(standalone.length ? ["Standalone:", ...standalone.map(line)] : []),
     ...r.failures.map((f) =>

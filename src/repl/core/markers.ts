@@ -91,6 +91,17 @@ function unescape(text: string, m: Markers): string {
   return out;
 }
 
+/** The reverse of `unescape`: every marker in `text` becomes plain text. */
+export function escapeMarkers(text: string, m: Markers): string {
+  let out = "";
+  for (let i = 0; i < text.length; ) {
+    const kind = markerAt(text, i, m);
+    out += kind ? `\\${m[kind]}` : text[i];
+    i += kind ? m[kind].length : 1;
+  }
+  return out;
+}
+
 /**
  * The segment the cursor is in. Text after the first send marker is kept. Text
  * after the first cut marker before it (up to the send marker) is cut. The rest

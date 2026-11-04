@@ -33,13 +33,17 @@ function toLookup(post: AppBskyFeedDefs.PostView): PostLookup | undefined {
   const record = post.record as { text?: unknown; reply?: { root?: { uri: string; cid: string }; parent?: { uri: string; cid: string } } };
   const ref = asRef(post);
   if (!ref || !isDid(post.author.did) || !isHandle(post.author.handle)) return undefined;
+  const root = asRef(record.reply?.root);
+  const parent = asRef(record.reply?.parent);
+  // A reply with bad refs would pass for a thread root.
+  if (record.reply && !(root && parent)) return undefined;
   return {
     ...ref,
     authorDid: post.author.did,
     authorHandle: post.author.handle,
     text: typeof record.text === "string" ? record.text : "",
-    root: asRef(record.reply?.root),
-    parent: asRef(record.reply?.parent),
+    root,
+    parent,
   };
 }
 

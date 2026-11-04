@@ -81,7 +81,10 @@ export class Registry {
   private readonly perLetter = new Map<ThreadLetter, number>();
   private lastLetter?: ThreadLetter;
 
-  constructor(readonly prefixed: boolean) {}
+  constructor(
+    readonly prefixed: boolean,
+    private readonly self?: Did,
+  ) {}
 
   newLetter(): ThreadLetter {
     this.lastLetter = letterOf(this.letters++);
@@ -154,10 +157,16 @@ export class Registry {
     const previous = this.list[this.list.indexOf(e) - 1];
     const branch = e.parent && e.parent !== previous?.uri ? ` ↳ ${this.byUri(e.parent)?.label ?? "?"}` : "";
     const uri = verbose ? ` (${e.uri})` : "";
-    const ext = e.external ? ` ext @${e.external}` : "";
+    const ext = e.external && e.authorDid !== this.self ? ` ext @${e.external}` : "";
     return `(${e.label}) ${e.rkey}${uri}${branch}${ext}`;
   }
 }
+
+// A record key must have a digit, so a 13-letter word is text.
+const REF_SHAPE = /^(\d+|[A-Za-z]{1,3}\d+|#\d+|at:\/\/\S+|https:\/\/bsky\.app\/profile\/\S+|(?=[a-z]*[2-7])[2-7a-z]{13})$/;
+
+/** Text that /thread reads as a ref rather than a first post. */
+export const looksLikeRef = (text: string) => REF_SHAPE.test(text.trim());
 
 const didOf = (uri: AtUri): Did => uri.slice("at://".length, uri.indexOf("/", "at://".length)) as Did;
 
