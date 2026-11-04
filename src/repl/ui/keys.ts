@@ -5,6 +5,7 @@ export type KeyAction =
   | EditorAction
   | { type: "submit" }
   | { type: "complete" }
+  | { type: "edit" }
   | { type: "interrupt" }
   | { type: "eof" }
   | { type: "escape" }
@@ -17,6 +18,7 @@ const CTRL = new Map<string, KeyAction>([
   ["e", { type: "lineEnd" }],
   ["w", { type: "deleteWord" }],
   ["u", { type: "deleteToLineStart" }],
+  ["g", { type: "edit" }],
 ]);
 
 /**

@@ -22,6 +22,7 @@ describe("keyToAction", () => {
     ["Tab", "", key({ tab: true }), s("/he"), { type: "complete" }],
     ["Ctrl+C", "c", key({ ctrl: true }), s(""), { type: "interrupt" }],
     ["Ctrl+D", "d", key({ ctrl: true }), s(""), { type: "eof" }],
+    ["Ctrl+G", "g", key({ ctrl: true }), s("x"), { type: "edit" }],
     ["Ctrl+A", "a", key({ ctrl: true }), s("x"), { type: "lineStart" }],
     ["Ctrl+E", "e", key({ ctrl: true }), s("x"), { type: "lineEnd" }],
     ["Ctrl+W", "w", key({ ctrl: true }), s("x"), { type: "deleteWord" }],

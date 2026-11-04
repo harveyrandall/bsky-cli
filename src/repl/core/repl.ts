@@ -441,6 +441,12 @@ export class Repl {
     }
   }
 
+  /** Whether every path is a file that could be attached. */
+  async areMedia(paths: readonly string[]): Promise<boolean> {
+    const found = await Promise.all(paths.map((p) => inspectMedia(expandHome(p), this.deps.fs ?? nodeMediaFs)));
+    return found.every((f) => !("error" in f));
+  }
+
   /** `/detach [n|all]`: unstage one file (from 1) or all of them. */
   detach(which: number | "all" = "all"): void {
     if (which !== "all" && !this.media[which - 1]) {

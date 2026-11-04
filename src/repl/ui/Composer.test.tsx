@@ -18,6 +18,8 @@ function setup(overrides: Partial<ComposerProps> = {}) {
     onEscape: vi.fn(() => "unhandled" as const),
     onInterrupt: vi.fn((text: string) => (text ? ("clear" as const) : ("hint" as const))),
     onEof: vi.fn(),
+    onEdit: vi.fn(async (text: string) => text),
+    onPaste: vi.fn(() => false),
     onSendNow: vi.fn(),
     onRestoreBusy: vi.fn(),
     onHint: vi.fn(),
@@ -42,6 +44,32 @@ describe("Composer", () => {
     expect(props.onError).toHaveBeenCalledWith("boom");
     await type("a");
     expect(lastFrame()).toContain("bsky › a");
+  });
+  it("shows staged files above the draft, and leaves room for them", async () => {
+    const app = setup({ chips: "📎 chart.png" });
+    Object.defineProperty(app.stdout, "rows", { value: 6, configurable: true });
+    app.stdout.emit("resize");
+    await app.type(["a", "b", "c", "d", "e", "f"].join("\n"));
+    await tick();
+    const frame = app.lastFrame() ?? "";
+    expect(frame.split("\n")[0]).toContain("📎 chart.png");
+    expect(frame.split("\n").length).toBeLessThan(6);
+  });
+  it("offers a paste into an empty composer, and inserts it if it isn't taken", async () => {
+    const { type, props, lastFrame } = setup();
+    await type("\x1b[200~/a.png\x1b[201~");
+    expect(props.onPaste).toHaveBeenCalledWith("/a.png");
+    expect(lastFrame()).toContain("bsky › /a.png");
+  });
+  it("doesn't insert a paste that was taken", async () => {
+    const { type, lastFrame } = setup({ onPaste: () => true });
+    await type("\x1b[200~/a.png\x1b[201~");
+    expect(lastFrame()).not.toContain("/a.png");
+  });
+  it("doesn't offer a paste into a composer with text in it", async () => {
+    const { type, props } = setup();
+    await type("see ", "\x1b[200~/a.png\x1b[201~");
+    expect(props.onPaste).not.toHaveBeenCalled();
   });
   it("hands Ctrl+D to onEof with the text", async () => {
     const { type, props } = setup();

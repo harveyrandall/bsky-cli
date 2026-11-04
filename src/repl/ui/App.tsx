@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { Static, Text, useApp } from "ink";
+import { basename } from "node:path";
 import type { Markers, SubmitPlan } from "@/repl/core/markers";
+import { chips, parseDroppedPaths, type StagedMedia } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
 import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
-import { Choice, Countdown, ExitPrompt, SplitPreview, type ExitChoice } from "@/repl/ui/Overlays";
+import { Choice, Countdown, ExitPrompt, SplitPreview, TextPrompt, YesNo, type ExitChoice } from "@/repl/ui/Overlays";
 
 export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
 export const KITTY_HINT =
@@ -41,7 +43,10 @@ interface LogLine {
 type Overlay =
   | { kind: "cooldown"; which: "undo" | "pace"; resolve(v: Cooldown | undefined): void }
   | { kind: "save"; values: { undo?: Cooldown; pace?: Cooldown }; resolve(a: "yes" | "no" | "never"): void }
-  | { kind: "preview"; plan: SubmitPlan; labelled: boolean; resolve(ok: boolean): void }
+  | { kind: "preview"; plan: SubmitPlan; labelled: boolean; media: readonly StagedMedia[]; resolve(ok: boolean): void }
+  | { kind: "choice"; label: string; options: readonly string[]; resolve(i: number | undefined): void }
+  | { kind: "text"; label: string; resolve(text: string | undefined): void }
+  | { kind: "drop"; paths: readonly string[]; resolve(ok: boolean): void }
   | { kind: "exit"; text: string };
 
 export function App(props: AppProps) {
@@ -59,6 +64,7 @@ export function App(props: AppProps) {
   const [overlay, setOverlay] = useState<Overlay>();
   const [restore, setRestore] = useState<{ id: number; text: string }>();
   const [exitWhenSent, setExitWhenSent] = useState(false);
+  const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
 
   const [repl] = useState(
     () =>
@@ -67,17 +73,24 @@ export function App(props: AppProps) {
         ask: {
           cooldown: (which) => new Promise((resolve) => setOverlay({ kind: "cooldown", which, resolve })),
           saveOffer: (values) => new Promise((resolve) => setOverlay({ kind: "save", values, resolve })),
-          confirm: (plan, labelled) => new Promise((resolve) => setOverlay({ kind: "preview", plan, labelled, resolve })),
-          alt: async () => undefined,
-          choose: async () => undefined,
-          text: async () => undefined,
+          confirm: (plan, labelled, media) => new Promise((resolve) => setOverlay({ kind: "preview", plan, labelled, media, resolve })),
+          alt: (file, required) =>
+            new Promise((resolve) =>
+              setOverlay({
+                kind: "text",
+                label: `Alt text for ${file} (${required ? "required; Esc drops the file" : "Enter to skip"}):`,
+                resolve: (text) => resolve(text === undefined ? null : text.trim() === "" ? undefined : text),
+              }),
+            ),
+          choose: (label, options) => new Promise((resolve) => setOverlay({ kind: "choice", label, options, resolve })),
+          text: (label) => new Promise((resolve) => setOverlay({ kind: "text", label, resolve })),
         },
         print,
         onChange: rerender,
         restore: (text) => {
           // Something came back: don't leave with it.
           setExitWhenSent(false);
-          setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
+          fillComposer(text);
         },
         saveDraft: props.drafts.save,
         deleteDraft: props.drafts.delete,
@@ -114,6 +127,24 @@ export function App(props: AppProps) {
       edited = await editInEditor(text);
     });
     return edited;
+  };
+
+  // A paste of media paths: ask to attach them. Anything else, or a no, is text after all.
+  const offerDrop = async (paths: readonly string[], text: string) => {
+    try {
+      const attach =
+        (await repl.areMedia(paths)) && (await new Promise<boolean>((resolve) => setOverlay({ kind: "drop", paths, resolve })));
+      if (attach) await repl.attach(paths);
+      else fillComposer(text);
+    } catch (err) {
+      print(err instanceof Error ? err.message : String(err), "error");
+      fillComposer(text);
+    }
+  };
+  const takePaste = (text: string) => {
+    const paths = parseDroppedPaths(text);
+    if (paths) void offerDrop(paths, text);
+    return paths !== undefined;
   };
 
   // Text that came back while the composer was busy: keep both.
@@ -174,6 +205,7 @@ export function App(props: AppProps) {
       case "cooldown":
         return (
           <Choice
+            key={overlay.which}
             label={overlay.which === "undo" ? "Undo window before each post?" : "Minimum time between posts?"}
             options={["none", "5s", "10s", "15s"]}
             onPick={(i) => {
@@ -203,6 +235,7 @@ export function App(props: AppProps) {
           <SplitPreview
             plan={overlay.plan}
             posts={overlay.labelled ? repl.labelPosts(overlay.plan.posts) : overlay.plan.posts}
+            media={overlay.media}
             limit={overlay.labelled ? 298 : 300}
             onAnswer={(ok) => {
               close();
@@ -210,6 +243,40 @@ export function App(props: AppProps) {
             }}
           />
         );
+      case "choice":
+        return (
+          <Choice
+            key={overlay.label}
+            label={overlay.label}
+            options={overlay.options}
+            onPick={(i) => {
+              close();
+              overlay.resolve(i);
+            }}
+          />
+        );
+      case "text":
+        return (
+          <TextPrompt
+            label={overlay.label}
+            onDone={(text) => {
+              close();
+              overlay.resolve(text);
+            }}
+          />
+        );
+      case "drop": {
+        const more = overlay.paths.length > 1 ? ` and ${overlay.paths.length - 1} more` : "";
+        return (
+          <YesNo
+            label={`Attach ${basename(overlay.paths[0])}${more}?`}
+            onAnswer={(ok) => {
+              close();
+              overlay.resolve(ok);
+            }}
+          />
+        );
+      }
       case "exit":
         return <ExitPrompt onChoose={(c) => void chooseExit(c, overlay.text)} />;
     }
@@ -234,6 +301,7 @@ export function App(props: AppProps) {
         limit={repl.composerLimit()}
         pending={repl.waiting()}
         active={!overlay}
+        chips={repl.staged().length > 0 ? chips(repl.staged()) : undefined}
         restore={restore}
         onRestoreBusy={(text) => void keepAsDraft(text)}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
@@ -244,6 +312,8 @@ export function App(props: AppProps) {
         onInterrupt={(text) => repl.interrupt(text)}
         onEof={requestExit}
         onSendNow={() => repl.sendNow()}
+        onEdit={edit}
+        onPaste={takePaste}
         onHint={(text) => print(text, "dim")}
         onError={(text) => print(text, "error")}
       />
