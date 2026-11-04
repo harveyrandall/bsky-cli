@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
+import { LEFT } from "@/repl/ui/App";
 
 const { render, detectKittyKeyboard } = vi.hoisted(() => ({ render: vi.fn(), detectKittyKeyboard: vi.fn() }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
@@ -9,10 +10,12 @@ const { startRepl } = await import("@/repl");
 /** An Ink instance whose exit promise settles when unmounted. */
 function fakeInstance() {
   let settle: (err?: Error) => void = () => {};
-  const exited = new Promise<void>((resolve, reject) => {
-    settle = (err) => (err ? reject(err) : resolve());
+  let finish: (value: unknown) => void = () => {};
+  const exited = new Promise<unknown>((resolve, reject) => {
+    settle = (err) => (err ? reject(err) : resolve(undefined));
+    finish = resolve;
   });
-  return { unmount: vi.fn((err?: Error) => settle(err)), waitUntilExit: () => exited };
+  return { unmount: vi.fn((err?: Error) => settle(err)), exit: (value: unknown) => finish(value), waitUntilExit: () => exited };
 }
 
 const added = (event: "uncaughtException" | "unhandledRejection", before: Function[]) =>
@@ -54,5 +57,30 @@ describe("startRepl", () => {
     expect(app.unmount).toHaveBeenCalledWith(boom);
     await expect(running).rejects.toThrow("boom");
     expect(added("uncaughtException", before)).toHaveLength(0);
+  });
+  it("says so and exits 1 when Ink stops without the user leaving", async () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl({ markers: DEFAULT_MARKERS });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    app.unmount();
+    await running;
+    expect(write).toHaveBeenCalledWith("bsky repl stopped because its input closed.\n");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    write.mockRestore();
+  });
+  it("exits quietly when the user leaves", async () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl({ markers: DEFAULT_MARKERS });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    app.exit(LEFT);
+    await running;
+    expect(write).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+    write.mockRestore();
   });
 });

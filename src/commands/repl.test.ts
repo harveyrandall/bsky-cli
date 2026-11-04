@@ -46,7 +46,9 @@ describe("bsky repl", () => {
     async (stdin, stdout) => {
       setTTY(stdin, stdout);
       await expect(makeProgram().parseAsync(["repl"], { from: "user" })).rejects.toMatchObject({ exitCode: 1 });
-      expect(process.stderr.write).toHaveBeenCalled();
+      expect(process.stderr.write).toHaveBeenCalledWith(
+        "bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n",
+      );
       expect(startRepl).not.toHaveBeenCalled();
     },
   );
@@ -94,6 +96,18 @@ describe("bsky repl", () => {
     setTTY(true, true);
     await expect(makeProgram({ repl }).parseAsync(["repl"], { from: "user" })).rejects.toThrow(message);
     expect(startRepl).not.toHaveBeenCalled();
+  });
+
+  it("says which flags aren't used yet", async () => {
+    setTTY(true, true);
+    await makeProgram().parseAsync(["repl", "--undo", "5", "-R"], { from: "user" });
+    expect(process.stderr.write).toHaveBeenCalledWith(
+      "bsky repl: --undo isn't used yet; it takes effect in a later release.\n",
+    );
+    expect(process.stderr.write).toHaveBeenCalledWith(
+      "bsky repl: --no-resumable isn't used yet; it takes effect in a later release.\n",
+    );
+    expect(startRepl).toHaveBeenCalled();
   });
 
   it("stops with an error for a bad marker", async () => {

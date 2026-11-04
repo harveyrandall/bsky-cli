@@ -42,9 +42,18 @@ export function registerRepl(program: Command): void {
         process.stdout.write(smokeFrame() + "\n");
         return;
       }
-      if (!process.stdin.isTTY || !process.stdout.isTTY) cmd.help({ error: true });
+      if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        process.stderr.write("bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n");
+        cmd.help({ error: true });
+      }
       const markers = resolveMarkers(opts);
       checkCooldowns(opts);
+      for (const option of cmd.options) {
+        const name = option.attributeName();
+        // Negatable flags share one value; report only the form that was typed.
+        const typed = cmd.getOptionValueSource(name) === "cli" && option.negate === (cmd.getOptionValue(name) === false);
+        if (typed) process.stderr.write(`bsky repl: ${option.long} isn't used yet; it takes effect in a later release.\n`);
+      }
       const { startRepl } = await import("@/repl");
       await startRepl({ markers });
     });

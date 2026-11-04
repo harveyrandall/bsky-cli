@@ -71,6 +71,7 @@ describe("App", () => {
     await type("/help");
     await type("\r\x1b[C\r");
     expect(lastFrame().split("Leave the REPL")).toHaveLength(2);
+    expect(lastFrame()).toContain("Still sending");
   });
   it("shows only the lines around the cursor when the draft is taller than the window", async () => {
     const app = setup();

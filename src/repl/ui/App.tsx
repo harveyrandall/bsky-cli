@@ -9,6 +9,9 @@ export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
 export const KITTY_HINT =
   "This terminal can't tell Shift+Enter from Enter — use Alt+Enter or Ctrl+J for new lines.";
 
+/** What waitUntilExit resolves with when the user leaves, rather than Ink stopping. */
+export const LEFT = Symbol("left");
+
 export interface AppProps {
   markers: Markers;
   kittyHint: boolean;
@@ -30,7 +33,7 @@ export function App({ markers, kittyHint }: AppProps) {
     (text: string, style: LineStyle = "normal") => setLog((l) => [...l, { id: l.length, text, style }]),
     [],
   );
-  const leave = useCallback(() => exit(), [exit]);
+  const leave = useCallback(() => exit(LEFT), [exit]);
 
   return (
     <>

@@ -70,12 +70,12 @@ export function tokenize(input: string): string[] {
     token ??= "";
     if (c === "'") {
       const end = input.indexOf("'", i + 1);
-      if (end < 0) throw new Error("Unclosed quote");
+      if (end < 0) throw new Error("Unclosed ' quote");
       token += input.slice(i + 1, end);
       i = end + 1;
     } else if (c === '"') {
       for (i++; input[i] !== '"'; ) {
-        if (i >= input.length) throw new Error("Unclosed quote");
+        if (i >= input.length) throw new Error('Unclosed " quote');
         const escaped = input[i] === "\\" && (input[i + 1] === '"' || input[i + 1] === "\\");
         token += escaped ? input[i + 1] : input[i];
         i += escaped ? 2 : 1;

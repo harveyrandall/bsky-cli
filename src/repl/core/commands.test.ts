@@ -12,7 +12,8 @@ describe("tokenize", () => {
     expect(tokenize("trailing\\")).toEqual(["trailing\\"]);
   });
   it("rejects an unclosed quote", () => {
-    expect(() => tokenize(`"open`)).toThrow("Unclosed quote");
+    expect(() => tokenize(`"open`)).toThrow('Unclosed " quote');
+    expect(() => tokenize(`'open`)).toThrow("Unclosed ' quote");
   });
 });
 

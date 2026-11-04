@@ -38,7 +38,8 @@ export async function dispatch(input: string, ctx: CommandContext): Promise<Disp
     await cmd.run(tokenize(parsed.rest), ctx);
     return "done";
   } catch (err) {
-    ctx.print(err instanceof Error ? err.message : String(err), "error");
+    const message = err instanceof Error ? err.message || err.name : String(err);
+    ctx.print(`/${parsed.name}: ${message}`, "error");
     return "keep";
   }
 }

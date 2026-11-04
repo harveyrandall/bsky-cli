@@ -90,7 +90,11 @@ export function Composer({ markers, onSubmit, onHint, onError, onExit }: Compose
 
   const submitting = useRef(false);
   const submit = async (text: string) => {
-    if (text.trim() === "" || submitting.current) return;
+    if (text.trim() === "") return;
+    if (submitting.current) {
+      onHint("Still sending — wait for it to finish.");
+      return;
+    }
     submitting.current = true;
     try {
       if ((await onSubmit(text)) === "done") apply({ type: "submitted", text });

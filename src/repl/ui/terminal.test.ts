@@ -38,6 +38,13 @@ describe("detectKittyKeyboard", () => {
     await detectKittyKeyboard(t.stdin, t.stdout);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it("still reports support when ?u arrives but DA1 never does", async () => {
+    vi.useFakeTimers();
+    const t = fakeTerminal("\x1b[?0u");
+    const result = detectKittyKeyboard(t.stdin, t.stdout);
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(result).resolves.toBe(true);
+  });
   it("times out at 500 ms when nothing answers", async () => {
     vi.useFakeTimers();
     const t = fakeTerminal();

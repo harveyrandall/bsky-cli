@@ -1,5 +1,5 @@
 import { render, renderToString } from "ink";
-import { App } from "@/repl/ui/App";
+import { App, LEFT } from "@/repl/ui/App";
 import { DEFAULT_MARKERS, type Markers } from "@/repl/core/markers";
 import { detectKittyKeyboard } from "@/repl/ui/terminal";
 
@@ -21,7 +21,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   process.on("uncaughtException", crash);
   process.on("unhandledRejection", crash);
   try {
-    await app.waitUntilExit();
+    // Ink also stops by itself when stdin closes; say so rather than exit as if asked to.
+    if ((await app.waitUntilExit()) !== LEFT) {
+      process.stderr.write("bsky repl stopped because its input closed.\n");
+      process.exitCode = 1;
+    }
   } finally {
     process.off("uncaughtException", crash);
     process.off("unhandledRejection", crash);

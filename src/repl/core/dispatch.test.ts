@@ -44,10 +44,13 @@ describe("dispatch", () => {
     expect(await dispatch("/zzzz", c)).toBe("keep");
     expect(c.print).toHaveBeenCalledWith("Unknown /zzzz. /help lists commands.", "error");
   });
-  it("reports an unclosed quote and keeps the text", async () => {
+  it.each([
+    ['/help "exit', '/help: Unclosed " quote'],
+    ["/help 'exit", "/help: Unclosed ' quote"],
+  ])("reports %s as one error line naming the command, and keeps the text", async (input, message) => {
     const c = ctx();
-    expect(await dispatch('/help "exit', c)).toBe("keep");
-    expect(c.print).toHaveBeenCalledWith("Unclosed quote", "error");
+    expect(await dispatch(input, c)).toBe("keep");
+    expect(c.print.mock.calls).toEqual([[message, "error"]]);
   });
   it("keeps plain text with a hint", async () => {
     const c = ctx();

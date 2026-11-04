@@ -29,7 +29,7 @@ export function detectKittyKeyboard(
       while ((chunk = stdin.read()) !== null) buffer += String(chunk);
       if (DA1_REPLY.test(buffer)) finish(KITTY_REPLY.test(buffer));
     };
-    const timer = setTimeout(() => finish(false), timeoutMs);
+    const timer = setTimeout(() => finish(KITTY_REPLY.test(buffer)), timeoutMs);
     stdin.on("readable", onReadable);
     stdin.setRawMode(true);
     stdout.write("\x1b[?u\x1b[c");
