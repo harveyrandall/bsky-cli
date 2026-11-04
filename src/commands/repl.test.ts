@@ -62,6 +62,16 @@ describe("bsky repl", () => {
     expect(startRepl).not.toHaveBeenCalled();
   });
 
+  it("smoke mode still checks the [repl] config", async () => {
+    setTTY(false, false);
+    process.env.BSKY_REPL_SMOKE = "1";
+    const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await expect(
+      makeProgram({ repl: { "cut-marker": "" } }).parseAsync(["repl"], { from: "user" }),
+    ).rejects.toThrow('Invalid [repl] cut-marker = ""');
+    expect(out).not.toHaveBeenCalledWith("FRAME\n");
+  });
+
   it("rejects --undo values other than 0, 5, 10 or 15", async () => {
     await expect(makeProgram().parseAsync(["repl", "--undo", "7"], { from: "user" })).rejects.toThrow(
       "must be 0, 5, 10 or 15",

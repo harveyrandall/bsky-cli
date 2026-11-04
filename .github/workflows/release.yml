@@ -96,16 +96,21 @@ jobs:
       - run: bun install
 
       # Ink imports react-devtools-core (an optional peer we don't install) only
-      # when DEV=true and the package resolves. Bun bundles that import anyway
-      # and the binary then fails at startup, so blank the hook before compiling.
+      # when DEV=true and the package resolves. Bun bundles that import anyway,
+      # and the binary then fails at startup for every command, so blank the
+      # hook before compiling. Fail loudly if an Ink release moves it.
       - name: Drop Ink's devtools hook
         shell: bash
-        run: echo "export {};" > node_modules/ink/build/devtools.js
+        run: |
+          grep -q "react-devtools-core" node_modules/ink/build/devtools.js \
+            && grep -q "./devtools.js" node_modules/ink/build/reconciler.js \
+            || { echo "::error::Ink's devtools hook has moved; update this step"; exit 1; }
+          echo "export {};" > node_modules/ink/build/devtools.js
 
       - name: Compile binary
         run: bun build --compile --target ${{ matrix.target }} dist/index.js --outfile bsky
 
-      # Cross-compiled targets can't run on their runner; the embedded JS is the same.
+      # Only targets native to their runner are smoke-tested; the others embed the same JS.
       - name: Smoke test (REPL, binary)
         if: matrix.smoke
         env:
@@ -247,7 +252,8 @@ jobs:
           git push
 
   npm-publish:
-    needs: test
+    # Wait for the binaries so a Bun-only break can't publish to npm alone.
+    needs: [test, build-binaries]
     runs-on: ubuntu-latest
     environment: release
     steps:

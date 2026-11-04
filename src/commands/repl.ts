@@ -36,6 +36,9 @@ export function registerRepl(program: Command): void {
     .option("--resumable", "Save this session so it can be resumed (default)")
     .option("-R, --no-resumable", "Don't save this session")
     .action(async (opts, cmd: Command) => {
+      // Config is checked first so the smoke run catches a broken [repl] section too.
+      const markers = resolveMarkers(opts);
+      checkCooldowns(opts);
       // Ink and React load only here, so other commands stay fast.
       if (process.env.BSKY_REPL_SMOKE === "1") {
         const { smokeFrame } = await import("@/repl");
@@ -46,8 +49,6 @@ export function registerRepl(program: Command): void {
         process.stderr.write("bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n");
         cmd.help({ error: true });
       }
-      const markers = resolveMarkers(opts);
-      checkCooldowns(opts);
       for (const option of cmd.options) {
         const name = option.attributeName();
         // Negatable flags share one value; report only the form that was typed.
