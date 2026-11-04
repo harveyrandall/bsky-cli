@@ -376,8 +376,14 @@ export class Repl {
   }
 
   async retry(): Promise<void> {
-    if (await this.pipeline.retry()) this.deps.print("Retrying…", "dim");
-    else this.deps.print("Nothing to retry", "dim");
+    const failure = this.pipeline.lastFailure();
+    if (!(await this.pipeline.retry())) {
+      this.deps.print("Nothing to retry", "dim");
+      return;
+    }
+    // It's being dealt with; failing again records it afresh.
+    this.failed.splice(this.failed.indexOf(failure!), 1);
+    this.deps.print("Retrying…", "dim");
   }
 
   /** Esc below any overlay (spec §10). */
@@ -511,16 +517,18 @@ export class Repl {
 
   private onFailed(f: Failure): void {
     this.failed.push(f);
-    if (f.kind === "network" && f.draftId === undefined) {
-      this.deps.print(`Couldn't reach Bluesky (${f.message}). It's still queued: /retry to send it, Esc to cancel.`, "error");
-    } else if (f.kind === "network") {
-      this.deps.print(`Couldn't reach Bluesky; saved as draft ${f.draftId}. /retry to send it now.`, "error");
+    const why = f.kind === "limited" ? "Rate limited" : "Couldn't reach Bluesky";
+    if ((f.kind === "network" || f.kind === "limited") && f.draftId === undefined) {
+      this.deps.print(`${why} (${f.message}). It's still queued: /retry to send it, Esc to cancel.`, "error");
+    } else if (f.kind === "network" || f.kind === "limited") {
+      this.deps.print(`${why}; saved as draft ${f.draftId}. /retry to send it ${f.kind === "limited" ? "later" : "now"}.`, "error");
     } else if (f.kind === "expired") {
       this.deps.print("Session expired — exit and run `bsky login`", "error");
       if (f.draftId) this.deps.print(`Unsent posts are saved as draft ${f.draftId}.`, "dim");
       else this.deps.print(f.message, "error");
     } else {
-      this.deps.print(f.message, "error");
+      const n = f.item.posts.length;
+      this.deps.print(n > 1 ? `Post ${f.from + 1} of ${n} wasn't sent: ${f.message}` : f.message, "error");
       this.deps.restore(this.asResend({ ...f.item, posts: f.item.posts.slice(f.from), target: f.target }));
     }
     this.deps.onChange();

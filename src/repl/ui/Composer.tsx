@@ -7,6 +7,8 @@ import { editorReducer, emptyEditor, type EditorAction } from "@/repl/ui/editor"
 import { chunkKeys, keyToAction } from "@/repl/ui/keys";
 import { Ring } from "@/repl/ui/Ring";
 
+const STILL_WORKING = "Still working — wait for it to finish.";
+
 const segmenter = new Intl.Segmenter();
 const cells = (text: string) => [...segmenter.segment(text)].length;
 
@@ -118,7 +120,7 @@ export function Composer(props: ComposerProps) {
   const submit = async (text: string) => {
     if (text.trim() === "") return;
     if (submitting.current) {
-      props.onHint("Still sending — wait for it to finish.");
+      props.onHint(STILL_WORKING);
       return;
     }
     submitting.current = true;
@@ -140,7 +142,7 @@ export function Composer(props: ComposerProps) {
       case "interrupt":
         return outcome(text, props.onInterrupt(text));
       case "eof":
-        return props.onEof(text);
+        return submitting.current ? props.onHint(STILL_WORKING) : props.onEof(text);
     }
     // While a post waits out its undo window the composer only sends it now.
     if (pending !== undefined) {

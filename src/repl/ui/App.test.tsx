@@ -103,7 +103,7 @@ describe("App", () => {
     await type("/help");
     await type("\r\x1b[C\r");
     expect(lastFrame().split("Leave the REPL")).toHaveLength(2);
-    expect(lastFrame()).toContain("Still sending");
+    expect(lastFrame()).toContain("Still working");
   });
   it("shows only the lines around the cursor when the draft is taller than the window", async () => {
     const app = setup();
@@ -341,6 +341,11 @@ describe("App threads", () => {
     await tick();
     expect(expired.lastFrame()).toContain("Paused: session expired");
     expect(expired.lastFrame()).not.toContain("network error");
+    const limited = setup();
+    limited.agent.post.mockRejectedValueOnce(Object.assign(new Error("Rate Limit Exceeded"), { status: 429 }));
+    await limited.type("/post a", "\r");
+    await tick();
+    expect(limited.lastFrame()).toContain("Paused: rate limited — /retry");
   });
   it("stays if a post comes back while it's sending everything to leave", async () => {
     const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });

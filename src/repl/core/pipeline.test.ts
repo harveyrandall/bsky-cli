@@ -7,6 +7,7 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 const fetchFailed = () => Object.assign(new Error("fetch failed"), {});
+const limited = (reset: string) => Object.assign(new Error("Rate Limit Exceeded"), { status: 429, headers: { "ratelimit-reset": reset } });
 
 function setup(o: { undo?: number; pace?: number } = {}) {
   let n = 0;
@@ -289,12 +290,33 @@ describe("Pipeline errors", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(sent.map((s) => [s.text, s.at])).toEqual([["a", 2000]]);
   });
-  it("treats a long rate limit like a network failure", async () => {
+  it("counts down a rate limit it's waiting out, and won't send early", async () => {
+    const { pipeline, deps, sent } = setup();
+    deps.send.mockRejectedValueOnce(limited("2"));
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pipeline.countdown()).toMatchObject({ phase: "pacing", sendAt: 2000 });
+    pipeline.sendNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sent.map((s) => s.at)).toEqual([2000]);
+  });
+  it("pauses and saves a draft on a long rate limit", async () => {
     const { pipeline, deps } = setup();
-    deps.send.mockRejectedValueOnce(Object.assign(new Error("Rate Limit Exceeded"), { status: 429, headers: { "ratelimit-reset": "120" } }));
+    deps.send.mockRejectedValueOnce(limited("120"));
     pipeline.enqueue({ kind: "standalone" }, ["a"]);
     await vi.advanceTimersByTimeAsync(0);
-    expect(deps.onFailed).toHaveBeenCalledWith(expect.objectContaining({ kind: "network" }));
+    expect(deps.onFailed).toHaveBeenCalledWith(expect.objectContaining({ kind: "limited", draftId: "d1" }));
+    expect(pipeline.isPaused()).toBe(true);
+  });
+  it("only waits out a rate limit once per post", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(limited("2")).mockRejectedValueOnce(limited("4"));
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(deps.send).toHaveBeenCalledTimes(2);
+    expect(deps.onFailed).toHaveBeenCalledWith(expect.objectContaining({ kind: "limited" }));
   });
   it("reports an expired session and keeps the text as a draft", async () => {
     const { pipeline, deps } = setup();

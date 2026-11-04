@@ -31,7 +31,7 @@ export interface SendTarget {
 }
 
 export interface Failure {
-  kind: "network" | "rejected" | "expired";
+  kind: "network" | "limited" | "rejected" | "expired";
   item: QueueItem;
   /** Index of the post that failed; earlier posts were sent. */
   from: number;
@@ -79,10 +79,11 @@ interface Active {
   draftId?: string;
   /** Skip the undo window (a retry). */
   immediate?: boolean;
-  rateLimited?: boolean;
+  /** When a rate limit being waited out ends; set once per post. */
+  limitedUntil?: number;
 }
 
-type Classified = { kind: "network" | "rejected" | "expired" } | { kind: "wait"; ms: number };
+type Classified = { kind: Failure["kind"] } | { kind: "wait"; ms: number };
 
 /**
  * A FIFO of posts to send (spec §9). The first post of an item goes out at
@@ -137,7 +138,7 @@ export class Pipeline {
 
   sendNow(): void {
     const head = this.queue[0];
-    if (!head || this.sending || this.failure) return;
+    if (!head || this.sending || this.failure || (head.limitedUntil ?? 0) > this.deps.now()) return;
     head.immediate = true;
     this.clear();
     void this.sendHead();
@@ -186,7 +187,7 @@ export class Pipeline {
 
   private sendAt(a: Active): number {
     const { undo, pace } = this.deps.settings();
-    const paced = this.lastSentAt + pace * 1000;
+    const paced = Math.max(this.lastSentAt + pace * 1000, a.limitedUntil ?? -Infinity);
     // Only an item's first post waits out the undo window, and not on a retry.
     if (a.index > 0 || a.immediate) return paced;
     return Math.max(a.item.createdAt + undo * 1000, paced);
@@ -233,7 +234,7 @@ export class Pipeline {
     this.lastSentAt = this.deps.now();
     a.last = { parent: ref, root: target?.root ?? ref };
     const index = a.index++;
-    a.rateLimited = false;
+    a.limitedUntil = undefined;
     const done = a.index >= a.item.posts.length;
     if (done && this.queue[0] === a) this.queue.shift();
     this.sending = false;
@@ -260,7 +261,7 @@ export class Pipeline {
     const e = err as { status?: number; error?: string; headers?: Record<string, string> };
     if (e.status === 429) {
       const ms = Number(e.headers?.["ratelimit-reset"]) * 1000 - this.deps.now();
-      return !a.rateLimited && ms >= 0 && ms <= 60_000 ? { kind: "wait", ms } : { kind: "network" };
+      return a.limitedUntil === undefined && ms >= 0 && ms <= 60_000 ? { kind: "wait", ms } : { kind: "limited" };
     }
     if (e.status === 401 || e.error === "ExpiredToken" || e.error === "InvalidToken") return { kind: "expired" };
     // A 5xx says nothing about the post; only a 4xx rejects it.
@@ -270,11 +271,7 @@ export class Pipeline {
   private async fail(a: Active, target: SendTarget | undefined, err: unknown): Promise<void> {
     const c = this.classify(err, a);
     if (c.kind === "wait") {
-      a.rateLimited = true;
-      this.timer = this.deps.setTimer(() => {
-        this.timer = undefined;
-        void this.sendHead();
-      }, c.ms);
+      a.limitedUntil = this.deps.now() + c.ms;
       return;
     }
     const message = err instanceof Error ? err.message : String(err);

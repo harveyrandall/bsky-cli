@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { exitSummary } from "./summary";
+import type { Failure } from "./pipeline";
 import { Registry } from "./refs";
 import type { AtUri, Cid, Did, StrongRef } from "./types";
 
@@ -20,6 +21,17 @@ describe("exitSummary", () => {
     expect(exitSummary({ registry: sample(), failures: [], verbose: false, handle: "me.bsky.social", ...times })).toEqual([
       "3 posts in 1 thread, 1 standalone",
     ]);
+  });
+  it("mentions saved drafts even without -v", () => {
+    const failed: Failure = { kind: "network", item: { id: 1, intent: { kind: "standalone" }, posts: ["a", "b"], createdAt: 0 }, from: 0, message: "x" };
+    const lines = exitSummary({
+      registry: sample(),
+      failures: [{ ...failed, draftId: "d1" }, { ...failed, kind: "rejected" }],
+      verbose: false,
+      handle: "me.bsky.social",
+      ...times,
+    });
+    expect(lines).toEqual(["3 posts in 1 thread, 1 standalone", "Failed: 2 posts saved as draft d1"]);
   });
   it("says when nothing was posted", () => {
     expect(exitSummary({ registry: new Registry(false), failures: [], verbose: false, handle: "me.bsky.social", ...times })).toEqual([

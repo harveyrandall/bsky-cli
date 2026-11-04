@@ -173,6 +173,15 @@ const didOf = (uri: AtUri): Did => uri.slice("at://".length, uri.indexOf("/", "a
 const cantResolve = (input: string) =>
   new Error(`Can't resolve "${input}": use a number, #n, rkey, at:// URI or bsky.app link`);
 
+/** A failed network call, saying which ref it was for. */
+async function lookingUp<T>(input: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    throw new Error(`Couldn't look up "${input}": ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function authorityToDid(authority: string, agent: RefAgent): Promise<Did | undefined> {
   if (isDid(authority)) return authority;
   return isHandle(authority) ? agent.resolveHandle(authority) : undefined;
@@ -205,7 +214,7 @@ export async function resolveRef(
   const link = /^https:\/\/bsky\.app\/profile\/([^/]+)\/post\/([^/?#]+)\/?$/.exec(s);
   if (atUri || link) {
     const [, authority, rkey] = (atUri ?? link)!;
-    const did = await authorityToDid(authority, r.agent);
+    const did = await lookingUp(input, () => authorityToDid(authority, r.agent));
     if (did) uri = `at://${did}/app.bsky.feed.post/${rkey}`;
   } else if (isRkey(s)) {
     uri = `at://${r.agent.selfDid}/app.bsky.feed.post/${s}`;
@@ -214,7 +223,7 @@ export async function resolveRef(
 
   const known = r.registry.byUri(uri);
   if (known) return fromEntry(known);
-  const [post] = await r.agent.getPosts([uri]);
+  const [post] = await lookingUp(input, () => r.agent.getPosts([uri]));
   if (!post) throw new Error(`Post not found: ${uri}`);
   return { ref: { uri: post.uri, cid: post.cid }, root: post.root ?? { uri: post.uri, cid: post.cid }, post };
 }

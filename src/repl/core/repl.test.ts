@@ -584,7 +584,43 @@ describe("failures", () => {
     await repl.retry();
     await flush();
     expect(posted.map((p) => p.text)).toEqual(["hello"]);
+    expect(repl.failures()).toEqual([]);
+  });
+  it("records only the latest failure of a retried post", async () => {
+    const { repl, agent, flush } = setup();
+    agent.post.mockRejectedValueOnce(new Error("fetch failed")).mockRejectedValueOnce(new Error("fetch failed"));
+    await repl.post("hello");
+    await flush();
+    await repl.retry();
+    await flush();
     expect(repl.failures()).toHaveLength(1);
+  });
+  it("says which post of a batch the server rejected", async () => {
+    const { repl, agent, flush, printed } = setup();
+    agent.post.mockResolvedValueOnce(ref(1)).mockRejectedValueOnce(rejected());
+    await repl.post("one /// two /// three");
+    await flush();
+    expect(printed()).toContain("Post 2 of 3 wasn't sent: Invalid record");
+  });
+  it("gives a lone rejected post just the server's reason", async () => {
+    const { repl, agent, flush, lines } = setup();
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.post("bad");
+    await flush();
+    expect(lines).toContainEqual(["Invalid record", "error"]);
+  });
+  it("tells a rate limit from an outage", async () => {
+    const { repl, agent, flush, printed } = setup();
+    agent.post.mockRejectedValueOnce(Object.assign(new Error("Rate Limit Exceeded"), { status: 429 }));
+    await repl.post("hello");
+    await flush();
+    expect(printed()).toContain("Rate limited; saved as draft d1. /retry to send it later.");
+  });
+  it("says what it was looking up when a ref can't be fetched", async () => {
+    const { repl, agent, printed } = setup();
+    agent.getPosts.mockRejectedValueOnce(new Error("fetch failed"));
+    await repl.reply("3lbx7kt5defza");
+    expect(printed()).toContain('Couldn\'t look up "3lbx7kt5defza": fetch failed');
   });
   it("says when the session has expired", async () => {
     const { repl, agent, flush, printed } = setup();

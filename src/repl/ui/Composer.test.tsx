@@ -48,6 +48,17 @@ describe("Composer", () => {
     await type("abc", "\x04");
     expect(props.onEof).toHaveBeenCalledWith("abc");
   });
+  it("won't leave while a command is still running", async () => {
+    let finish = (_: "done") => {};
+    const { type, props } = setup({ onSubmit: () => new Promise((resolve) => (finish = resolve)) });
+    await type("/reply 1", "\r", "\x04");
+    expect(props.onEof).not.toHaveBeenCalled();
+    expect(props.onHint).toHaveBeenCalledWith("Still working — wait for it to finish.");
+    finish("done");
+    await tick();
+    await type("\x04");
+    expect(props.onEof).toHaveBeenCalledOnce();
+  });
   it("shows a pending post dimmed, ignores typing, and sends it now on Enter", async () => {
     const { type, props, lastFrame } = setup({ pending: "waiting post" });
     expect(lastFrame()).toContain("bsky › waiting post");
