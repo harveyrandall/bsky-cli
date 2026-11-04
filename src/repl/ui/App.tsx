@@ -97,6 +97,17 @@ export function App(props: AppProps) {
 
   const close = () => setOverlay(undefined);
 
+  // Text that came back while the composer was busy: keep both.
+  const keepAsDraft = async (text: string) => {
+    try {
+      const d = await props.drafts.save({ reason: "manual", type: "post", text });
+      print(`A post came back while you were typing; saved it as draft ${d.id}`, "dim");
+    } catch (err) {
+      print(`A post came back but couldn't be saved as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
+      print(text);
+    }
+  };
+
   const chooseExit = async (choice: ExitChoice, text: string) => {
     close();
     if (choice === "stay") return;
@@ -191,6 +202,7 @@ export function App(props: AppProps) {
         pending={pending}
         active={!overlay}
         restore={restore}
+        onRestoreBusy={(text) => void keepAsDraft(text)}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), repl })}
         onEscape={(text) => repl.escape(text)}
         onInterrupt={(text) => repl.interrupt(text)}

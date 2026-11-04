@@ -70,8 +70,10 @@ export interface ComposerProps {
   pending?: string;
   /** False while an overlay has the keyboard. */
   active?: boolean;
-  /** Replaces the text whenever `id` changes. */
+  /** Text coming back (a rejected post): fills an empty composer whenever `id` changes. */
   restore?: { id: number; text: string };
+  /** Restored text that would have overwritten what's being typed. */
+  onRestoreBusy(text: string): void;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -94,7 +96,9 @@ export function Composer(props: ComposerProps) {
   };
 
   useEffect(() => {
-    if (restore) apply({ type: "set", text: restore.text });
+    if (!restore) return;
+    if (editor.current.text.trim() === "") apply({ type: "set", text: restore.text });
+    else props.onRestoreBusy(restore.text);
   }, [restore?.id]);
 
   // The REPL never exits on an error: report it and keep the draft.

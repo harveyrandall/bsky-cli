@@ -280,4 +280,17 @@ describe("App threads", () => {
     expect(exit).not.toHaveBeenCalled();
     expect(lastFrame()).toContain("[s]end now · save [d]raft · discard [x] · [Esc] stay");
   });
+  it("keeps what you're typing when a post comes back rejected, saving that post as a draft", async () => {
+    const { type, lastFrame, agent, drafts } = setup();
+    let reject = () => {};
+    agent.post.mockImplementationOnce(
+      () => new Promise((_resolve, fail) => (reject = () => fail(Object.assign(new Error("Invalid record"), { status: 400 })))),
+    );
+    await type("/post bad", "\r", "my next post");
+    reject();
+    await tick();
+    await tick();
+    expect(lastFrame()).toContain("bsky › my next post");
+    expect(drafts.save).toHaveBeenCalledWith(expect.objectContaining({ reason: "manual", text: expect.stringContaining("bad") }));
+  });
 });
