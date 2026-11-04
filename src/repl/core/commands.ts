@@ -6,10 +6,10 @@ export interface CommandContext {
 }
 
 export interface ReplCommand {
-  name: string;
-  aliases: string[];
-  usage: string;
-  summary: string;
+  readonly name: string;
+  readonly aliases: readonly string[];
+  readonly usage: string;
+  readonly summary: string;
   run(args: string[], ctx: CommandContext): void | Promise<void>;
 }
 

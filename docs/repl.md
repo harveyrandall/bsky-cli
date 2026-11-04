@@ -105,4 +105,4 @@ Set defaults in the `[repl]` section of the [config file](configuration.md):
 # cut-marker = "<//"
 ```
 
-Markers must be non-empty, contain no spaces and differ from each other; otherwise `bsky repl` stops with an error naming the key.
+Markers must be non-empty text with no spaces, can't start with `/` and a letter (that begins a command), and must differ from each other. Otherwise `bsky repl` stops with an error naming the key and the rule.

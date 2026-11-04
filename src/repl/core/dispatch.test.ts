@@ -10,6 +10,7 @@ describe("parseInput", () => {
     expect(parseInput("/help exit")).toEqual({ kind: "command", name: "help", rest: "exit" });
     expect(parseInput("/Help")).toEqual({ kind: "text", text: "/Help" });
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
+    expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
   });
 });

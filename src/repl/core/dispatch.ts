@@ -12,7 +12,7 @@ export type Parsed =
 export function parseInput(input: string): Parsed {
   const trimmed = input.trimStart();
   if (trimmed === "") return { kind: "empty" };
-  if (trimmed.startsWith("\\/")) return { kind: "text", text: trimmed.slice(1) };
+  if (trimmed.startsWith("\\/")) return { kind: "text", text: input.replace("\\/", "/") };
   const match = /^\/([a-z]\S*)([\s\S]*)$/.exec(trimmed);
   if (match) return { kind: "command", name: match[1], rest: match[2].trim() };
   return { kind: "text", text: input };
