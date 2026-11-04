@@ -224,12 +224,18 @@ export class Pipeline {
     } catch (err) {
       this.deps.onWarning(`Sent, but couldn't record it: ${err instanceof Error ? err.message : String(err)}`);
     }
-    if (done && a.draftId) {
-      await this.deps.deleteDraft(a.draftId).catch((err: unknown) => {
-        this.deps.onWarning(`Sent, but couldn't delete draft ${a.draftId}: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
+    if (done) await this.dropDraft(a);
     this.schedule();
+  }
+
+  /** The draft a retry replaces: it still holds posts that have since been dealt with. */
+  private async dropDraft(a: Active): Promise<void> {
+    if (a.draftId === undefined) return;
+    await this.deps.deleteDraft(a.draftId).catch((err: unknown) => {
+      this.deps.onWarning(
+        `Couldn't delete draft ${a.draftId}, so it may send again on your next run: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   }
 
   private classify(err: unknown, a: Active): Classified {
@@ -257,6 +263,7 @@ export class Pipeline {
     if (c.kind === "rejected") {
       if (this.queue[0] === a) this.queue.shift();
       this.deps.onFailed(failure);
+      await this.dropDraft(a);
       return;
     }
     this.paused = true;
@@ -273,6 +280,7 @@ export class Pipeline {
       failure.draftId = draft.id;
       if (this.queue[0] === a) this.queue.shift();
       this.failedTarget = target;
+      await this.dropDraft(a);
     } catch (saveErr) {
       // No draft, so the posts stay queued (paused) for /retry or Esc.
       failure.message = `${message}; couldn't save a draft either: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`;

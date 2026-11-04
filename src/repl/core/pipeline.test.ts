@@ -211,7 +211,45 @@ describe("Pipeline errors", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sent.map((s) => s.text)).toEqual(["a", "b"]);
     expect(deps.onFailed).toHaveBeenCalledOnce();
-    expect(deps.onWarning).toHaveBeenCalledWith("Sent, but couldn't delete draft d1: ENOENT");
+    expect(deps.onWarning).toHaveBeenCalledWith("Couldn't delete draft d1, so it may send again on your next run: ENOENT");
+  });
+  it("replaces the old draft when a retry fails again, so sent posts can't go out twice", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "thread" }, ["one", "two"]);
+    await vi.advanceTimersByTimeAsync(0);
+    deps.saveDraft.mockResolvedValueOnce({ id: "d2" });
+    deps.send.mockResolvedValueOnce(ref(1)).mockRejectedValueOnce(fetchFailed());
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.onFailed).toHaveBeenLastCalledWith(expect.objectContaining({ draftId: "d2" }));
+    expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
+  });
+  it("keeps the old draft when a failed retry can't save a new one", async () => {
+    const { pipeline, deps, sent } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    deps.saveDraft.mockRejectedValueOnce(new Error("EACCES"));
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.deleteDraft).not.toHaveBeenCalled();
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.map((s) => s.text)).toEqual(["a"]);
+    expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
+  });
+  it("deletes the old draft when the server rejects a retry: the text goes back to the composer", async () => {
+    const { pipeline, deps } = setup();
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    deps.send.mockRejectedValueOnce(new Error("Record too large"));
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.onFailed).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "rejected" }));
+    expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
   });
   it("doesn't call a sent post failed when recording it throws", async () => {
     const { pipeline, deps, sent } = setup();
