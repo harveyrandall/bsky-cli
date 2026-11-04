@@ -24,6 +24,22 @@ beforeEach(() => {
 });
 
 describe("startRepl", () => {
+  it.each([
+    [true, false, "enabled"],
+    [false, true, "disabled"],
+  ])("with kitty support %s: hint %s, kitty keyboard %s, Ctrl+C left to the composer", async (kitty, hint, mode) => {
+    detectKittyKeyboard.mockResolvedValue(kitty);
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl({ markers: DEFAULT_MARKERS });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const [element, options] = render.mock.calls[0];
+    expect(element.props).toMatchObject({ markers: DEFAULT_MARKERS, kittyHint: hint });
+    expect(options).toMatchObject({ exitOnCtrlC: false, kittyKeyboard: { mode } });
+    app.unmount();
+    await running;
+  });
+
   it("unmounts Ink on an uncaught error so the terminal is restored, then rethrows it", async () => {
     const app = fakeInstance();
     render.mockReturnValue(app);
