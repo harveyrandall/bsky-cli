@@ -51,6 +51,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     deleteDraft: vi.fn(async () => {}),
     saveConfig: vi.fn(async () => {}),
     saveScheduled: vi.fn(async () => ({ id: "s1" })),
+    composerBusy: vi.fn(() => false),
     fs,
   };
   const repl = new Repl(
@@ -328,7 +329,7 @@ describe("draft saves that fail", () => {
     await repl.post("waiting");
     expect(repl.escape("new text")).toBe("handled");
     await flush();
-    expect(printed()).toContain("Couldn't save the cancelled posts as a draft (EACCES):");
+    expect(printed()).toContain("Couldn't save these posts as a draft (EACCES):");
     expect(printed()).toContain("waiting");
   });
 });
@@ -560,6 +561,34 @@ describe("media", () => {
   it("leaves nothing to save when there's no text or media", () => {
     const { repl } = setup();
     expect(repl.composerDraft("  ")).toBeUndefined();
+  });
+});
+
+describe("a post coming back while you're typing", () => {
+  it("goes to a draft with its media, rather than leaving the media for your next post", async () => {
+    const { repl, agent, deps, flush, printed } = setup();
+    deps.composerBusy.mockReturnValue(true);
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.attach(["/x/a.png"]);
+    await repl.post("hello");
+    await flush();
+    expect(deps.saveDraft).toHaveBeenCalledWith({ reason: "manual", type: "post", text: "hello", images: ["/x/a.png"], imageAlts: ["a.png"] });
+    expect(printed()).toContain("A post came back while you were typing; saved it as draft d1");
+    expect(repl.staged()).toEqual([]);
+    expect(deps.restore).not.toHaveBeenCalled();
+  });
+  it("keeps a reply's parent and a quote's target", async () => {
+    const { repl, agent, deps, flush } = setup();
+    await repl.post("first");
+    await flush();
+    deps.composerBusy.mockReturnValue(true);
+    agent.post.mockRejectedValueOnce(rejected()).mockRejectedValueOnce(rejected());
+    await repl.reply("1", "a reply");
+    await flush();
+    await repl.quote("1", "a quote");
+    await flush();
+    expect(deps.saveDraft).toHaveBeenCalledWith({ reason: "manual", type: "reply", text: "a reply", replyUri: ref(1).uri });
+    expect(deps.saveDraft).toHaveBeenCalledWith({ reason: "manual", type: "quote", text: "a quote", quoteUri: ref(1).uri });
   });
 });
 

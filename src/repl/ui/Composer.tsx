@@ -74,10 +74,10 @@ export interface ComposerProps {
   active?: boolean;
   /** Staged files, shown above the draft. */
   chips?: string;
-  /** Text coming back (a rejected post): fills an empty composer whenever `id` changes. */
+  /** Text coming back (a rejected post, a paste that wasn't a drop): added whenever `id` changes. */
   restore?: { id: number; text: string };
-  /** Restored text that would have overwritten what's being typed. */
-  onRestoreBusy(text: string): void;
+  /** The draft, whenever it changes. */
+  onText(text: string): void;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -100,13 +100,12 @@ export function Composer(props: ComposerProps) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const apply = (action: EditorAction) => {
     editor.current = editorReducer(editor.current, action);
+    props.onText(editor.current.text);
     rerender();
   };
 
   useEffect(() => {
-    if (!restore) return;
-    if (editor.current.text.trim() === "") apply({ type: "set", text: restore.text });
-    else props.onRestoreBusy(restore.text);
+    if (restore) apply({ type: "insert", text: restore.text });
   }, [restore?.id]);
 
   // The REPL never exits on an error: report it and keep the draft.

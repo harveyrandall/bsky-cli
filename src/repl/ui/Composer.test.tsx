@@ -21,7 +21,7 @@ function setup(overrides: Partial<ComposerProps> = {}) {
     onEdit: vi.fn(async (text: string) => text),
     onPaste: vi.fn(() => false),
     onSendNow: vi.fn(),
-    onRestoreBusy: vi.fn(),
+    onText: vi.fn(),
     onHint: vi.fn(),
     onError: vi.fn(),
     ...overrides,
@@ -100,13 +100,17 @@ describe("Composer", () => {
     await tick();
     expect(lastFrame()).toContain("bsky › back again");
   });
-  it("hands restored text elsewhere instead of overwriting what you're typing", async () => {
+  it("adds restored text to what's there rather than overwriting it", async () => {
     const { type, rerender, props, lastFrame } = setup();
-    await type("my next post");
+    await type("typed ");
     rerender(<Composer {...props} restore={{ id: 1, text: "came back" }} />);
     await tick();
-    expect(lastFrame()).toContain("bsky › my next post");
-    expect(props.onRestoreBusy).toHaveBeenCalledWith("came back");
+    expect(lastFrame()).toContain("bsky › typed came back");
+  });
+  it("reports its text as it changes", async () => {
+    const { type, props } = setup();
+    await type("hi");
+    expect(props.onText).toHaveBeenLastCalledWith("hi");
   });
   it("puts back what Esc returns", async () => {
     const { type, lastFrame } = setup({ onEscape: () => ({ restore: "cancelled post" }) });

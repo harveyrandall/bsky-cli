@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Static, Text, useApp } from "ink";
 import { basename } from "node:path";
 import type { Markers, SubmitPlan } from "@/repl/core/markers";
@@ -65,6 +65,7 @@ export function App(props: AppProps) {
   const [restore, setRestore] = useState<{ id: number; text: string }>();
   const [exitWhenSent, setExitWhenSent] = useState(false);
   const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
+  const composerText = useRef("");
 
   const [repl] = useState(
     () =>
@@ -96,6 +97,7 @@ export function App(props: AppProps) {
         deleteDraft: props.drafts.delete,
         saveConfig: props.saveConfig,
         saveScheduled: props.saveScheduled,
+        composerBusy: () => composerText.current.trim() !== "",
       }),
   );
   useEffect(() => props.onReady?.(repl), [repl]);
@@ -145,17 +147,6 @@ export function App(props: AppProps) {
     const paths = parseDroppedPaths(text);
     if (paths) void offerDrop(paths, text);
     return paths !== undefined;
-  };
-
-  // Text that came back while the composer was busy: keep both.
-  const keepAsDraft = async (text: string) => {
-    try {
-      const d = await props.drafts.save({ reason: "manual", type: "post", text });
-      print(`A post came back while you were typing; saved it as draft ${d.id}`, "dim");
-    } catch (err) {
-      print(`A post came back but couldn't be saved as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
-      print(text);
-    }
   };
 
   const chooseExit = async (choice: ExitChoice, text: string) => {
@@ -303,7 +294,7 @@ export function App(props: AppProps) {
         active={!overlay}
         chips={repl.staged().length > 0 ? chips(repl.staged()) : undefined}
         restore={restore}
-        onRestoreBusy={(text) => void keepAsDraft(text)}
+        onText={(text) => (composerText.current = text)}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
         onEscape={(text) => {
           setExitWhenSent(false);

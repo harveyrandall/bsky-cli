@@ -62,8 +62,10 @@ export interface ReplDeps {
   ask: ReplAsk;
   print(text: string, style?: LineStyle): void;
   onChange(): void;
-  /** Text coming back after an asynchronous failure. */
+  /** Text coming back after an asynchronous failure, into an idle composer. */
   restore(text: string): void;
+  /** Whether what's in the composer, or the editor, would be in the way of text coming back. */
+  composerBusy(): boolean;
   saveDraft(d: Omit<Draft, "id" | "createdAt">): Promise<{ id: string }>;
   deleteDraft(id: string): Promise<void>;
   saveConfig(values: Record<string, string | number | boolean>): Promise<void>;
@@ -644,21 +646,21 @@ export class Repl {
     const items = this.pipeline.cancelAll();
     if (items.length === 0) return "handled";
     if (composerText.trim() !== "") {
-      void this.saveCancelled(items);
+      void this.saveToDrafts(items, (id) => `Saved as draft ${id}`);
       return "handled";
     }
     for (const item of items) this.restage(item.media);
     return { restore: items.length === 1 ? this.asResend(items[0]) : this.join(items.flatMap((i) => i.posts)) };
   }
 
-  private async saveCancelled(items: readonly Unsent[]): Promise<void> {
+  private async saveToDrafts(items: readonly Unsent[], saved: (id: string) => string): Promise<void> {
     for (const item of items) {
       try {
         const d = await this.deps.saveDraft(manualDraft(item));
-        this.deps.print(`Saved as draft ${d.id}`, "dim");
+        this.deps.print(saved(d.id), "dim");
       } catch (err) {
         // Never lose it: show the text so it can be copied.
-        this.deps.print(`Couldn't save the cancelled posts as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
+        this.deps.print(`Couldn't save these posts as a draft (${err instanceof Error ? err.message : String(err)}):`, "error");
         this.deps.print(this.join(item.posts));
       }
     }
@@ -749,8 +751,14 @@ export class Repl {
     } else {
       const n = f.item.posts.length;
       this.deps.print(n > 1 ? `Post ${f.from + 1} of ${n} wasn't sent: ${f.message}` : f.message, "error");
-      if (f.from === 0) this.restage(f.item.media);
-      this.deps.restore(this.asResend({ ...f.item, posts: f.item.posts.slice(f.from), target: f.target }));
+      const back: Unsent = { ...f.item, posts: f.item.posts.slice(f.from), media: f.from === 0 ? f.item.media : undefined, target: f.target };
+      if (this.deps.composerBusy()) {
+        // A draft keeps its text, media and destination together.
+        void this.saveToDrafts([back], (id) => `A post came back while you were typing; saved it as draft ${id}`);
+      } else {
+        this.restage(back.media);
+        this.deps.restore(this.asResend(back));
+      }
     }
     this.deps.onChange();
   }
