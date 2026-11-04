@@ -32,6 +32,12 @@ describe("detectKittyKeyboard", () => {
     const t = fakeTerminal("\x1b[?62c");
     await expect(detectKittyKeyboard(t.stdin, t.stdout)).resolves.toBe(false);
   });
+  it("leaves no timer behind once DA1 answers", async () => {
+    vi.useFakeTimers();
+    const t = fakeTerminal("\x1b[?62c");
+    await detectKittyKeyboard(t.stdin, t.stdout);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("times out at 500 ms when nothing answers", async () => {
     vi.useFakeTimers();
     const t = fakeTerminal();
