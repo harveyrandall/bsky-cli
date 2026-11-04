@@ -17,6 +17,9 @@ import { getClient, isJson } from "@/index";
 import { extractLinks, extractMentions, extractTags } from "@/lib/extract";
 import { saveDraft } from "@/drafts";
 import type { Draft } from "@/lib/types";
+import { isNetworkError } from "@/lib/errors";
+
+export { isNetworkError };
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -217,22 +220,6 @@ export async function createPost(
 
   const resp = await agent.post(post);
   return { uri: resp.uri, cid: resp.cid };
-}
-
-export function isNetworkError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : "";
-  const cause = err instanceof Error ? err.cause : undefined;
-  const causeMsg = cause instanceof Error ? cause.message : "";
-
-  return (
-    msg.includes("fetch failed") ||
-    msg.includes("ECONNREFUSED") ||
-    msg.includes("ENOTFOUND") ||
-    msg.includes("ETIMEDOUT") ||
-    causeMsg.includes("fetch failed") ||
-    causeMsg.includes("ECONNREFUSED") ||
-    causeMsg.includes("ENOTFOUND")
-  );
 }
 
 export function isLengthError(err: unknown): boolean {

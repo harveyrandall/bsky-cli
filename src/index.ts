@@ -43,7 +43,7 @@ import { registerConfig } from "@/commands/config-cmd";
 import { registerDm } from "@/commands/dm";
 import { registerRepl } from "@/commands/repl";
 import type { SessionConfig } from "@/lib/types";
-import { configFilePath, loadTomlConfig, applyConfigToProgram } from "@/toml-config";
+import { activeConfigPath, loadTomlConfig, applyConfigToProgram } from "@/toml-config";
 
 import packageJson from "../package.json";
 
@@ -168,14 +168,8 @@ registerConfig(program);
 registerDm(program);
 registerRepl(program);
 
-// Pre-parse --config/-c from argv before Commander runs
-function preParseConfigPath(): string | undefined {
-  const idx = process.argv.findIndex((a) => a === "--config" || a === "-c");
-  return idx !== -1 ? process.argv[idx + 1] : undefined;
-}
-
-// Load TOML config and apply to program before parsing
-const tomlPath = configFilePath(preParseConfigPath());
+// -c/--config is read from argv before Commander runs
+const tomlPath = activeConfigPath();
 const tomlConfig = loadTomlConfig(tomlPath);
 applyConfigToProgram(program, tomlConfig);
 

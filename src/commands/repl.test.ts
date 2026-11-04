@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
-import { registerRepl } from "@/commands/repl";
+import { registerRepl, replAgent } from "@/commands/repl";
 import { applyConfigToProgram } from "@/toml-config";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 
@@ -9,6 +9,10 @@ const { startRepl, smokeFrame } = vi.hoisted(() => ({
   smokeFrame: vi.fn(() => "FRAME"),
 }));
 vi.mock("@/repl", () => ({ startRepl, smokeFrame }));
+vi.mock("@/index", () => ({
+  getClient: vi.fn(async () => ({ session: { did: "did:plc:me", handle: "me.bsky.social" } })),
+}));
+vi.mock("@/commands/post", () => ({ createPost: vi.fn() }));
 
 const original = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY };
 function setTTY(stdin: boolean | undefined, stdout: boolean | undefined) {
@@ -38,7 +42,25 @@ describe("bsky repl", () => {
   it("starts the REPL with default markers in a terminal", async () => {
     setTTY(true, true);
     await makeProgram().parseAsync(["repl"], { from: "user" });
-    expect(startRepl).toHaveBeenCalledWith({ markers: DEFAULT_MARKERS });
+    expect(startRepl).toHaveBeenCalledWith(expect.objectContaining({ markers: DEFAULT_MARKERS, handle: "me.bsky.social" }));
+  });
+
+  it("treats a mistyped command as unknown, with a suggestion, instead of opening the REPL", async () => {
+    setTTY(true, true);
+    const errors: string[] = [];
+    const p = makeProgram().configureOutput({ writeErr: (text) => void errors.push(text) });
+    await expect(p.parseAsync(["rpel"], { from: "user" })).rejects.toMatchObject({ code: "commander.unknownCommand" });
+    expect(errors.join("")).toContain("unknown command 'rpel'");
+    expect(errors.join("")).toContain("Did you mean repl");
+    expect(startRepl).not.toHaveBeenCalled();
+  });
+
+  it("refuses arguments after repl itself", async () => {
+    setTTY(true, true);
+    await expect(makeProgram().parseAsync(["repl", "extra"], { from: "user" })).rejects.toMatchObject({
+      code: "commander.unknownCommand",
+    });
+    expect(startRepl).not.toHaveBeenCalled();
   });
 
   it.each([[false, true], [true, false]])(
@@ -97,7 +119,7 @@ describe("bsky repl", () => {
     const p = makeProgram({ repl: { undo: 5, pace: 10, "split-marker": "~~" } });
     await p.parseAsync(["repl", "--pace", "15"], { from: "user" });
     expect(replOpts(p)).toMatchObject({ undo: 5, pace: 15 });
-    expect(startRepl).toHaveBeenCalledWith({ markers: { ...DEFAULT_MARKERS, split: "~~" } });
+    expect(startRepl).toHaveBeenCalledWith(expect.objectContaining({ markers: { ...DEFAULT_MARKERS, split: "~~" } }));
   });
 
   it.each([
@@ -113,12 +135,50 @@ describe("bsky repl", () => {
     setTTY(true, true);
     await makeProgram().parseAsync(["repl", "--undo", "5", "-R"], { from: "user" });
     expect(process.stderr.write).toHaveBeenCalledWith(
-      "bsky repl: --undo isn't used yet; it takes effect in a later release.\n",
-    );
-    expect(process.stderr.write).toHaveBeenCalledWith(
       "bsky repl: --no-resumable isn't used yet; it takes effect in a later release.\n",
     );
+    expect(process.stderr.write).not.toHaveBeenCalledWith(expect.stringContaining("--undo"));
     expect(startRepl).toHaveBeenCalled();
+  });
+
+  it("opens for a bare `bsky` in a terminal", async () => {
+    setTTY(true, true);
+    await makeProgram().parseAsync([], { from: "user" });
+    expect(startRepl).toHaveBeenCalled();
+  });
+
+  it("prints the program's help for a bare `bsky` without a terminal, as before", async () => {
+    setTTY(false, false);
+    await expect(makeProgram().parseAsync([], { from: "user" })).rejects.toMatchObject({ exitCode: 1 });
+    expect(process.stderr.write).not.toHaveBeenCalledWith(expect.stringContaining("needs an interactive terminal"));
+    expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Commands:"));
+  });
+
+  it("maps flags and config onto the session's settings", async () => {
+    setTTY(true, true);
+    const p = makeProgram({ repl: { "ask-to-save": false } });
+    await p.parseAsync(["repl", "-t", "-l", "--undo", "5", "--pace", "10", "--prepend-thread-label"], { from: "user" });
+    expect(startRepl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: {
+          autoThread: true,
+          prefixThread: true,
+          threadLabel: "prepend",
+          undo: 5,
+          pace: 10,
+          askToSave: false,
+          verbose: false,
+        },
+      }),
+    );
+  });
+
+  it("leaves undo and pace unset so the REPL asks", async () => {
+    setTTY(true, true);
+    await makeProgram().parseAsync(["repl", "--thread-label"], { from: "user" });
+    expect(startRepl).toHaveBeenCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ undo: undefined, pace: undefined, threadLabel: "append" }) }),
+    );
   });
 
   it("stops with an error for a bad marker", async () => {
@@ -126,5 +186,32 @@ describe("bsky repl", () => {
     await expect(
       makeProgram({ repl: { "cut-marker": "" } }).parseAsync(["repl"], { from: "user" }),
     ).rejects.toThrow('Invalid [repl] cut-marker = ""');
+  });
+});
+
+describe("replAgent", () => {
+  const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5def2x";
+  const lookup = (record: unknown) => {
+    const post = { uri, cid: "bafyabc", author: { did: "did:plc:alice", handle: "alice.bsky.social" }, record };
+    const agent = { session: { did: "did:plc:me" }, getPosts: vi.fn(async () => ({ data: { posts: [post] } })) };
+    return replAgent(agent as never).getPosts([uri as never]);
+  };
+  it("drops a post whose reply refs can't be trusted, rather than calling it a thread root", async () => {
+    await expect(lookup({ text: "hi", reply: { root: { uri: "nonsense", cid: "x" }, parent: { uri, cid: "bafyabc" } } })).resolves.toEqual([]);
+  });
+  it("hands createPost the parent and root the right way round", async () => {
+    const { createPost } = await import("@/commands/post");
+    vi.mocked(createPost).mockResolvedValueOnce({ uri, cid: "bafyabc" } as never);
+    const agent = { session: { did: "did:plc:me" } } as never;
+    const parent = { uri: `${uri}p`, cid: "bafyp" } as never;
+    const root = { uri: `${uri}r`, cid: "bafyr" } as never;
+    await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
+    expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
+  });
+  it("won't start without a session", () => {
+    expect(() => replAgent({} as never)).toThrow("Not logged in");
+  });
+  it("keeps a post with no reply as its own root", async () => {
+    await expect(lookup({ text: "hi" })).resolves.toMatchObject([{ uri, text: "hi", root: undefined }]);
   });
 });

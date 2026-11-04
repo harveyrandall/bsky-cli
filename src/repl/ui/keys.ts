@@ -7,6 +7,7 @@ export type KeyAction =
   | { type: "complete" }
   | { type: "interrupt" }
   | { type: "eof" }
+  | { type: "escape" }
   | { type: "ignore" };
 
 const CTRL = new Map<string, KeyAction>([
@@ -41,8 +42,9 @@ export function keyToAction(input: string, key: Partial<Key>, s: Pick<EditorStat
   if (key.end) return { type: "lineEnd" };
   if (key.backspace) return { type: "backspace" };
   if (key.delete) return { type: "delete" };
-  // Esc and unbound Alt chords do nothing for now.
-  if (key.escape || key.meta) return { type: "ignore" };
+  if (key.escape) return { type: "escape" };
+  // Unbound Alt chords do nothing.
+  if (key.meta) return { type: "ignore" };
   return input ? { type: "insert", text: input } : { type: "ignore" };
 }
 

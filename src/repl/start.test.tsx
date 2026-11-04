@@ -1,11 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import { LEFT } from "@/repl/ui/App";
+import { Registry } from "@/repl/core/refs";
 
-const { render, detectKittyKeyboard } = vi.hoisted(() => ({ render: vi.fn(), detectKittyKeyboard: vi.fn() }));
+const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues } = vi.hoisted(() => ({
+  render: vi.fn(),
+  detectKittyKeyboard: vi.fn(),
+  saveDraft: vi.fn(),
+  deleteDraft: vi.fn(),
+  setConfigValues: vi.fn(),
+}));
+vi.mock("@/drafts", () => ({ saveDraft, deleteDraft }));
+vi.mock("@/toml-config", () => ({ setConfigValues }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
-const { startRepl } = await import("@/repl");
+const { startRepl, offlineProps } = await import("@/repl");
+const options = {
+  markers: DEFAULT_MARKERS,
+  settings: offlineProps.settings,
+  agent: offlineProps.agent,
+  handle: "me.bsky.social",
+  configPath: "/tmp/config.toml",
+};
 
 /** An Ink instance whose exit promise settles when unmounted; like Ink's, unmount takes no error. */
 function fakeInstance() {
@@ -34,11 +50,29 @@ describe("startRepl", () => {
     detectKittyKeyboard.mockResolvedValue(kitty);
     const app = fakeInstance();
     render.mockReturnValue(app);
-    const running = startRepl({ markers: DEFAULT_MARKERS });
+    const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
-    const [element, options] = render.mock.calls[0];
+    const [element, renderOptions] = render.mock.calls[0];
     expect(element.props).toMatchObject({ markers: DEFAULT_MARKERS, kittyHint: hint });
-    expect(options).toMatchObject({ exitOnCtrlC: false, kittyKeyboard: { mode } });
+    expect(renderOptions).toMatchObject({ exitOnCtrlC: false, kittyKeyboard: { mode } });
+    app.unmount();
+    await running;
+  });
+
+  it("saves drafts to the profile and answers to the [repl] section of the active config", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl({ ...options, profile: "work" });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const { drafts, saveConfig, configName } = render.mock.calls[0][0].props;
+    const draft = { reason: "manual", type: "post", text: "hi" };
+    await drafts.save(draft);
+    await drafts.delete("d1");
+    await saveConfig({ undo: 5 });
+    expect(saveDraft).toHaveBeenCalledWith(draft, "work");
+    expect(deleteDraft).toHaveBeenCalledWith("d1", "work");
+    expect(setConfigValues).toHaveBeenCalledWith("/tmp/config.toml", "repl", { undo: 5 });
+    expect(configName).toBe("config.toml");
     app.unmount();
     await running;
   });
@@ -47,7 +81,7 @@ describe("startRepl", () => {
     const app = fakeInstance();
     render.mockReturnValue(app);
     const before = process.listeners("uncaughtException");
-    const running = startRepl({ markers: DEFAULT_MARKERS });
+    const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
 
     const [crash] = added("uncaughtException", before);
@@ -62,7 +96,7 @@ describe("startRepl", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const app = fakeInstance();
     render.mockReturnValue(app);
-    const running = startRepl({ markers: DEFAULT_MARKERS });
+    const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     app.unmount();
     await running;
@@ -75,12 +109,25 @@ describe("startRepl", () => {
     const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const app = fakeInstance();
     render.mockReturnValue(app);
-    const running = startRepl({ markers: DEFAULT_MARKERS });
+    const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     app.exit(LEFT);
     await running;
     expect(write).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
+    write.mockRestore();
+  });
+  it("prints the exit summary once Ink has exited", async () => {
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl(options);
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const [element] = render.mock.calls[0];
+    element.props.onReady({ registry: new Registry(false), failures: () => [], close: () => [] });
+    app.exit(LEFT);
+    await running;
+    expect(write).toHaveBeenCalledWith("No posts this session\n");
     write.mockRestore();
   });
 });
