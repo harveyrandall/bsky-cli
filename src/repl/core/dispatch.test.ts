@@ -46,6 +46,8 @@ describe("media commands", () => {
     expect(c.fake.attach).toHaveBeenLastCalledWith(["/a b.png", "/c.png"], "Two charts");
     await dispatch("/attach /a.png", c);
     expect(c.fake.attach).toHaveBeenLastCalledWith(["/a.png"], undefined);
+    await dispatch(`/attach --alt "A chart" /a.png /b.png`, c);
+    expect(c.fake.attach).toHaveBeenLastCalledWith(["/a.png", "/b.png"], "A chart");
   });
   it("/attach needs a path, and --alt its text", async () => {
     const c = ctx();

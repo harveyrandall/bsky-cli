@@ -154,6 +154,16 @@ describe("bsky repl", () => {
     expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining("Commands:"));
   });
 
+  it.each([
+    ["-f", ["repl", "-f"], {}],
+    ["force-alt = true", ["repl"], { repl: { "force-alt": true } }],
+  ])("requires alt text with %s, and doesn't call it unused", async (_, args, config) => {
+    setTTY(true, true);
+    await makeProgram(config).parseAsync(args, { from: "user" });
+    expect(startRepl).toHaveBeenCalledWith(expect.objectContaining({ settings: expect.objectContaining({ forceAlt: true }) }));
+    expect(process.stderr.write).not.toHaveBeenCalledWith(expect.stringContaining("force-alt"));
+  });
+
   it("maps flags and config onto the session's settings", async () => {
     setTTY(true, true);
     const p = makeProgram({ repl: { "ask-to-save": false } });
@@ -207,7 +217,7 @@ describe("replAgent", () => {
     const parent = { uri: `${uri}p`, cid: "bafyp" } as never;
     const root = { uri: `${uri}r`, cid: "bafyr" } as never;
     await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
-    expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root, quote: undefined });
+    expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
   });
   it("won't start without a session", () => {
     expect(() => replAgent({} as never)).toThrow("Not logged in");
@@ -217,7 +227,15 @@ describe("replAgent", () => {
     vi.mocked(createPost).mockResolvedValueOnce({ uri, cid: "bafyabc" } as never);
     const agent = { session: { did: "did:plc:me" } } as never;
     await replAgent(agent).post("hi", undefined, [{ path: "/x/a.png", kind: "image", alt: "A chart" }]);
-    expect(createPost).toHaveBeenCalledWith(agent, "hi", { images: ["/x/a.png"], imageAlts: ["A chart"], quote: undefined });
+    expect(createPost).toHaveBeenCalledWith(agent, "hi", { images: ["/x/a.png"], imageAlts: ["A chart"] });
+  });
+  it("hands createPost the post being quoted", async () => {
+    const { createPost } = await import("@/commands/post");
+    vi.mocked(createPost).mockResolvedValueOnce({ uri, cid: "bafyabc" } as never);
+    const agent = { session: { did: "did:plc:me" } } as never;
+    const quoted = { uri, cid: "bafyq" } as never;
+    await replAgent(agent).post("look", undefined, undefined, quoted);
+    expect(vi.mocked(createPost).mock.lastCall?.[2].quote).toEqual({ uri, cid: "bafyq" });
   });
   it("keeps a post with no reply as its own root", async () => {
     await expect(lookup({ text: "hi" })).resolves.toMatchObject([{ uri, text: "hi", root: undefined }]);

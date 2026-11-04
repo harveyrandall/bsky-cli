@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Repl, IDLE_HINT, type ReplAsk, type ReplSettings } from "./repl";
 import { DEFAULT_MARKERS } from "./markers";
@@ -467,6 +468,28 @@ describe("media", () => {
     await repl.attach(["/x/a.png"]);
     expect(repl.staged()).toEqual([{ path: "/x/a.png", kind: "image" }]);
   });
+  it("expands ~/ in a path", async () => {
+    const { repl } = setup();
+    await repl.attach(["~/a.png"]);
+    expect(repl.staged().map((m) => m.path)).toEqual([join(homedir(), "a.png")]);
+  });
+  it("doesn't let a blank --alt get round --force-alt", async () => {
+    const { repl, ask } = setup({ forceAlt: true }, { alt: vi.fn(async () => "A chart") });
+    await repl.attach(["/x/a.png"], "   ");
+    expect(ask.alt).toHaveBeenCalledOnce();
+    expect(repl.staged()[0].alt).toBe("A chart");
+  });
+  it("leaves a file out on Esc even when alt text is optional", async () => {
+    const { repl, printed } = setup({}, { alt: vi.fn(async () => null) });
+    await repl.attach(["/x/a.png"]);
+    expect(repl.staged()).toEqual([]);
+    expect(printed()).toContain("Left out a.png");
+  });
+  it("calls paths media only if all of them are", async () => {
+    const { repl } = setup();
+    await expect(repl.areMedia(["/x/a.png", "/x/b.mp4"])).resolves.toBe(true);
+    await expect(repl.areMedia(["/x/a.png", "/x/missing.png"])).resolves.toBe(false);
+  });
   it("uses --alt for every file without asking", async () => {
     const { repl, ask } = setup();
     await repl.attach(["/x/a.png", "/x/b.png"], "Two charts");
@@ -784,6 +807,16 @@ describe("/quote", () => {
     await flush();
     expect(deps.restore).toHaveBeenCalledWith("/quote 1 bad");
   });
+  it("leaves the thread where it was, so the next post doesn't reply to the quote", async () => {
+    const { repl, posted, flush } = setup();
+    await repl.startThread("one");
+    await flush();
+    await repl.quote("1", "look");
+    await flush();
+    await repl.submitText("two");
+    await flush();
+    expect(posted[2].reply?.parent).toEqual(ref(1));
+  });
   it("is left alone by Esc like the other once modes", async () => {
     const { repl } = await withPost(setup());
     await repl.quote("1");
@@ -889,6 +922,24 @@ describe("/new", () => {
     await repl.submitText("keep this <// scrap");
     expect(printed()).toContain("Discarded: scrap");
   });
+  it("keeps media staged if a draft can't be saved", async () => {
+    const { repl, deps } = setup({}, pick("Draft"));
+    deps.saveDraft.mockRejectedValueOnce(new Error("EACCES"));
+    await repl.attach(["/x/a.png"]);
+    await repl.newMenu();
+    await expect(repl.submitText("later")).rejects.toThrow("EACCES");
+    expect(repl.staged()).toHaveLength(1);
+  });
+  it("hands back text kept for later from a draft", async () => {
+    const { repl } = setup({}, pick("Draft"));
+    await repl.newMenu();
+    expect(await repl.submitText("now //> later")).toEqual({ restore: "later" });
+  });
+  it("takes a quoted path, as a drag into the prompt gives", async () => {
+    const { repl } = setup({}, { ...pick("Image post"), text: vi.fn(async () => "'/x/a b.png'") });
+    await repl.newMenu();
+    expect(repl.staged().map((m) => m.path)).toEqual(["/x/a b.png"]);
+  });
   it("keeps a thread's shape in a draft", async () => {
     const { repl, deps } = setup({}, pick("Draft"));
     await repl.newMenu();
@@ -933,6 +984,38 @@ describe("scheduled posts", () => {
     await repl.submitText("later");
     expect(ask.choose).toHaveBeenCalledWith("AM or PM?", ["AM", "PM"]);
     expect(deps.saveScheduled).toHaveBeenCalledWith(expect.objectContaining({ scheduledAt: when }));
+  });
+  it("take the morning when you say AM", async () => {
+    const choose = vi.fn(async (label: string, options: readonly string[]) => (label === "New:" ? options.indexOf("Scheduled post") : 0));
+    const { repl, deps } = setup({}, { ...answers("05-11-2026", "3:30"), choose });
+    await repl.newMenu();
+    await repl.submitText("later");
+    expect(deps.saveScheduled).toHaveBeenCalledWith(expect.objectContaining({ scheduledAt: new Date(2026, 10, 5, 3, 30).toISOString() }));
+  });
+  it("aren't saved if you back out at the time or at AM or PM", async () => {
+    const atTime = setup({}, answers("05-11-2026", undefined));
+    await atTime.repl.newMenu();
+    expect(await atTime.repl.submitText("later")).toBe("keep");
+    expect(atTime.deps.saveScheduled).not.toHaveBeenCalled();
+    const choose = vi.fn(async (label: string, options: readonly string[]) => (label === "New:" ? options.indexOf("Scheduled post") : undefined));
+    const atHalf = setup({}, { ...answers("05-11-2026", "3:30"), choose });
+    await atHalf.repl.newMenu();
+    expect(await atHalf.repl.submitText("later")).toBe("keep");
+    expect(atHalf.deps.saveScheduled).not.toHaveBeenCalled();
+  });
+  it("keep their media if the save fails", async () => {
+    const { repl, deps } = setup({}, answers("05-11-2026", "15:30"));
+    deps.saveScheduled.mockRejectedValueOnce(new Error("EACCES"));
+    await repl.attach(["/x/a.png"]);
+    await repl.newMenu();
+    await expect(repl.submitText("later")).rejects.toThrow("EACCES");
+    expect(repl.staged()).toHaveLength(1);
+    expect(repl.mode().kind).toBe("schedule-once");
+  });
+  it("hand back text kept for later", async () => {
+    const { repl } = setup({}, answers("05-11-2026", "15:30"));
+    await repl.newMenu();
+    expect(await repl.submitText("now //> later")).toEqual({ restore: "later" });
   });
   it("ask again after a bad date, a bad time or a time in the past", async () => {
     const { repl, deps, printed } = setup({}, answers("nonsense", "05-11-2026", "25:00", "01-01-2026", "15:30", "05-11-2026", "15:30"));

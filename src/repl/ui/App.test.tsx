@@ -10,11 +10,22 @@ import { IDLE_HINT, type Repl, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import type { AtUri, Cid, StrongRef } from "@/repl/core/types";
 
-const { exit, suspendTerminal, editInEditor } = vi.hoisted(() => ({
-  exit: vi.fn(),
-  suspendTerminal: vi.fn(async (run: () => Promise<void>) => run()),
-  editInEditor: vi.fn(async (text: string) => `${text} edited`),
-}));
+const { exit, suspendTerminal, editInEditor, suspended } = vi.hoisted(() => {
+  const suspended = { now: false, during: [] as boolean[] };
+  return {
+    suspended,
+    exit: vi.fn(),
+    suspendTerminal: vi.fn(async (run: () => Promise<void>) => {
+      suspended.now = true;
+      await run();
+      suspended.now = false;
+    }),
+    editInEditor: vi.fn(async (text: string) => {
+      suspended.during.push(suspended.now);
+      return `${text} edited`;
+    }),
+  };
+});
 vi.mock("ink", async (importOriginal) => {
   const ink = await importOriginal<typeof import("ink")>();
   return { ...ink, useApp: () => ({ ...ink.useApp(), exit, suspendTerminal }) };
@@ -24,6 +35,7 @@ beforeEach(() => {
   exit.mockClear();
   suspendTerminal.mockClear();
   editInEditor.mockClear();
+  suspended.during = [];
 });
 
 const dir = mkdtempSync(join(tmpdir(), "bsky-app-"));
@@ -75,7 +87,9 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
   };
   // Colour codes depend on the terminal running the tests.
   const lastFrame = () => stripVTControlCharacters(app.lastFrame() ?? "");
-  return { ...app, lastFrame, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, saveScheduled, repl: () => session! };
+  // For a frame that follows a chain of promises, which a fixed tick can miss on a busy machine.
+  const shows = (text: string) => vi.waitFor(() => expect(lastFrame()).toContain(text));
+  return { ...app, lastFrame, shows, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, saveScheduled, repl: () => session! };
 }
 
 describe("App", () => {
@@ -265,16 +279,16 @@ describe("App threads", () => {
     expect(agent.post).not.toHaveBeenCalled();
   });
   it("asks for undo and pace on the first thread, then saves them on Yes", async () => {
-    const { type, lastFrame, saveConfig } = setup({ settings: { undo: undefined, pace: undefined, askToSave: true } });
+    const { type, shows, saveConfig } = setup({ settings: { undo: undefined, pace: undefined, askToSave: true } });
     await type("/thread", "\r");
-    expect(lastFrame()).toContain("Undo window before each post?");
+    await shows("Undo window before each post?");
     await type("\x1b[C", "\r");
-    expect(lastFrame()).toContain("Minimum time between posts?");
+    await shows("Minimum time between posts?");
     await type("\r");
-    expect(lastFrame()).toContain("Save undo 5s · pace off as your defaults in config.toml?");
+    await shows("Save undo 5s · pace off as your defaults in config.toml?");
     await type("\r");
-    expect(saveConfig).toHaveBeenCalledWith({ undo: 5, pace: 0 });
-    expect(lastFrame()).toMatch(/^thread ›\s*$/m);
+    await vi.waitFor(() => expect(saveConfig).toHaveBeenCalledWith({ undo: 5, pace: 0 }));
+    await shows("thread ›");
   });
   it("asks what to do on Ctrl+D with unsent text, and leaves on x", async () => {
     const { type, lastFrame } = setup();
@@ -448,16 +462,14 @@ describe("App media", () => {
     return s;
   };
   it("asks for alt text, then shows the file above the composer", async () => {
-    const { type, lastFrame, repl } = setup();
+    const { type, shows, repl } = setup();
     await type(`/attach ${image}`, "\r");
-    await tick();
-    expect(lastFrame()).toContain("Alt text tells people using screen readers");
-    expect(lastFrame()).toContain("Alt text for chart.png (Enter to skip):");
+    await shows("Alt text tells people using screen readers");
+    await shows("Alt text for chart.png (Enter to skip):");
     await type("A bar chart");
-    expect(lastFrame()).toContain("A bar chart");
+    await shows("A bar chart");
     await type("\r");
-    await tick();
-    expect(lastFrame()).toContain("📎 chart.png");
+    await shows("📎 chart.png");
     expect(repl().staged()).toEqual([{ path: image, kind: "image", alt: "A bar chart" }]);
   });
   it("says alt text is required with --force-alt, and Esc drops the file", async () => {
@@ -473,6 +485,7 @@ describe("App media", () => {
     await tick();
     expect(repl().staged()).toEqual([]);
     expect(lastFrame()).not.toContain("📎");
+    expect(lastFrame()).not.toContain("Alt text for");
   });
   it("sends staged media with the next post", async () => {
     const s = await attached(setup());
@@ -532,6 +545,34 @@ describe("App media", () => {
     await type("see ", paste(image));
     await tick();
     expect(lastFrame()).not.toContain("Attach");
+    expect(lastFrame().replace(/\s/g, "")).toContain(`see${image}`.replace(/\s/g, ""));
+  });
+  it("treats a drop as text if any of it isn't media", async () => {
+    const { type, lastFrame } = setup();
+    await type(paste(`${image} ${notes}`));
+    await tick();
+    await tick();
+    expect(lastFrame()).not.toContain("Attach");
+    expect(lastFrame().replace(/\s/g, "")).toContain(notes.replace(/\s/g, ""));
+  });
+  it("keeps a paste it couldn't check, and says why", async () => {
+    const s = setup();
+    vi.spyOn(s.repl(), "areMedia").mockRejectedValueOnce(new Error("EIO"));
+    await s.type(paste(image));
+    await tick();
+    await tick();
+    expect(s.lastFrame()).toContain("EIO");
+    expect(s.lastFrame().replace(/\s/g, "")).toContain(image.replace(/\s/g, ""));
+  });
+  it("updates the files shown when one is detached", async () => {
+    const s = setup();
+    await s.type(`/attach ${image} ${photo} --alt charts`, "\r");
+    await tick();
+    expect(s.lastFrame()).toContain("📎 chart.png · photo.png");
+    await s.type("/detach 1", "\r");
+    await tick();
+    expect(s.lastFrame()).toContain("📎 photo.png");
+    expect(s.lastFrame()).not.toContain("chart.png");
   });
   it("treats a path that isn't media as text", async () => {
     const { type, lastFrame } = setup();
@@ -566,7 +607,7 @@ describe("App media", () => {
     const { type, lastFrame } = setup();
     await type("draft", "\x07");
     await tick();
-    expect(suspendTerminal).toHaveBeenCalledOnce();
+    expect(suspended.during).toEqual([true]);
     expect(editInEditor).toHaveBeenCalledWith("draft");
     expect(lastFrame()).toContain("bsky › draft edited");
   });
@@ -574,7 +615,7 @@ describe("App media", () => {
     const { type, lastFrame } = setup();
     await type("/edit draft", "\r");
     await tick();
-    expect(suspendTerminal).toHaveBeenCalledOnce();
+    expect(suspended.during).toEqual([true]);
     expect(lastFrame()).toContain("bsky › draft edited");
     expect(lastFrame()).not.toContain("/edit");
   });

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { maxImages } from "@/lib/limits";
 import { canStage, chips, expandHome, inspectMedia, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
@@ -43,8 +44,9 @@ describe("inspectMedia", () => {
 describe("canStage", () => {
   const image = (n: number): StagedMedia => ({ path: `/${n}.png`, kind: "image" });
   it("allows up to the image limit", () => {
-    expect(canStage([image(1), image(2), image(3)], "image")).toBeUndefined();
-    expect(canStage([image(1), image(2), image(3), image(4)], "image")).toBe("Only 4 images per post");
+    const full = Array.from({ length: maxImages() }, (_, i) => image(i));
+    expect(canStage(full.slice(1), "image")).toBeUndefined();
+    expect(canStage(full, "image")).toBe(`Only ${maxImages()} images per post`);
   });
   it("never mixes images and video, and allows one video", () => {
     const video: StagedMedia = { path: "/a.mp4", kind: "video" };
@@ -86,6 +88,16 @@ describe("nodeMediaFs", () => {
   });
   it("won't take a folder for a file", async () => {
     await expect(nodeMediaFs.size(dir)).rejects.toThrow("is a folder");
+  });
+  it("reads far enough to tell MP4 from what only shares its container", async () => {
+    const box = [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70];
+    const brand = (text: string) => [...text].map((c) => c.charCodeAt(0));
+    const mp4 = join(dir, "a.mp4");
+    const heic = join(dir, "a.heic");
+    writeFileSync(mp4, new Uint8Array([...box, ...brand("isom"), 0, 0]));
+    writeFileSync(heic, new Uint8Array([...box, ...brand("heic"), 0, 0]));
+    await expect(inspectMedia(mp4, nodeMediaFs)).resolves.toEqual({ kind: "video" });
+    await expect(inspectMedia(heic, nodeMediaFs)).resolves.toEqual({ error: "a.heic isn't an image or MP4 video" });
   });
   it("reads a file's size and first bytes", async () => {
     const file = join(dir, "a.bin");
