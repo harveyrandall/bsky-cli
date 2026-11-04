@@ -70,10 +70,11 @@ export interface ComposerProps {
   markers: Markers;
   onSubmit(text: string): Promise<DispatchResult>;
   onHint(text: string): void;
+  onError(message: string): void;
   onExit(): void;
 }
 
-export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
+export function Composer({ markers, onSubmit, onHint, onError, onExit }: ComposerProps) {
   const { rows: windowRows, columns } = useWindowSize();
   // Editor state lives in a ref so keys that arrive in one stdin chunk (fast
   // typing, slow SSH) each see the text the previous key left behind.
@@ -84,6 +85,9 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
     rerender();
   };
 
+  // The REPL never exits on an error: report it and keep the draft.
+  const report = (err: unknown) => onError(err instanceof Error ? err.message || err.name : String(err));
+
   const submitting = useRef(false);
   const submit = async (text: string) => {
     if (text.trim() === "" || submitting.current) return;
@@ -91,7 +95,7 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
     try {
       if ((await onSubmit(text)) === "done") apply({ type: "submitted", text });
     } catch (err) {
-      onHint(err instanceof Error ? err.message : String(err));
+      report(err);
     } finally {
       submitting.current = false;
     }
@@ -125,13 +129,23 @@ export function Composer({ markers, onSubmit, onHint, onExit }: ComposerProps) {
   };
 
   useInput((input, key) => {
-    if (input.length > 1 && /[\x00-\x1f]/.test(input)) {
-      for (const [part, partKey] of chunkKeys(input)) handle(part, partKey);
-    } else {
-      handle(input, key);
+    try {
+      if (input.length > 1 && /[\x00-\x1f]/.test(input)) {
+        for (const [part, partKey] of chunkKeys(input)) handle(part, partKey);
+      } else {
+        handle(input, key);
+      }
+    } catch (err) {
+      report(err);
     }
   });
-  usePaste((text) => apply({ type: "insert", text }));
+  usePaste((text) => {
+    try {
+      apply({ type: "insert", text });
+    } catch (err) {
+      report(err);
+    }
+  });
 
   const { text, cursor } = editor.current;
   // One cell stays free at the end of each row for the cursor.

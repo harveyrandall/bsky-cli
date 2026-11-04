@@ -14,7 +14,18 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     exitOnCtrlC: false,
     kittyKeyboard: { mode: kitty ? "enabled" : "disabled" },
   });
-  await app.waitUntilExit();
+  // Ink restores the terminal on an uncaught error under Node but not under
+  // Bun, which left the shell in kitty and bracketed-paste mode. Unmounting
+  // restores it everywhere and rejects waitUntilExit with the error.
+  const crash = (err: unknown) => app.unmount(err instanceof Error ? err : new Error(String(err)));
+  process.on("uncaughtException", crash);
+  process.on("unhandledRejection", crash);
+  try {
+    await app.waitUntilExit();
+  } finally {
+    process.off("uncaughtException", crash);
+    process.off("unhandledRejection", crash);
+  }
 }
 
 /** One frame without a TTY, so CI can prove Ink loads under Node and Bun. */

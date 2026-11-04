@@ -45,6 +45,7 @@ export function App({ markers, kittyHint }: AppProps) {
         markers={markers}
         onSubmit={(text) => dispatch(text, { print, exit: leave })}
         onHint={(text) => print(text, "dim")}
+        onError={(text) => print(text, "error")}
         onExit={leave}
       />
     </>
