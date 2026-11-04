@@ -29,6 +29,7 @@ export interface AppProps {
   drafts: { save: ReplDeps["saveDraft"]; delete: ReplDeps["deleteDraft"] };
   saveConfig: ReplDeps["saveConfig"];
   saveScheduled: ReplDeps["saveScheduled"];
+  schedulerRunning: ReplDeps["schedulerRunning"];
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -104,6 +105,7 @@ export function App(props: AppProps) {
         deleteDraft: props.drafts.delete,
         saveConfig: props.saveConfig,
         saveScheduled: props.saveScheduled,
+        schedulerRunning: props.schedulerRunning,
         composerBusy: () => held.current !== undefined || composerText.current.trim() !== "",
       }),
   );

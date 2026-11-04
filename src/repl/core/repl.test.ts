@@ -52,6 +52,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     saveConfig: vi.fn(async () => {}),
     saveScheduled: vi.fn(async () => ({ id: "s1" })),
     composerBusy: vi.fn(() => false),
+    schedulerRunning: vi.fn(() => true),
     fs,
   };
   const repl = new Repl(
@@ -868,6 +869,19 @@ describe("scheduled posts", () => {
     expect(printed()).toContain("Scheduled for 5 Nov 2026, 15:30 (s1)");
     expect(repl.staged()).toEqual([]);
     expect(repl.mode().kind).toBe("idle");
+  });
+  it("say so when nothing will send them", async () => {
+    const { repl, deps, printed } = setup({}, answers("05-11-2026", "15:30"));
+    deps.schedulerRunning.mockReturnValue(false);
+    await repl.newMenu();
+    await repl.submitText("later");
+    expect(printed()).toContain("Nothing sends it until the scheduler runs: `bsky schedule enable`, or `bsky schedule watch` in another terminal");
+  });
+  it("don't mention the scheduler when it's running", async () => {
+    const { repl, printed } = setup({}, answers("05-11-2026", "15:30"));
+    await repl.newMenu();
+    await repl.submitText("later");
+    expect(printed()).not.toContain("scheduler");
   });
   it("ask AM or PM when the hour could be either", async () => {
     const { repl, deps, ask } = setup({}, answers("05-11-2026", "3:30"));

@@ -62,6 +62,7 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
       drafts={drafts}
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
+      schedulerRunning={() => true}
       configName="config.toml"
       onReady={(r) => (session = r)}
     />,

@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { render, renderToString } from "ink";
 import { deleteDraft, saveDraft } from "@/drafts";
+import { getSchedulerStatus } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
 import { setConfigValues } from "@/toml-config";
 import { App, LEFT, type AppProps } from "@/repl/ui/App";
@@ -19,6 +20,14 @@ export interface ReplOptions {
   profile?: string;
 }
 
+function schedulerRunning(): boolean {
+  try {
+    return getSchedulerStatus() === "enabled";
+  } catch {
+    return false; // an unsupported platform: nothing runs by itself
+  }
+}
+
 export async function startRepl(opts: ReplOptions): Promise<void> {
   // Probing ourselves rather than using Ink's `mode: "auto"`: that waits a fixed
   // 200 ms and doesn't report the answer, which the hint needs. Ink enables the
@@ -35,6 +44,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       drafts={{ save: (d) => saveDraft(d, opts.profile), delete: (id) => deleteDraft(id, opts.profile) }}
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
       saveScheduled={(p) => saveScheduledPost(p, opts.profile)}
+      schedulerRunning={schedulerRunning}
       configName={basename(opts.configPath)}
       onReady={(r) => (repl = r)}
     />,
@@ -89,6 +99,7 @@ export const offlineProps: Omit<AppProps, "markers" | "kittyHint"> = {
   drafts: { save: offline, delete: offline },
   saveConfig: offline,
   saveScheduled: offline,
+  schedulerRunning: () => false,
   configName: "config.toml",
 };
 

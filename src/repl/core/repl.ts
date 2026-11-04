@@ -70,6 +70,7 @@ export interface ReplDeps {
   deleteDraft(id: string): Promise<void>;
   saveConfig(values: Record<string, string | number | boolean>): Promise<void>;
   saveScheduled(p: Omit<ScheduledPost, "id" | "createdAt">): Promise<{ id: string }>;
+  schedulerRunning(): boolean;
   timers?: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   fs?: MediaFs;
 }
@@ -604,6 +605,9 @@ export class Repl {
     const saved = await this.deps.saveScheduled({ scheduledAt, text: plan.posts[0], ...mediaOptions(media) });
     this.unstage(media);
     this.deps.print(`Scheduled for ${formatLocalDateTime(scheduledAt)} (${saved.id})`, "dim");
+    if (!this.deps.schedulerRunning()) {
+      this.deps.print("Nothing sends it until the scheduler runs: `bsky schedule enable`, or `bsky schedule watch` in another terminal", "dim");
+    }
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
   }

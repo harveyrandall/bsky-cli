@@ -3,7 +3,8 @@ import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import { LEFT } from "@/repl/ui/App";
 import { Registry } from "@/repl/core/refs";
 
-const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues } = vi.hoisted(() => ({
+const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues, getSchedulerStatus } = vi.hoisted(() => ({
+  getSchedulerStatus: vi.fn(),
   render: vi.fn(),
   detectKittyKeyboard: vi.fn(),
   saveDraft: vi.fn(),
@@ -12,6 +13,7 @@ const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues } =
 }));
 vi.mock("@/drafts", () => ({ saveDraft, deleteDraft }));
 vi.mock("@/toml-config", () => ({ setConfigValues }));
+vi.mock("@/lib/scheduler", () => ({ getSchedulerStatus }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
 const { startRepl, offlineProps } = await import("@/repl");
@@ -73,6 +75,24 @@ describe("startRepl", () => {
     expect(deleteDraft).toHaveBeenCalledWith("d1", "work");
     expect(setConfigValues).toHaveBeenCalledWith("/tmp/config.toml", "repl", { undo: 5 });
     expect(configName).toBe("config.toml");
+    app.unmount();
+    await running;
+  });
+
+  it("treats a scheduler it can't check as not running", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl(options);
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const { schedulerRunning } = render.mock.calls[0][0].props;
+    getSchedulerStatus.mockReturnValueOnce("enabled");
+    expect(schedulerRunning()).toBe(true);
+    getSchedulerStatus.mockReturnValueOnce("not installed");
+    expect(schedulerRunning()).toBe(false);
+    getSchedulerStatus.mockImplementationOnce(() => {
+      throw new Error("Unsupported platform");
+    });
+    expect(schedulerRunning()).toBe(false);
     app.unmount();
     await running;
   });
