@@ -1,9 +1,16 @@
 import { stripVTControlCharacters } from "node:util";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
 import { App } from "./App";
 import { TEXT_HINT } from "@/repl/core/dispatch";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
+
+const { exit } = vi.hoisted(() => ({ exit: vi.fn() }));
+vi.mock("ink", async (importOriginal) => {
+  const ink = await importOriginal<typeof import("ink")>();
+  return { ...ink, useApp: () => ({ ...ink.useApp(), exit }) };
+});
+beforeEach(() => exit.mockClear());
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 function setup() {
@@ -95,6 +102,14 @@ describe("App", () => {
     const { type, lastFrame } = setup();
     await type("/hlp", "\r", "\x15", "/help", "\r");
     expect(lastFrame()).toContain("Leave the REPL");
+  });
+  it.each([
+    ["/exit", ["/exit", "\r"]],
+    ["Ctrl+D on an empty composer", ["\x04"]],
+  ])("%s leaves the REPL", async (_name, chunks) => {
+    const { type } = setup();
+    await type(...chunks);
+    expect(exit).toHaveBeenCalledOnce();
   });
   it("runs /help and clears the composer", async () => {
     const { type, lastFrame } = setup();
