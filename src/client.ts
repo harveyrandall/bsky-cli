@@ -1,4 +1,5 @@
 import { AtpAgent } from "@atproto/api";
+import chalk from "chalk";
 import { saveSessionConfig } from "@/config";
 import { isNetworkError } from "@/lib/errors";
 import type { SessionConfig } from "@/lib/types";
@@ -18,59 +19,45 @@ export async function sharedClient(profile: string | undefined, signIn: () => Pr
   return agent.clone();
 }
 
+/** A failure can't be thrown from here: the library would put the spent token back. */
+function saveRefreshed(session: SessionConfig, profile?: string): void {
+  try {
+    saveSessionConfig(session, profile);
+  } catch (err) {
+    console.error(chalk.yellow(`Couldn't save your session, so you may need to log in again: ${err instanceof Error ? err.message : String(err)}`));
+  }
+}
+
 /**
  * Create an authenticated AT Protocol client from a saved session.
  *
  * This function does NOT take a password — authentication happens
- * during `bsky login`. Here we only resume and refresh the saved
- * JWT tokens. If the refresh token has expired, the user must
+ * during `bsky login`. Here we only resume the saved JWT tokens, which
+ * refreshes them. If the refresh token has expired, the user must
  * run `bsky login` again.
  */
 export async function createClient(
   session: SessionConfig,
   profile?: string,
 ): Promise<AtpAgent> {
-  const agent = new AtpAgent({ service: session.host });
+  const agent = new AtpAgent({
+    service: session.host,
+    // Every refresh spends the token before it, here or hours later in a REPL.
+    persistSession: (event, data) => {
+      if (event !== "update" || !data) return;
+      const { did, handle, accessJwt, refreshJwt } = data;
+      saveRefreshed({ ...session, did, handle, accessJwt, refreshJwt }, profile);
+    },
+  });
 
   try {
-    // Resume session using saved tokens
     await agent.resumeSession({
       did: session.did,
       handle: session.handle,
-      accessJwt: session.refreshJwt,
+      accessJwt: session.accessJwt,
       refreshJwt: session.refreshJwt,
       active: true,
     });
-
-    // Refresh to get fresh access token
-    const refreshed = await agent.com.atproto.server.refreshSession(
-      undefined,
-      {
-        headers: {
-          authorization: `Bearer ${session.refreshJwt}`,
-        },
-      },
-    );
-
-    // Resume with refreshed tokens
-    await agent.resumeSession({
-      did: refreshed.data.did,
-      handle: refreshed.data.handle,
-      accessJwt: refreshed.data.accessJwt,
-      refreshJwt: refreshed.data.refreshJwt,
-      active: true,
-    });
-
-    // Persist refreshed tokens
-    const updated: SessionConfig = {
-      ...session,
-      did: refreshed.data.did,
-      handle: refreshed.data.handle,
-      accessJwt: refreshed.data.accessJwt,
-      refreshJwt: refreshed.data.refreshJwt,
-    };
-    await saveSessionConfig(updated, profile);
-
     return agent;
   } catch (err) {
     // Only the server saying no means the login is bad.

@@ -1,18 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockAgent = {
-  resumeSession: vi.fn(),
-  com: {
-    atproto: {
-      server: {
-        refreshSession: vi.fn(),
-      },
-    },
-  },
-};
+const mockAgent = { resumeSession: vi.fn() };
+let persistSession: (event: string, data?: object) => void;
 
 vi.mock("@atproto/api", () => ({
-  AtpAgent: vi.fn(function () {
+  AtpAgent: vi.fn(function (options: { persistSession: typeof persistSession }) {
+    persistSession = options.persistSession;
     return mockAgent;
   }),
 }));
@@ -35,47 +28,37 @@ const session = {
 };
 
 describe("createClient", () => {
+  const refreshed = { did: "did:plc:test", handle: "alice.bsky.social", accessJwt: "new-access", refreshJwt: "new-refresh" };
+
   beforeEach(() => {
     // mockReset clears history AND implementations (mockRejectedValue, etc.)
     mockAgent.resumeSession.mockReset();
-    mockAgent.com.atproto.server.refreshSession.mockReset();
+    mockAgent.resumeSession.mockImplementation(async () => persistSession("update", refreshed));
     vi.mocked(saveSessionConfig).mockReset();
   });
 
-  it("resumes session and refreshes tokens", async () => {
-    mockAgent.com.atproto.server.refreshSession.mockResolvedValue({
-      data: {
-        did: "did:plc:test",
-        handle: "alice.bsky.social",
-        accessJwt: "new-access",
-        refreshJwt: "new-refresh",
-      },
-    });
-
+  it("resumes the saved session, once, with its own tokens", async () => {
     const agent = await createClient(session);
     expect(agent).toBe(mockAgent);
-    expect(mockAgent.resumeSession).toHaveBeenCalled();
-    expect(saveSessionConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ accessJwt: "new-access" }),
-      undefined,
+    expect(mockAgent.resumeSession).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ accessJwt: "old-access", refreshJwt: "old-refresh" }),
     );
   });
 
-  it("saves refreshed tokens with profile", async () => {
-    mockAgent.com.atproto.server.refreshSession.mockResolvedValue({
-      data: {
-        did: "did:plc:test",
-        handle: "alice.bsky.social",
-        accessJwt: "new-access",
-        refreshJwt: "new-refresh",
-      },
-    });
+  it("saves refreshed tokens", async () => {
+    await createClient(session);
+    expect(saveSessionConfig).toHaveBeenCalledWith(expect.objectContaining({ accessJwt: "new-access", host: session.host }), undefined);
+  });
 
+  it("saves refreshed tokens with profile", async () => {
     await createClient(session, "work");
-    expect(saveSessionConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ accessJwt: "new-access" }),
-      "work",
-    );
+    expect(saveSessionConfig).toHaveBeenCalledWith(expect.objectContaining({ accessJwt: "new-access" }), "work");
+  });
+
+  it.each(["expired", "network-error", "create-failed"])("saves nothing on %s", async (event) => {
+    mockAgent.resumeSession.mockImplementation(async () => persistSession(event));
+    await createClient(session);
+    expect(saveSessionConfig).not.toHaveBeenCalled();
   });
 
   it("throws session expired when refresh fails", async () => {
@@ -87,15 +70,6 @@ describe("createClient", () => {
   });
 
   it("does not call login — no password available", async () => {
-    mockAgent.com.atproto.server.refreshSession.mockResolvedValue({
-      data: {
-        did: "did:plc:test",
-        handle: "alice.bsky.social",
-        accessJwt: "new-access",
-        refreshJwt: "new-refresh",
-      },
-    });
-
     await createClient(session);
     // Verify login is not a property — client no longer does password-based auth
     expect((mockAgent as any).login).toBeUndefined();
