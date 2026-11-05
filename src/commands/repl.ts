@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { InvalidArgumentError, type Command } from "commander";
 import type { AppBskyFeedDefs, AtpAgent } from "@atproto/api";
-import { bskyDir, profileNames } from "@/config";
+import { bskyDir, findProfile, profileNames } from "@/config";
 import { getClient } from "@/index";
 import { likePost, unlikePost } from "@/commands/like";
 import { createPost } from "@/commands/post";
@@ -204,11 +204,13 @@ async function openRepl(
       // `-p ?` lists them and exits, which here would end the REPL.
       if (name === "?") throw new Error(`Pick a profile: ${profileNames().join(", ") || "there are none yet"}`);
       const before = profile;
-      program.setOptionValue("profile", name);
+      // "" is the unnamed profile: it beats BSKY_PROFILE and the config, as undefined wouldn't.
+      const target = await findProfile(name);
+      program.setOptionValue("profile", target);
       try {
         const next = await getClient(program);
-        profile = name;
-        return { agent: replAgent(next), handle: next.session?.handle ?? "" };
+        profile = target;
+        return { agent: replAgent(next), handle: next.session?.handle ?? "", profile: target };
       } catch (err) {
         program.setOptionValue("profile", before);
         throw err;

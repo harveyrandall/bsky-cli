@@ -345,6 +345,24 @@ describe("saved sessions", () => {
       await expect(switchAccount("work")).rejects.toThrow("BSKY_HANDLE and BSKY_PASSWORD choose the account here");
       expect(getClient).not.toHaveBeenCalled();
     });
+    it.each([
+      ["", ""],
+      ["default", ""],
+      ["work", "work"],
+      ["work.bsky.social", "work"],
+      ["me.bsky.social", ""],
+      ["nosuch", "nosuch"],
+    ])("takes %j as profile %j", async (name, profile) => {
+      session("session.json", "me.bsky.social");
+      session("session-work.json", "work.bsky.social");
+      const switchAccount = await open();
+      await expect(switchAccount(name)).resolves.toMatchObject({ profile });
+    });
+    it("prefers a profile that's really called default", async () => {
+      session("session-default.json", "other.bsky.social");
+      const switchAccount = await open();
+      await expect(switchAccount("default")).resolves.toMatchObject({ profile: "default" });
+    });
   });
   it("uses the session's own profile", async () => {
     write({ profile: "work" });

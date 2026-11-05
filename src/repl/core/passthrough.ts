@@ -149,7 +149,7 @@ export async function runPassthrough(
   let ok = true;
   let thrown: string | undefined;
   try {
-    const args = io.profile ? ["-p", io.profile, ...argv] : [...argv];
+    const args = io.profile !== undefined ? ["-p", io.profile, ...argv] : [...argv];
     await output.run(sink, () => program.parseAsync(args, { from: "user" }));
     ok = !process.exitCode;
   } catch (err) {

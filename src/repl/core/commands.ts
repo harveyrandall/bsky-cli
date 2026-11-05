@@ -197,11 +197,10 @@ export const COMMANDS: readonly ReplCommand[] = [
   {
     name: "switch",
     aliases: [],
-    usage: "/switch <profile>",
-    summary: "Post as another account",
+    usage: "/switch [profile]",
+    summary: "Post as another account, or the unnamed profile's",
     run([profile], ctx) {
-      if (profile === undefined) throw new Error("Usage: /switch <profile>");
-      return ctx.repl.switchProfile(profile);
+      return ctx.repl.switchProfile(profile ?? "");
     },
   },
   {

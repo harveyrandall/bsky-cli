@@ -63,11 +63,12 @@ describe("managing posts", () => {
     await dispatch("/drafts 174", c);
     expect(c.fake.drafts).toHaveBeenLastCalledWith("174");
   });
-  it("/switch needs a profile", async () => {
+  it("/switch takes a profile, or goes back to the unnamed one", async () => {
     const c = ctx();
     await dispatch("/switch work", c);
-    expect(c.fake.switchProfile).toHaveBeenCalledWith("work");
-    expect(await dispatch("/switch", c)).toBe("keep");
+    expect(c.fake.switchProfile).toHaveBeenLastCalledWith("work");
+    await dispatch("/switch", c);
+    expect(c.fake.switchProfile).toHaveBeenLastCalledWith("");
   });
 });
 

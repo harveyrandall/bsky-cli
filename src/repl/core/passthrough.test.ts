@@ -140,6 +140,16 @@ describe("runPassthrough", () => {
   });
 });
 
+describe("an unnamed profile after a /switch", () => {
+  it("is passed on as empty, which beats a profile from the config", async () => {
+    const p = program();
+    p.setOptionValueWithSource("profile", "work", "config");
+    const lines: string[] = [];
+    await runPassthrough(p, ["who"], { print: (text) => lines.push(text), profile: "" });
+    expect(lines).toEqual([""]);
+  });
+});
+
 describe("what a run comes to", () => {
   it.each([
     [["hello"], "done"],

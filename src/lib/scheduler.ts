@@ -200,7 +200,7 @@ function unsupported(): never {
 
 export function enableScheduler(interval: number, profile?: string): void {
   // It's written into a crontab line, a plist or a schtasks command.
-  if (profile !== undefined && !/^[\w.-]+$/.test(profile)) {
+  if (profile && !/^[\w.-]+$/.test(profile)) {
     throw new Error(`Can't schedule for profile "${profile}": use letters, digits, ".", "_" and "-"`);
   }
   const bskyPath = resolveBskyPath();

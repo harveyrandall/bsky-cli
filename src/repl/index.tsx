@@ -26,7 +26,7 @@ export interface ReplOptions {
   profile?: string;
   passthrough?: AppProps["passthrough"];
   /** `/switch`: the account behind a profile. */
-  switchAccount?(profile: string): Promise<{ agent: ReplAgent; handle: string }>;
+  switchAccount?(profile: string): Promise<{ agent: ReplAgent; handle: string; profile: string }>;
   session?: {
     store: Pick<SessionStore, "save" | "delete" | "lock" | "unlock" | "prune">;
     id: SessionId;
@@ -98,9 +98,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       switchAccount={async (name) => {
         if (!opts.switchAccount) throw new Error("Can't switch accounts here");
         const next = await opts.switchAccount(name);
-        profile = name;
+        profile = next.profile;
         handle = next.handle;
-        keeper?.setAccount({ handle: handle as Handle, did: next.agent.selfDid, profile });
+        keeper?.setAccount({ handle: handle as Handle, did: next.agent.selfDid, profile: profile || undefined });
         return next;
       }}
       keeper={keeper}

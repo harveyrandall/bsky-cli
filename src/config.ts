@@ -250,6 +250,14 @@ export async function saveConfig(
 
 // ── Profile listing ──────────────────────────────────────────────────
 
+/** What a name means as a profile: its own, the one logged in as that handle, or `default` for the unnamed one. */
+export async function findProfile(name: string): Promise<string> {
+  if (!name || existsSync(sessionPath(name))) return name;
+  if (name === "default") return "";
+  const found = name.includes(".") ? await findSessionByHandle(name) : null;
+  return found ? (found.profile ?? "") : name;
+}
+
 /** Profiles with a saved session. */
 export function profileNames(): string[] {
   const dir = bskyDir();
