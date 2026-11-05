@@ -286,7 +286,7 @@ If a run is stopped while sending, that post may or may not have gone out, so it
 
 ### `bsky schedule watch`
 
-Run a foreground watcher that checks for due posts on a cron schedule. Stays open until you press Ctrl+C.
+Run a foreground watcher that checks for due posts on a cron schedule. Stays open until you press Ctrl+C. If a post is being sent, it finishes first, and pressing Ctrl+C again leaves at once.
 
 ```bash
 bsky schedule watch                             # every minute (default)
