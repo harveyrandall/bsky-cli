@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createClient, sharedClient } from "@/client";
 import { loadSessionConfig, saveSessionConfig, sessionPath } from "@/config";
 import type { SessionConfig } from "@/lib/types";
@@ -22,6 +22,7 @@ function fakeServer() {
   const refreshTokens = new Set<string>();
   const accessTokens = new Map<string, number>();
   const counts = { refreshSession: 0 };
+  const refreshedWith: string[] = [];
   const issue = () => {
     const [accessJwt, refreshJwt] = [`access-${++issued}`, `refresh-${issued}`];
     accessTokens.set(accessJwt, now + 120 * MINUTES);
@@ -34,6 +35,7 @@ function fakeServer() {
     const token = request.headers.get("authorization")?.replace("Bearer ", "") ?? "";
     if (new URL(request.url).pathname.endsWith("refreshSession")) {
       counts.refreshSession++;
+      refreshedWith.push(token);
       const dead = !refreshTokens.has(token) || (spent.has(token) && spent.get(token)! + 120 * MINUTES <= now);
       if (dead) return json(400, { error: "ExpiredToken", message: "Token has been revoked" });
       if (!spent.has(token)) spent.set(token, now);
@@ -42,7 +44,7 @@ function fakeServer() {
     if ((accessTokens.get(token) ?? 0) <= now) return json(400, { error: "ExpiredToken", message: "Token has expired" });
     return json(200, { feed: [] });
   };
-  return { fetchStub, issue, counts, at: (minutes: number) => (now = minutes * MINUTES) };
+  return { fetchStub, issue, counts, refreshedWith, at: (minutes: number) => (now = minutes * MINUTES) };
 }
 
 describe("a session's tokens", () => {
@@ -132,7 +134,7 @@ describe("a session's tokens", () => {
     });
     it("replace the same account's, as a command in another terminal leaves", async () => {
       const agent = await signedIn();
-      saveSessionConfig({ ...onDisk(), refreshJwt: "from-another-terminal" });
+      saveSessionConfig({ ...onDisk(), refreshJwt: server.issue().refreshJwt });
       await agent.getTimeline();
       expect(onDisk().refreshJwt).toBe(agent.session?.refreshJwt);
     });
@@ -147,6 +149,55 @@ describe("a session's tokens", () => {
       rmSync(sessionPath());
       await agent.getTimeline();
       expect(onDisk().refreshJwt).toBe(agent.session?.refreshJwt);
+    });
+  });
+  describe("with another process using the same login", () => {
+    it("carry on from what it left in the file, rather than the one it spent", async () => {
+      const agent = await createClient(loggedIn());
+      server.at(10);
+      await createClient(onDisk()); // `bsky timeline` in another terminal
+      server.at(150);
+      await expect(agent.getTimeline()).resolves.toBeDefined();
+      expect(agent.session?.refreshJwt).toBe(onDisk().refreshJwt);
+    });
+    it("leave the next run able to sign in afterwards", async () => {
+      const agent = await createClient(loggedIn());
+      server.at(10);
+      await createClient(onDisk());
+      server.at(150);
+      await agent.getTimeline();
+      server.at(400);
+      await expect(createClient(onDisk())).resolves.toBeDefined();
+    });
+    it("won't borrow another account's", async () => {
+      const agent = await createClient(loggedIn());
+      const own = agent.session?.refreshJwt;
+      saveSessionConfig({ ...onDisk(), did: "did:plc:someoneelse", refreshJwt: "not-yours" });
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      server.at(150);
+      await expect(agent.getTimeline()).resolves.toBeDefined();
+      expect(agent.session?.refreshJwt).not.toBe(own);
+      expect(server.refreshedWith).not.toContain("not-yours");
+    });
+    it.skipIf(process.getuid?.() === 0)("trust their own if the file couldn't be updated, as it's then the older one", async () => {
+      const agent = await createClient(loggedIn());
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      chmodSync(dirname(sessionPath()), 0o500);
+      try {
+        server.at(150);
+        await agent.getTimeline();
+        server.at(300);
+        await expect(agent.getTimeline()).resolves.toBeDefined();
+      } finally {
+        chmodSync(dirname(sessionPath()), 0o700);
+      }
+    });
+    it("use their own when nothing's changed", async () => {
+      const agent = await createClient(loggedIn());
+      const own = agent.session?.refreshJwt;
+      server.at(150);
+      await agent.getTimeline();
+      expect(server.refreshedWith.at(-1)).toBe(own);
     });
   });
   it("still work if they can't be saved, and you're told", async () => {
@@ -170,8 +221,9 @@ describe("a session's tokens", () => {
   });
   it("stay as they were if the server refuses them", async () => {
     const session = { ...loggedIn(), refreshJwt: "nonsense" };
+    saveSessionConfig(session);
     await expect(createClient(session)).rejects.toThrow("Session expired");
-    expect(onDisk().refreshJwt).toBe("refresh-1");
+    expect(onDisk().refreshJwt).toBe("nonsense");
   });
   it.each([
     ["a proxy", 403, { error: "Forbidden", message: "Blocked by a proxy" }],

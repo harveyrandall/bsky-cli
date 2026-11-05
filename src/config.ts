@@ -232,10 +232,10 @@ export async function loadSessionConfig(
   );
 }
 
-/** Who's logged in to a profile, going by its file: undefined if that can't be read. */
-export function sessionDid(profile?: string): string | undefined {
+/** What's in a profile's file right now, which another process may have changed: undefined if it can't be read. */
+export function savedSession(profile?: string): Partial<SessionConfig> | undefined {
   try {
-    return (JSON.parse(readFileSync(sessionPath(profile), "utf-8")) as Partial<SessionConfig>).did;
+    return JSON.parse(readFileSync(sessionPath(profile), "utf-8")) as Partial<SessionConfig>;
   } catch {
     return undefined;
   }
