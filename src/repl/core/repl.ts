@@ -737,11 +737,13 @@ export class Repl {
       return "keep";
     }
     const excerpt = entry?.excerpt ?? text.split("\n")[0];
-    if (!(await this.deps.ask.yesNo(`Delete ${name} "${excerpt}"?`))) return "done";
+    const stops = this.threadState?.root.uri === ref.uri;
+    if (!(await this.deps.ask.yesNo(`Delete ${name} "${excerpt}"?${stops ? " This stops the thread." : ""}`))) return "done";
     await this.agent.deletePost(ref.uri);
     this.registry.markDeleted(ref.uri);
     this.deps.print(`Deleted ${name}`, "dim");
-    this.stepBackFrom(ref.uri);
+    if (stops) this.stopThread();
+    else this.stepBackFrom(ref.uri);
     this.deps.onChange();
     return "done";
   }

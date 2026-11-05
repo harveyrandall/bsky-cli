@@ -1275,6 +1275,12 @@ describe("/delete and /undo", () => {
     await repl.deletePost("3");
     expect(repl.thread()?.cursor).toEqual(ref(1));
   });
+  it("stops the thread with its root, and says so first", async () => {
+    const { repl, ask } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("1");
+    expect(ask.yesNo).toHaveBeenCalledWith('Delete (1) "one"? This stops the thread.');
+    expect(repl.thread()).toBeUndefined();
+  });
   it("waits for what's queued, which may be replying to it", async () => {
     const { repl, agent, printed } = await written();
     repl.setCooldown("undo", 5);
