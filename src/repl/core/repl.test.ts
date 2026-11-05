@@ -346,8 +346,9 @@ describe("cancelling a retry", () => {
     await flush();
     await repl.retry();
     await flush();
-    expect(repl.escape("")).toEqual({ restore: "/reply 1 two" });
+    expect(repl.escape("")).toBe("handled");
     await flush();
+    expect(deps.saveDraft).toHaveBeenLastCalledWith({ reason: "manual", type: "reply", text: "two", replyUri: ref(1).uri });
     expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
     expect(printed()).not.toContain("Left in draft");
   });
@@ -1059,12 +1060,12 @@ describe("resume", () => {
         await flush();
         expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
       });
-      it.each([["Edit", 1], ["Discard", 2]])("deletes the draft on %s, which leaves it nowhere to come back from", async (_, answer) => {
+      it.each([["Edit", 1], ["Discard", 2]])("keeps the draft on %s, as nothing was sent", async (_, answer) => {
         const file = await fromDraft();
         const { repl, deps, flush } = answering(answer);
         await repl.resume(file);
         await flush();
-        expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
+        expect(deps.deleteDraft).not.toHaveBeenCalled();
       });
       it("keeps the draft while the question's open", async () => {
         const file = await fromDraft();
@@ -1180,7 +1181,7 @@ describe("snapshot", () => {
   it("has only the session's own fields, so no agent state can get in", async () => {
     const { repl } = setup();
     expect(Object.keys(repl.snapshot(meta, composer, [])).sort()).toEqual(
-      ["composer", "counters", "createdAt", "did", "handle", "history", "id", "lastThreadLetter", "mode", "pending", "posts", "settings", "staged", "thread", "updatedAt", "version", "viewed"].sort(),
+      ["composer", "counters", "createdAt", "did", "handle", "history", "id", "lastThreadLetter", "loaded", "mode", "pending", "posts", "settings", "staged", "thread", "updatedAt", "version", "viewed"].sort(),
     );
   });
 });
@@ -1409,14 +1410,14 @@ describe("/drafts", () => {
     await flush();
     expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("1741392000000-a7f3");
   });
-  it("swaps the draft for the composer if the server refuses it, as any retry does", async () => {
+  it("keeps the draft if the server refuses it, and the text comes back", async () => {
     const { repl, deps, agent, flush } = withDrafts(draft());
     await repl.drafts("17");
     agent.post.mockRejectedValueOnce(rejected());
     await repl.post("hello");
     await flush();
     expect(deps.restore).toHaveBeenCalledWith("/post hello");
-    expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("1741392000000-a7f3");
+    expect(deps.deleteDraft).not.toHaveBeenCalled();
   });
   it("keeps the draft if you post something else", async () => {
     const { repl, deps, flush } = withDrafts(draft());

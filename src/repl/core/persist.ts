@@ -50,6 +50,8 @@ export interface ReplSessionFile {
   lastThreadLetter?: ThreadLetter;
   mode: SavedMode;
   composer: { text: string; cursor: number };
+  /** The draft in the composer. */
+  loaded?: { id: string; text: string; media: string[] };
   staged: StagedMedia[];
   pending: Unsent[];
   history: string[];
@@ -139,6 +141,7 @@ function checkItem(item: unknown, at: string): void {
   need(typeof item.createdAt === "number", `${at}.createdAt`);
   need(optional(item.target, isTarget), `${at}.target`);
   need(optional(item.draftId, (v) => typeof v === "string"), `${at}.draftId`);
+  need(optional(item.stale, (v) => typeof v === "boolean"), `${at}.stale`);
   if (item.media !== undefined) checkMedia(item.media, `${at}.media`);
   const intent = item.intent as Fields;
   if (intent.kind === "quote") need(item.posts.length === 1 && item.media === undefined && item.target === undefined, at);
@@ -209,6 +212,9 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   need(isObject(c), "composer");
   need(typeof c.text === "string", "composer.text");
   need(isCount(c.cursor), "composer.cursor");
+  const isLoaded = (v: unknown) =>
+    isObject(v) && typeof v.id === "string" && typeof v.text === "string" && Array.isArray(v.media) && v.media.every((p) => typeof p === "string");
+  need(optional(raw.loaded, isLoaded), "loaded");
   checkMedia(raw.staged, "staged");
   need(Array.isArray(raw.pending), "pending");
   raw.pending.forEach((item, i) => checkItem(item, `pending[${i}]`));
