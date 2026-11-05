@@ -398,7 +398,7 @@ Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from co
 
 **Dispatcher**
 
-1. Input is a command only if it matches `^/[a-z]` (markers never match; a leading `\/` posts a literal `/`).
+1. Input is a command only if it matches `^/[a-zA-Z]`, so a mistyped `/Exit` is caught rather than posted (markers never match; a leading `\/` posts a literal `/`).
 2. Shell-style tokenizer (quotes, backslash escapes).
 3. Native command → Commander subcommand (passthrough) → `Unknown /hlp. Did you mean /help?` (edit distance over both sets). `/run` skips native lookup.
 4. `/help` and Tab completion come from one registry; `/help` lists passthrough entries on one `↗ From the CLI:` line.
@@ -434,7 +434,7 @@ Lexicons are the API contract — read them.
 - `refs`: every ref form, both numbering modes, `#n`, handle → DID, errors.
 - `session`: transitions, cursor after delete, root delete, once-modes return, `/switch`.
 - `pipeline` (fake timers): `max(undo, pace)`, cancel, send now, batch pacing, send-time parent resolution, network → draft, `/retry`, 429 retry.
-- `dispatch` / tokenizer: precedence, `/run`, `^/[a-z]`, `\/`, suggestions, `#n` expansion.
+- `dispatch` / tokenizer: precedence, `/run`, `^/[a-zA-Z]`, `\/`, suggestions, `#n` expansion.
 - `passthrough`: exit guard, stdout redirect, two consecutive parses do not leak `--json`.
 - `persist`: round trip, `version`, atomic write, lock + stale lock, prune, `last` / prefix resolution.
 - `printPost`: snapshot unchanged without a labeller; label with one.

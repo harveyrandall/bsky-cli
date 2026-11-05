@@ -8,14 +8,15 @@ export type Parsed =
 
 /**
  * `/name …` is a command; a leading `\/` escapes it into text. Leading
- * whitespace is ignored, and a name starts with a lowercase letter, so `/`,
- * `/ x` and `/Help` are text.
+ * whitespace is ignored, and a name starts with a letter, so `/` and `/ x` are
+ * text. `/Exit` is a command that doesn't exist, rather than text, so that a
+ * typo in a thread is caught and not posted.
  */
 export function parseInput(input: string): Parsed {
   const trimmed = input.trimStart();
   if (trimmed === "") return { kind: "empty" };
   if (trimmed.startsWith("\\/")) return { kind: "text", text: input.replace("\\/", "/") };
-  const match = /^\/([a-z]\S*)([\s\S]*)$/.exec(trimmed);
+  const match = /^\/([a-zA-Z]\S*)([\s\S]*)$/.exec(trimmed);
   if (match) return { kind: "command", name: match[1], rest: match[2].trim() };
   return { kind: "text", text: input };
 }
