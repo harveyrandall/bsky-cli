@@ -45,7 +45,7 @@ The prompt shows what Enter will do with plain text:
 | `/view <ref>` | Print a post and its replies |
 | `/run <command> [args]` | Run a CLI command, even one whose name a REPL command has taken |
 | `/auto-thread [on\|off]` | Toggle starting a thread from plain text |
-| `/settings [name value]` | Change a setting for this session, then show them all: `undo` or `pace` with 0, 5, 10 or 15, `force-alt` or `verbose` with `on` or `off`, or `thread-label` with `off`, `append` or `prepend`. With no arguments it asks for the undo window and pace |
+| `/settings [name value]` | Change a setting for this session, then show the settings: `undo` or `pace` with 0, 5, 10 or 15, `force-alt` or `verbose` with `on` or `off`, or `thread-label` with `off`, `append` or `prepend`. With no arguments it asks for the undo window and pace |
 | `/history` | List this session's posts, marking any you've deleted |
 | `/retry` | Resend what couldn't be sent (network error, rate limit or expired session) |
 | `/help [command]` | List commands, or show help for one |

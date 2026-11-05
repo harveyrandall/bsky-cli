@@ -697,7 +697,7 @@ export class Repl {
         explained = true;
         const answer = await this.askAlt(basename(path));
         if (answer === null) {
-          this.deps.print(`Left out ${basename(path)}: Esc skips a file, and nothing's wrong with it. /attach it again to add it.`, "dim");
+          this.deps.print(`Left out ${basename(path)}: Esc leaves a file out, and nothing's wrong with it. /attach it again to add it.`, "dim");
           continue;
         }
         text = answer;
@@ -1061,6 +1061,9 @@ export class Repl {
 
   setSetting(changes: Pick<Partial<ReplSettings>, "forceAlt" | "threadLabel" | "verbose">): void {
     Object.assign(this.s, changes);
+    // It's asked on attaching, so what's staged has missed it.
+    const bare = changes.forceAlt ? this.media.filter((m) => !m.alt) : [];
+    if (bare.length > 0) this.deps.print(`Already staged with no alt text: ${bare.map((m) => basename(m.path)).join(", ")}. /detach and /attach it to add some.`, "dim");
     this.deps.onChange();
   }
 

@@ -68,6 +68,16 @@ describe("/settings", () => {
     expect(c.fake.setSetting).not.toHaveBeenCalled();
     expect(c.print).toHaveBeenCalledWith(expect.stringContaining("Usage: /settings"), "error");
   });
+  it("takes one setting at a time, rather than quietly dropping the rest", async () => {
+    const c = ctx();
+    expect(await dispatch("/settings undo 10 pace 5", c)).toBe("keep");
+    expect(c.fake.setCooldown).not.toHaveBeenCalled();
+  });
+  it("points auto-thread at its own command", async () => {
+    const c = ctx();
+    expect(await dispatch("/settings auto-thread on", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith(expect.stringContaining("/auto-thread on|off"), "error");
+  });
 });
 
 describe("a command with a capital", () => {

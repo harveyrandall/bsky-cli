@@ -286,14 +286,17 @@ export const COMMANDS: readonly ReplCommand[] = [
     name: "settings",
     aliases: [],
     usage: "/settings [name value]",
-    summary: "Change undo, pace, force-alt, thread-label or verbose, then show them",
-    async run([key, value], ctx) {
+    summary: "Change undo, pace, force-alt, thread-label or verbose, then show the settings; alone, asks for undo and pace",
+    async run([key, value, ...extra], ctx) {
+      const usage = "Usage: /settings undo|pace 0|5|10|15, force-alt|verbose on|off, or thread-label off|append|prepend";
+      if (extra.length > 0) throw new Error(usage);
+      if (key === "auto-thread") throw new Error("Use /auto-thread on|off");
       if (key === undefined) await ctx.repl.askSettings();
       else if (key === "undo" || key === "pace") ctx.repl.setCooldown(key, cooldown(key, value));
       else if (key === "force-alt") ctx.repl.setSetting({ forceAlt: onOrOff(key, value) });
       else if (key === "verbose") ctx.repl.setSetting({ verbose: onOrOff(key, value) });
       else if (key === "thread-label") ctx.repl.setSetting({ threadLabel: threadLabel(value) });
-      else throw new Error("Usage: /settings [undo|pace N] [force-alt|verbose on|off] [thread-label off|append|prepend]");
+      else throw new Error(usage);
       ctx.print(ctx.repl.settingsLine());
     },
   },

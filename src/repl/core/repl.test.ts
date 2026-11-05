@@ -498,7 +498,7 @@ describe("media", () => {
     const { repl, printed } = setup({}, { alt: vi.fn(async () => null) });
     await repl.attach(["/x/a.png"]);
     expect(repl.staged()).toEqual([]);
-    expect(printed()).toContain("Left out a.png: Esc skips a file, and nothing's wrong with it. /attach it again to add it.");
+    expect(printed()).toContain("Left out a.png: Esc leaves a file out, and nothing's wrong with it. /attach it again to add it.");
   });
   it("calls paths media only if all of them are", async () => {
     const { repl } = setup();
@@ -525,7 +525,7 @@ describe("media", () => {
     const { repl, printed } = setup({ forceAlt: true }, { alt: vi.fn(async () => answers.shift()) });
     await repl.attach(["/x/a.png", "/x/b.png"]);
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.png"]);
-    expect(printed()).toContain("Left out a.png: Esc skips a file, and nothing's wrong with it. /attach it again to add it.");
+    expect(printed()).toContain("Left out a.png: Esc leaves a file out, and nothing's wrong with it. /attach it again to add it.");
   });
   it("says why a file can't be attached and carries on", async () => {
     const { repl, printed } = setup();
@@ -1491,6 +1491,14 @@ describe("settings that a session can change", () => {
     repl.setSetting({ forceAlt: true, threadLabel: "prepend", verbose: true });
     expect(repl.settingsLine()).toContain("thread-label prepend · force-alt on · verbose on");
     expect(deps.onChange).toHaveBeenCalled();
+  });
+  it("say which files force-alt comes too late for, as it's only asked on attaching", async () => {
+    const { repl, printed } = setup({}, { alt: vi.fn(async () => undefined) });
+    await repl.attach(["/x/a.png"]);
+    await repl.attach(["/x/b.png"], "described");
+    repl.setSetting({ forceAlt: true });
+    expect(printed()).toContain("Already staged with no alt text: a.png. /detach and /attach it to add some.");
+    expect(printed()).not.toContain("b.png");
   });
   it("say whether the summary should be full", () => {
     const { repl } = setup();
