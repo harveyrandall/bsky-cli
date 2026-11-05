@@ -169,7 +169,7 @@ Anything else: `Can't resolve "<x>": use a number, #n, rkey, at:// URI or bsky.a
 
 **Output per post:** `(4) 3lbx7kt5def2v`; verbose `(4) 3lbx7kt5def2v (at://did:plc:…/app.bsky.feed.post/3lbx7kt5def2v)`. Suffixes: `↳ 1` when the parent is not the previous post, `❝ #2` for quotes, `📷 2` / `🎞` for media.
 
-**Deletes** (`/undo`, `/delete <ref>`, own posts only, confirmation required): entry marked `deleted` (shown as `deleted` in `/history`). If it was the cursor, the cursor moves to its parent. Deleting the root stops the thread (confirmation says so).
+**Deletes** (`/undo`, `/delete <ref>`, own posts only, confirmation required): entry marked `deleted` (shown as `deleted` in `/history`). If it was the cursor, the cursor moves to its parent. Deleting the root stops the thread (confirmation says so) and prints `/thread <label>` for the thread's last post, if any is left.
 
 **`/switch <profile>`** stops the active thread; the registry is kept.
 
@@ -232,7 +232,8 @@ Result: `{ posts: string[], keep?: string, discard?: string, autoSplit: boolean,
 **Alt-text prompt** opens with one sentence: *"Alt text tells people using screen readers what's in your image — without it, they're left out of the post."*
 
 - Default: Enter skips (alt falls back to the file name, current `createPost` behaviour).
-- `--force-alt` / `force-alt = true`: re-prompts until non-blank text is given; Esc drops that file instead.
+- `--force-alt` / `force-alt = true`: re-prompts until non-blank text is given.
+- Esc, with or without `--force-alt`, drops that file and says it isn't an error.
 - `TODO(alt-text-ai)` comment at the prompt: future local-model generation (Future work).
 
 ## 9. Posting pipeline
@@ -361,7 +362,7 @@ Resume a session?
 
 Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from counts + first post text). `+ new` is pre-selected. Sessions locked by a running REPL show `in use` and cannot be opened.
 
-**On resume:** replay registry lines dimmed under `── resumed k3f7xq ──`; verify `cursor` with `getPosts` (if deleted, fall back to the nearest surviving ancestor, else stop the thread); pending items ask `send · edit · discard`; missing staged files are dropped with a warning; if the session's account differs, switch to its profile.
+**On resume:** replay registry lines dimmed under `── resumed k3f7xq ──`, then print the session's settings and, for each flag given on this run that it overrules, what to run instead (saved settings win); verify `cursor` with `getPosts` (if deleted, fall back to the nearest surviving ancestor, else stop the thread); pending items ask `send · edit · discard`, and send on a post whose thread is lost then asks for a new thread (the default) or a link to a post to continue from, where backing out counts as edit; missing staged files are dropped with a warning; if the session's account differs, switch to its profile.
 
 **Housekeeping:** lock file `<id>.lock` with the PID (stale locks with dead PIDs are cleared); sessions with no posts and no composer text are deleted on exit; prune to `keep-sessions`, oldest first.
 

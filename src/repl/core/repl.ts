@@ -257,8 +257,10 @@ export class Repl {
     this.pipeline.sendNow();
   }
 
-  /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
-  /** `ignored` is flags given now that the saved settings overrule, with what to run instead. */
+  /**
+   * Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling
+   * what went. `ignored` is flags given now that the session overrules, with what to run instead.
+   */
   async resume(file: ReplSessionFile, ignored: readonly string[] = []): Promise<void> {
     // All of it first, so a save at any moment from here has the whole session.
     this.registry.restore(file.posts, file.counters, file.viewed);

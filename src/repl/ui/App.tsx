@@ -40,9 +40,9 @@ export interface AppProps {
   keeper?: Pick<SessionKeeper, "track" | "save">;
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
-  /** CLI commands that can run here. */
   /** Flags that a resumed session's own settings overrule, with what to run instead. */
   ignoredFlags?: readonly string[];
+  /** CLI commands that can run here. */
   passthrough?: {
     names(): string[];
     knows(name: string): boolean;
