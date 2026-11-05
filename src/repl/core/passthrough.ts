@@ -15,6 +15,7 @@ export const BLOCKED = new Map<string, string>([
   ["schedule post", "use /new, then Scheduled post"],
   ["schedule edit", "it asks questions: run it in another terminal"],
   ["schedule delete", "it asks to confirm: run it in another terminal"],
+  ["schedule uninstall", "it asks to confirm: run it in another terminal"],
   ["schedule watch", "it runs until stopped: run it in another terminal"],
 ]);
 

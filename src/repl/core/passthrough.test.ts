@@ -140,6 +140,18 @@ describe("runPassthrough", () => {
   });
 });
 
+describe("schedule uninstall", () => {
+  it("is refused, as it asks a question that would take the terminal out of raw mode", async () => {
+    const p = program();
+    const action = vi.fn();
+    p.commands.find((c) => c.name() === "schedule")!.command("uninstall").action(action);
+    const printed: string[] = [];
+    await runPassthrough(p, ["schedule", "uninstall"], { print: (text) => printed.push(text) });
+    expect(action).not.toHaveBeenCalled();
+    expect(printed.join()).toContain("bsky schedule uninstall can't run inside the REPL");
+  });
+});
+
 describe("outsideCommands", () => {
   it("keeps a frame out of a command's output, whoever scheduled it", async () => {
     const p = program();
