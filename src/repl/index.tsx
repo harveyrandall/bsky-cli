@@ -48,6 +48,8 @@ export async function pickSession(store: Pick<SessionStore, "delete">, listings:
     { exitOnCtrlC: false },
   );
   await app.waitUntilExit();
+  // Ink lets go of stdin, and a readline question after it (offline drafts) would otherwise end the process.
+  process.stdin.ref();
   return picked as SessionId | undefined | null;
 }
 

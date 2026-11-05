@@ -386,12 +386,12 @@ describe("App threads", () => {
       const s = setup();
       const post = await inFlight(s);
       await s.type("\x04", "s", `/attach ${image}`, "\r");
-      await tick();
+      await s.shows("Alt text for chart.png");
       post.finish(ref(1));
       await tick();
       await tick();
       expect(exit).not.toHaveBeenCalled();
-      expect(s.lastFrame()).toContain("Alt text for chart.png");
+      await s.shows("Alt text for chart.png");
     });
     it("moves staged media into the draft on send now, so it isn't in both places", async () => {
       const s = setup();
@@ -521,12 +521,11 @@ describe("App media", () => {
     expect(lastFrame()).toContain("Attach chart.png and 1 more? [Y/n]");
   });
   it("pastes the path as text if you say no", async () => {
-    const { type, lastFrame, repl } = setup();
+    const { type, shows, repl } = setup();
     await type(paste(image));
-    await tick();
+    await shows("Attach chart.png? [Y/n]");
     await type("n");
-    await tick();
-    expect(lastFrame()).toContain(`bsky › ${image}`.slice(0, 40));
+    await shows(`bsky › ${image}`.slice(0, 40));
     expect(repl().staged()).toEqual([]);
   });
   it("says why a dropped file is too big, rather than pasting its path", async () => {

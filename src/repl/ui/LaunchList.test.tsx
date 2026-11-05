@@ -61,6 +61,23 @@ describe("LaunchList", () => {
     await tick();
     expect(lastFrame()).not.toContain("zzzzzz");
   });
+  it("says so if it can't delete, and stays in the list", async () => {
+    const onDelete = vi.fn(async () => {
+      throw new Error("EACCES");
+    });
+    const app = render(<LaunchList listings={listings} onPick={vi.fn()} onDelete={onDelete} />);
+    await tick();
+    for (const key of [DOWN, DOWN, DOWN, "d"]) {
+      app.stdin.write(key);
+      await tick();
+    }
+    expect(app.lastFrame()).toContain("Couldn't delete zzzzzz (EACCES)");
+    expect(app.lastFrame()).toContain("zzzzzz");
+  });
+  it("keeps the id apart from the note on an unreadable row", async () => {
+    const { lastFrame } = setup();
+    expect(lastFrame()).toContain("zzzzzz  unreadable");
+  });
   it("starts new on Esc, and quits on Ctrl+C", async () => {
     const esc = setup();
     await tick();
@@ -73,8 +90,44 @@ describe("LaunchList", () => {
   });
 });
 
+describe("a long list", () => {
+  const many: SessionListing[] = Array.from({ length: 30 }, (_, i) => ({ id: `s${String.fromCharCode(97 + (i % 26))}${Math.floor(i / 26)}`, updatedAt: "2026-10-31T14:05:22.000Z", summary: `session ${i}`, state: "ok" }));
+  const tall = (rows: number) => {
+    const app = render(<LaunchList listings={many} onPick={vi.fn()} onDelete={vi.fn(async () => {})} />);
+    Object.defineProperty(app.stdout, "rows", { value: rows, configurable: true });
+    app.stdout.emit("resize");
+    return app;
+  };
+  it("fits the window, with new and the question still showing", async () => {
+    const app = tall(12);
+    await tick();
+    const frame = app.lastFrame() ?? "";
+    expect(frame.split("\n").length).toBeLessThan(12);
+    expect(frame).toContain("Resume a session?");
+    expect(frame).toContain("+ new");
+    expect(frame).toContain("more");
+  });
+  it("keeps the selected row in view", async () => {
+    const app = tall(12);
+    await tick();
+    for (let i = 0; i < 20; i++) {
+      app.stdin.write(DOWN);
+      await tick();
+    }
+    const frame = app.lastFrame() ?? "";
+    expect(frame).toContain("session 19");
+    expect(frame.split("\n").length).toBeLessThan(12);
+    expect(frame).toContain("+ new");
+  });
+});
+
 describe("localStamp", () => {
   it("is local time to the second, with no zone", () => {
     expect(localStamp(new Date(2026, 9, 31, 14, 5, 22).toISOString())).toBe("2026-10-31T14:05:22");
+  });
+  it("moves with the time zone, which a UTC machine wouldn't show", () => {
+    const offset = vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(300);
+    expect(localStamp("2026-10-31T14:05:22.000Z")).toBe("2026-10-31T09:05:22");
+    offset.mockRestore();
   });
 });

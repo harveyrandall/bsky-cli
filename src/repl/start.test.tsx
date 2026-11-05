@@ -18,7 +18,7 @@ vi.mock("@/lib/scheduler", () => ({ getSchedulerStatus }));
 vi.mock("@/scheduled", () => ({ saveScheduledPost }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
-const { startRepl, offlineProps } = await import("@/repl");
+const { startRepl, offlineProps, pickSession } = await import("@/repl");
 const options = {
   markers: DEFAULT_MARKERS,
   settings: offlineProps.settings,
@@ -44,6 +44,34 @@ const added = (event: "uncaughtException" | "unhandledRejection", before: Functi
 beforeEach(() => {
   vi.clearAllMocks();
   detectKittyKeyboard.mockResolvedValue(true);
+});
+
+describe("pickSession", () => {
+  const listings = [{ id: "k3f7xq", updatedAt: "2026-11-04T10:00:00.000Z", summary: "", state: "ok" as const }];
+  const pick = async (id: string | undefined | null) => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const store = { delete: vi.fn(async () => {}) };
+    const picking = pickSession(store, listings);
+    render.mock.lastCall?.[0].props.onPick(id);
+    return { picked: await picking, store, props: render.mock.lastCall?.[0].props };
+  };
+  it("hands back what was picked", async () => {
+    await expect(pick("k3f7xq").then((r) => r.picked)).resolves.toBe("k3f7xq");
+    await expect(pick(undefined).then((r) => r.picked)).resolves.toBeUndefined();
+    await expect(pick(null).then((r) => r.picked)).resolves.toBeNull();
+  });
+  it("deletes through the store", async () => {
+    const { store, props } = await pick(undefined);
+    await props.onDelete("zzzzzz");
+    expect(store.delete).toHaveBeenCalledWith("zzzzzz");
+  });
+  it("hands stdin back: Ink lets go of it, and a question that follows would quit the process", async () => {
+    const ref = vi.spyOn(process.stdin, "ref").mockReturnValue(process.stdin);
+    await pick(undefined);
+    expect(ref).toHaveBeenCalled();
+    ref.mockRestore();
+  });
 });
 
 describe("startRepl", () => {
