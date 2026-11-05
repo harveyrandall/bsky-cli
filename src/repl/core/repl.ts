@@ -313,7 +313,7 @@ export class Repl {
   private resumeMode(saved: SavedMode): ReplMode {
     if (!("target" in saved)) return saved;
     const entry = this.registry.byLabel(saved.target);
-    if (!entry) return { kind: saved.returnTo };
+    if (!entry || entry.deleted) return { kind: saved.returnTo };
     const target = { ref: { uri: entry.uri, cid: entry.cid }, root: entry.root, entry };
     return { kind: saved.kind, target, label: entry.label, returnTo: saved.returnTo };
   }
@@ -732,16 +732,14 @@ export class Repl {
     }
     const entry = this.registry.byUri(ref.uri);
     const name = entry ? `(${entry.label})` : rkeyOf(ref.uri);
-    if (entry?.deleted) {
-      this.deps.print(`${name} is already deleted`, "error");
-      return "keep";
-    }
     const excerpt = entry?.excerpt ?? text.split("\n")[0];
     const stops = this.threadState?.root.uri === ref.uri;
     if (!(await this.deps.ask.yesNo(`Delete ${name} "${excerpt}"?${stops ? " This stops the thread." : ""}`))) return "done";
     await this.agent.deletePost(ref.uri);
     this.registry.markDeleted(ref.uri);
     this.deps.print(`Deleted ${name}`, "dim");
+    const mode = this.current;
+    if ("target" in mode && mode.target.ref.uri === ref.uri) this.current = { kind: mode.returnTo };
     if (stops) this.stopThread();
     else this.stepBackFrom(ref.uri);
     this.deps.onChange();

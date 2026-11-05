@@ -256,7 +256,10 @@ export async function resolveRef(
   r: { registry: Registry; agent: RefAgent; letter?: ThreadLetter },
 ): Promise<ResolvedRef> {
   const s = input.trim();
-  const fromEntry = (e: RegistryEntry): ResolvedRef => ({ ref: { uri: e.uri, cid: e.cid }, root: e.root, entry: e });
+  const fromEntry = (e: RegistryEntry): ResolvedRef => {
+    if (e.deleted) throw new Error(`(${e.label}) is already deleted`);
+    return { ref: { uri: e.uri, cid: e.cid }, root: e.root, entry: e };
+  };
 
   if (/^\d+$/.test(s)) {
     const label = r.registry.prefixed ? `${r.letter ?? r.registry.currentLetter() ?? ""}${s}` : s;

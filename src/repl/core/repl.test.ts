@@ -1289,6 +1289,22 @@ describe("/delete and /undo", () => {
     expect(agent.deletePost).not.toHaveBeenCalled();
     expect(printed()).toContain("Wait for pending posts");
   });
+  it("can't be aimed at afterwards", async () => {
+    const { repl, agent, printed } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("2");
+    for (const aim of [() => repl.reply("2", "hi"), () => repl.quote("2", "hi"), () => repl.replyFrom("2"), () => repl.engage("like", "2"), () => repl.openPost("2")]) {
+      expect(await aim()).toBe("keep");
+    }
+    expect(printed()).toContain("(2) is already deleted");
+    expect(agent.post).toHaveBeenCalledTimes(3);
+    expect(agent.like).not.toHaveBeenCalled();
+  });
+  it("closes a prompt aimed at it", async () => {
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.reply("2");
+    await repl.deletePost("2");
+    expect(repl.mode().kind).toBe("thread");
+  });
   it("leaves a prompt aimed at something else", async () => {
     const { repl } = await written({}, ["one", "two", "three"]);
     await repl.reply("3");
