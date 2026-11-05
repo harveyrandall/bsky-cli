@@ -13,7 +13,8 @@ function run(command: string, args: string[], input?: string): Promise<void> {
 
 export function openUrl(url: string): Promise<void> {
   if (process.platform === "darwin") return run("open", [url]);
-  if (process.platform === "win32") return run("cmd", ["/c", "start", "", url]);
+  // Not `cmd /c start`: cmd would expand a `%` in the link, and a did:web can have one.
+  if (process.platform === "win32") return run("rundll32", ["url.dll,FileProtocolHandler", url]);
   return run("xdg-open", [url]);
 }
 

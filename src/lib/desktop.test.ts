@@ -32,7 +32,7 @@ describe("desktop", () => {
   it.each([
     ["darwin", "open", ["https://x"]],
     ["linux", "xdg-open", ["https://x"]],
-    ["win32", "cmd", ["/c", "start", "", "https://x"]],
+    ["win32", "rundll32", ["url.dll,FileProtocolHandler", "https://x"]],
   ])("opens a link on %s", async (name, command, args) => {
     on(name);
     programs(() => 0);
