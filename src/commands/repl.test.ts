@@ -220,10 +220,18 @@ describe("ignoredFlags", () => {
   it("handles turning something off", () => {
     expect(notes({ autoThread: false }, { autoThread: true })).toEqual(["--no-auto-thread: /auto-thread off"]);
   });
-  it("says nothing about a flag that matches the session", () => {
-    expect(notes({ undo: 5, pace: 0, autoThread: false })).toEqual([]);
+  it.each<[Record<string, unknown>, object]>([
+    [{ undo: 5, pace: 0, autoThread: false }, {}],
+    [{ prefixThread: true }, { prefixThread: true }],
+    [{ forceAlt: true }, { forceAlt: true }],
+    [{ verbose: true }, { verbose: true }],
+    [{ prependThreadLabel: true }, { threadLabel: "prepend" }],
+    [{ threadLabel: true }, { threadLabel: "append" }],
+    [{ threadLabel: true, prependThreadLabel: true }, { threadLabel: "prepend" }],
+  ])("says nothing about %j when the session already has it", (flags, settings) => {
+    expect(notes(flags, settings)).toEqual([]);
   });
-  it("only counts flags you typed, not config or defaults", () => {
+  it("only asks about a flag if given says it was typed", () => {
     expect(ignoredFlags(() => false, { undo: 10, forceAlt: true }, saved)).toEqual([]);
   });
 });
@@ -262,6 +270,9 @@ describe("saved sessions", () => {
     sessionsHome.dir = mkdtempSync(join(tmpdir(), "bsky-repl-"));
     // The bskyDir mock above doesn't reach sessionPath, which calls its own.
     vi.stubEnv("XDG_CONFIG_HOME", sessionsHome.dir);
+    // Set in some shells, and /switch refuses to run with them.
+    vi.stubEnv("BSKY_HANDLE", "");
+    vi.stubEnv("BSKY_PASSWORD", "");
     setTTY(true, true);
     pickSession.mockResolvedValue(undefined);
   });
@@ -385,6 +396,18 @@ describe("saved sessions", () => {
       await makeProgram({ repl: { resumable: false } }).parseAsync(["repl", "-r", "k3f7xq"], { from: "user" });
       expect(session().ignoredFlags).toEqual([]);
     });
+  });
+  it("doesn't count a setting from the config as a flag you typed", async () => {
+    write();
+    await makeProgram({ repl: { undo: 10 } }).parseAsync(["repl", "-r", "k3f7xq"], { from: "user" });
+    expect(session().ignoredFlags).toEqual([]);
+  });
+  it.each([[["repl", "-r", "k3f7xq", "-v"]], [["-v", "repl", "-r", "k3f7xq"]]])("finds -v on the program, wherever it's typed: %j", async (argv) => {
+    write();
+    const p = new Command().exitOverride().option("-v, --verbose");
+    registerRepl(p);
+    await p.parseAsync(argv, { from: "user" });
+    expect(session().ignoredFlags).toEqual(["-v: /settings verbose on"]);
   });
   it("has none to pass on for a new session", async () => {
     await makeProgram().parseAsync(["repl", "--undo", "10"], { from: "user" });

@@ -50,6 +50,7 @@ const added = (event: "uncaughtException" | "unhandledRejection", before: Functi
 beforeEach(() => {
   vi.clearAllMocks();
   detectKittyKeyboard.mockResolvedValue(true);
+  process.exitCode = undefined; // an app that unmounts sets it, and a test checks it
 });
 
 describe("pickSession", () => {
@@ -196,7 +197,7 @@ describe("startRepl", () => {
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     expect(render.mock.calls[0][0].props.ignoredFlags).toEqual(["--undo 10: /settings undo 10"]);
     app.unmount();
-    await running.catch(() => {});
+    await running;
   });
 
   it("doesn't count a scheduler that sends another profile's posts", async () => {
