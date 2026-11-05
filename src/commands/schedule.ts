@@ -376,9 +376,13 @@ To automate posting, you can:
         const profile = program.opts().profile;
         const json = isJson(program);
         let posts = await listScheduledPosts(profile);
+        const claims = await claimedPosts(profile);
+        for (const { id, path, stale } of claims) {
+          console.error(stale ? `${id} may have gone out: a run left ${path} behind, and schedule run says what to do` : `${id} is being sent`);
+        }
 
         if (posts.length === 0) {
-          if (!json) console.error("No scheduled posts.");
+          if (!json && claims.length === 0) console.error("No scheduled posts.");
           return;
         }
 
@@ -514,7 +518,13 @@ To automate posting, you can:
           }
         }
 
-        await updateScheduledPost(post, profile);
+        try {
+          await updateScheduledPost(post, profile);
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          console.error("That post is being sent, or has gone, so your changes weren't saved.");
+          return;
+        }
         console.error(`Scheduled post ${chalk.blue(post.id)} updated.`);
       } finally {
         rl.close();
@@ -583,7 +593,13 @@ To automate posting, you can:
           console.error(`Draft saved: ${chalk.blue(draft.id)}`);
         }
 
-        await deleteScheduledPost(post.id, profile);
+        try {
+          await deleteScheduledPost(post.id, profile);
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          console.error("That post is being sent, or has gone, so it wasn't deleted. If sending fails, it goes back in the queue.");
+          return;
+        }
         console.error("Scheduled post deleted.");
       } finally {
         rl.close();
@@ -625,7 +641,9 @@ To automate posting, you can:
       const shutdown = () => {
         console.error("\nWatcher stopped.");
         job.stop();
-        process.exit(0);
+        // Leaving mid-send would strand the post. A second Ctrl+C still leaves at once.
+        const leave = () => (job.isBusy() ? setTimeout(leave, 100) : process.exit(0));
+        leave();
       };
       process.once("SIGINT", shutdown);
       process.once("SIGTERM", shutdown);

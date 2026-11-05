@@ -222,6 +222,31 @@ describe("schedule run, on real files", () => {
     });
   });
 
+  describe("schedule list", () => {
+    it("shows a post being sent, rather than saying the queue's empty", async () => {
+      const id = await leftBehind();
+      aged(id, 1);
+      await run(undefined, "list");
+      expect(errors.join()).toContain(`${id} is being sent`);
+      expect(errors.join()).not.toContain("No scheduled posts");
+    });
+    it("shows a post left behind", async () => {
+      const id = await leftBehind();
+      await run(undefined, "list");
+      expect(errors.join()).toContain(`${id} may have gone out`);
+      expect(errors.join()).toContain(`${id}.sending`);
+    });
+    it("still says so when there's nothing at all", async () => {
+      await run(undefined, "list");
+      expect(errors).toEqual(["No scheduled posts."]);
+    });
+    it("keeps its output clean", async () => {
+      await leftBehind();
+      await run(undefined, "list");
+      expect(logged).toEqual([]);
+    });
+  });
+
   it("fails rather than call an unreadable queue empty", async () => {
     await queued();
     mkdirSync(join(home, "stray"));

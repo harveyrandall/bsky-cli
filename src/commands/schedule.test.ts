@@ -421,6 +421,23 @@ describe("schedule watch", () => {
     );
   });
 
+  it("finishes a send before leaving, or the post would be stranded", async () => {
+    vi.useFakeTimers();
+    const isBusy = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    vi.mocked(Cron).mockImplementation(function () { return { stop: mockCronStop, isBusy }; } as never);
+    const once = vi.spyOn(process, "once").mockImplementation(() => process);
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    await program.parseAsync(["node", "bsky", "schedule", "watch"]);
+    const shutdown = once.mock.calls.find(([event]) => event === "SIGINT")![1] as () => void;
+    shutdown();
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(exit).toHaveBeenCalledWith(0);
+    once.mockRestore();
+    exit.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("says how many it posted", async () => {
     vi.mocked(listScheduledPosts).mockResolvedValue([mockPost({ id: "due-1", scheduledAt: "2020-01-01T00:00:00.000Z" })]);
     vi.mocked(claimScheduledPost).mockImplementation(async (post) => post);
@@ -848,6 +865,27 @@ describe("schedule edit with recurrence", () => {
   afterEach(() => {
     logSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+
+  it("says so if the post went while you were editing it, rather than bringing it back", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([mockPost()]);
+    mockQuestion.mockResolvedValueOnce("t").mockResolvedValueOnce("Updated text");
+    vi.mocked(updateScheduledPost).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+
+    await program.parseAsync(["node", "bsky", "schedule", "edit", "1"]);
+
+    expect(errorSpy).toHaveBeenCalledWith("That post is being sent, or has gone, so your changes weren't saved.");
+    expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining("updated"));
+  });
+
+  it("says so if the post went while you were deleting it", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([mockPost()]);
+    mockQuestion.mockResolvedValueOnce("y").mockResolvedValueOnce("n");
+    vi.mocked(deleteScheduledPost).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+
+    await program.parseAsync(["node", "bsky", "schedule", "delete", "1"]);
+
+    expect(errorSpy).toHaveBeenCalledWith("That post is being sent, or has gone, so it wasn't deleted. If sending fails, it goes back in the queue.");
   });
 
   it("displays recurrence info for recurring posts", async () => {
