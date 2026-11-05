@@ -1,5 +1,6 @@
 import { AtpAgent } from "@atproto/api";
 import { saveSessionConfig } from "@/config";
+import { isNetworkError } from "@/lib/errors";
 import type { SessionConfig } from "@/lib/types";
 
 const clients = new Map<string, AtpAgent>();
@@ -71,7 +72,12 @@ export async function createClient(
     await saveSessionConfig(updated, profile);
 
     return agent;
-  } catch {
+  } catch (err) {
+    // Only the server saying no means the login is bad.
+    const { status } = err as { status?: number };
+    if (isNetworkError(err) || (status ?? 0) >= 500 || status === 429) {
+      throw new Error(`Can't reach ${session.host}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
     throw new Error(
       "Session expired. Run 'bsky login' to re-authenticate.",
     );

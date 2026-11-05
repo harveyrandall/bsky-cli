@@ -125,3 +125,16 @@ describe("sharedClient", () => {
     expect(signIn).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("createClient when it can't tell", () => {
+  beforeEach(() => mockAgent.resumeSession.mockReset());
+  it.each([
+    [new TypeError("fetch failed"), "Can't reach https://bsky.social: fetch failed"],
+    [Object.assign(new Error("Bad Gateway"), { status: 502 }), "Can't reach https://bsky.social: Bad Gateway"],
+    [Object.assign(new Error("Rate Limit Exceeded"), { status: 429 }), "Can't reach https://bsky.social: Rate Limit Exceeded"],
+    [Object.assign(new Error("Token has expired"), { status: 400 }), "Session expired"],
+  ])("reports %s", async (err, message) => {
+    mockAgent.resumeSession.mockRejectedValueOnce(err);
+    await expect(createClient(session)).rejects.toThrow(message);
+  });
+});
