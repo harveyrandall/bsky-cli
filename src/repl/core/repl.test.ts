@@ -498,7 +498,7 @@ describe("media", () => {
     const { repl, printed } = setup({}, { alt: vi.fn(async () => null) });
     await repl.attach(["/x/a.png"]);
     expect(repl.staged()).toEqual([]);
-    expect(printed()).toContain("Left out a.png");
+    expect(printed()).toContain("Left out a.png: Esc skips a file, and nothing's wrong with it. /attach it again to add it.");
   });
   it("calls paths media only if all of them are", async () => {
     const { repl } = setup();
@@ -525,7 +525,7 @@ describe("media", () => {
     const { repl, printed } = setup({ forceAlt: true }, { alt: vi.fn(async () => answers.shift()) });
     await repl.attach(["/x/a.png", "/x/b.png"]);
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.png"]);
-    expect(printed()).toContain("Left out a.png");
+    expect(printed()).toContain("Left out a.png: Esc skips a file, and nothing's wrong with it. /attach it again to add it.");
   });
   it("says why a file can't be attached and carries on", async () => {
     const { repl, printed } = setup();
@@ -1282,6 +1282,22 @@ describe("/delete and /undo", () => {
     await repl.deletePost("1");
     expect(ask.yesNo).toHaveBeenCalledWith('Delete (1) "one"? This stops the thread.');
     expect(repl.thread()).toBeUndefined();
+  });
+  it("says how to carry on from what's left of a stopped thread", async () => {
+    const { repl, printed } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 3");
+  });
+  it("offers nothing to carry on from if nothing's left", async () => {
+    const { repl, printed } = await written({}, ["one"]);
+    await repl.deletePost("1");
+    expect(printed()).not.toContain("To carry on");
+  });
+  it("won't offer a post that's gone too", async () => {
+    const { repl, printed } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("3");
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 2");
   });
   it("waits for what's queued, which may be replying to it", async () => {
     const { repl, agent, printed } = await written();

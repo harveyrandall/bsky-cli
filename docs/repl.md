@@ -35,7 +35,7 @@ The prompt shows what Enter will do with plain text:
 | `/attach <path…> [--alt "…"]` | Stage images or a video for the next post |
 | `/detach [n\|all]` | Unstage one file (counting from 1, in the order shown above the composer), or all of them, which is what `/detach` alone does |
 | `/edit [text]` | Write in `$EDITOR` (same as Ctrl+G) |
-| `/delete <ref>` | Delete one of your posts, after asking. A thread that was continuing from it goes back to the post before, or stops if there isn't one, and deleting a thread's first post stops the thread, as the question says. Refused while anything is queued |
+| `/delete <ref>` | Delete one of your posts, after asking. A thread that was continuing from it goes back to the post before, or stops if there isn't one, and deleting a thread's first post stops the thread, as the question says, and gives you the command to carry on from what's left. Refused while anything is queued |
 | `/undo` | Delete the last post you made this session, after asking. Refused while anything is queued: wait, or Esc takes back what hasn't gone yet |
 | `/drafts [id]` | List your drafts, or load one into the composer by its id or the start of it |
 | `/switch [profile]` | Post as another account, or with no name, the unnamed profile's. See [Switching account](#switching-account) |
@@ -55,7 +55,7 @@ Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it re
 
 **Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), a `#n` label from something you've read, its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
 
-A name that isn't a command gets a suggestion and your text stays. Command names start with a lowercase letter, so `/Help` and `/ x` are text; start with `\/` to post text that begins like a command.
+A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command.
 
 ## Reading and CLI commands
 

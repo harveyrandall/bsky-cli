@@ -651,7 +651,7 @@ export class Repl {
         explained = true;
         const answer = await this.askAlt(basename(path));
         if (answer === null) {
-          this.deps.print(`Left out ${basename(path)}`, "dim");
+          this.deps.print(`Left out ${basename(path)}: Esc skips a file, and nothing's wrong with it. /attach it again to add it.`, "dim");
           continue;
         }
         text = answer;
@@ -755,8 +755,13 @@ export class Repl {
     this.deps.print(`Deleted ${name}`, "dim");
     const mode = this.current;
     if ("target" in mode && mode.target.ref.uri === ref.uri) this.current = { kind: mode.returnTo };
-    if (stops) this.stopThread();
-    else this.stepBackFrom(ref.uri);
+    if (stops) {
+      this.stopThread();
+      const last = this.registry.entries().filter((e) => e.root.uri === ref.uri && !e.deleted).at(-1);
+      if (last) this.deps.print(`To carry on from its last post: /thread ${last.label}`, "dim");
+    } else {
+      this.stepBackFrom(ref.uri);
+    }
     this.deps.onChange();
     return "done";
   }
