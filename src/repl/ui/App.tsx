@@ -11,7 +11,7 @@ import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/c
 import type { SessionKeeper } from "@/repl/core/session";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
-import { emptyEditor, type EditorState } from "@/repl/ui/editor";
+import { emptyEditor, snap, type EditorState } from "@/repl/ui/editor";
 import { Choice, Countdown, ExitPrompt, SplitPreview, TextPrompt, YesNo, type ExitChoice } from "@/repl/ui/Overlays";
 
 export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
@@ -81,7 +81,9 @@ export function App(props: AppProps) {
   const fillComposer = (text: string) => setRestore((r) => ({ id: (r?.id ?? 0) + 1, text }));
   const [startingDraft] = useState(() => {
     const saved = props.resume;
-    return saved ? { ...emptyEditor(saved.history), ...saved.composer } : emptyEditor();
+    if (!saved) return emptyEditor();
+    const { text, cursor } = saved.composer;
+    return { ...emptyEditor(saved.history), text, cursor: snap(text, Math.min(cursor, text.length)) };
   });
   const composer = useRef(startingDraft);
   const composerText = () => composer.current.text;

@@ -23,7 +23,7 @@ const NEW_QUESTIONS: Partial<Record<(typeof NEW_ITEMS)[number], string>> = {
   "Quote post": "Post to quote (number, link or at:// URI):",
 };
 
-type ReturnTo = "idle" | "thread";
+export type ReturnTo = "idle" | "thread";
 
 export type ReplMode =
   | { kind: "idle" }

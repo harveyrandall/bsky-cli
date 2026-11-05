@@ -777,6 +777,25 @@ describe("App resuming", () => {
     expect(lastFrame()).toContain("bsky › halfX a thought");
     await type("\x15\x0b");
   });
+  it("doesn't trust a saved cursor: one past the end or inside a character is moved", async () => {
+    const past = setup({ resume: file({ composer: { text: "hi", cursor: 99 } }) });
+    await past.shows("── resumed k3f7xq ──");
+    await tick();
+    await past.type("!");
+    expect(past.lastFrame()).toContain("bsky › hi!");
+    const inside = setup({ resume: file({ composer: { text: "a👍b", cursor: 2 } }) });
+    await inside.shows("── resumed k3f7xq ──");
+    await tick();
+    await inside.type("!");
+    expect(inside.lastFrame()).toContain("bsky › a👍!b");
+  });
+  it("takes only the text and cursor from a saved composer", async () => {
+    const { shows, type, lastFrame } = setup({ resume: file({ composer: { text: "hi", cursor: 2, history: 5 } }) });
+    await shows("── resumed k3f7xq ──");
+    await tick();
+    await type("\x1b[A");
+    expect(lastFrame()).toContain("bsky › /thread");
+  });
   it("brings back what you'd submitted for ↑", async () => {
     const { type, lastFrame, shows } = setup({ resume: file({ composer: { text: "", cursor: 0 } }) });
     await shows("── resumed k3f7xq ──");

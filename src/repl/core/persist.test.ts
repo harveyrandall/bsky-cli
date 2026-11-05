@@ -5,7 +5,7 @@ import { open, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionStore, newSessionId, parseSessionFile, resolveId, type ReplSessionFile, type SessionListing } from "./persist";
-import { isIsoUtc, isMarker, isSessionId, type SessionId } from "./types";
+import { isIsoUtc, isSessionId, type SessionId } from "./types";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
@@ -89,6 +89,46 @@ const breaks: [string, (f: Mutable) => void][] = [
   ["pending[2].media", (f) => (f.pending[2].media = [{ path: "b.png", kind: "image" }])],
   ["history", (f) => (f.history = [1])],
   ["counters.nextLabel", (f) => (f.counters.nextLabel = "3")],
+  ["counters.nextViewed", (f) => (f.counters.nextViewed = -1)],
+  ["counters.nextLetter", (f) => (f.counters.nextLetter = 1e21)],
+  ["settings.autoThread", (f) => (f.settings.autoThread = "yes")],
+  ["settings.askToSave", (f) => (f.settings.askToSave = 1)],
+  ["settings.pace", (f) => (f.settings.pace = 7)],
+  ["settings.markers.send", (f) => (f.settings.markers.send = "")],
+  ["settings.markers.cut", (f) => (f.settings.markers.cut = "a b")],
+  ["posts[0].rkey", (f) => (f.posts[0].rkey = "nope")],
+  ["posts[0].authorDid", (f) => (f.posts[0].authorDid = "nope")],
+  ["posts[0].external", (f) => (f.posts[0].external = "not a handle")],
+  ["posts[0].letter", (f) => (f.posts[0].letter = "a")],
+  ["thread.root", (f) => (f.thread.root = { uri: "x", cid: "y" })],
+  ["pending[0].id", (f) => (f.pending[0].id = -1)],
+  ["pending[0].createdAt", (f) => (f.pending[0].createdAt = "then")],
+  ["pending[2].intent", (f) => delete f.pending[2].intent.root],
+  ["viewed", (f) => (f.viewed = [{ anything: 1 }])],
+];
+
+/** Fields that are each fine alone, wrong together. */
+const clashes: [string, string, (f: Mutable) => void][] = [
+  ["two posts with one label", "posts[1].label", (f) => (f.posts[1].label = "A1")],
+  ["two entries for one post", "posts[1].uri", (f) => Object.assign(f.posts[1], { uri: f.posts[0].uri, rkey: f.posts[0].rkey })],
+  ["a label that doesn't match its letter", "posts[0].label", (f) => (f.posts[0].letter = "B")],
+  ["a label that can't take a number", "posts[0].label", (f) => (f.posts[0].label = "AB1")],
+  ["a lettered post with letters off", "posts[0].letter", (f) => (f.settings.prefixThread = false)],
+  ["a post with no letter with letters on", "posts[0].letter", (f) => delete f.posts[0].letter],
+  ["a count behind the labels", "counters.nextLabel", (f) => {
+    f.settings.prefixThread = false;
+    f.posts = f.posts.map(({ letter: _, ...p }: Mutable, i: number) => ({ ...p, label: `${i + 1}` }));
+    f.mode = { kind: "idle" };
+    f.thread.letter = undefined;
+    f.counters.nextLabel = 2;
+  }],
+  ["a count of nothing", "counters.nextLabel", (f) => (f.counters.nextLabel = 0)],
+  ["a cursor in another thread", "thread.cursor", (f) => (f.thread.root = ref(b))],
+  ["a cursor with the wrong cid", "thread.cursor", (f) => (f.thread.cursor = { ...f.thread.cursor, cid: "bafywrong" })],
+  ["two markers the same", "settings.markers.send", (f) => (f.settings.markers.send = "///")],
+  ["a marker that starts a command", "settings.markers.split", (f) => (f.settings.markers.split = "/x")],
+  ["a queued quote that's also a reply", "pending[1]", (f) => (f.pending[1].target = { parent: ref(a), root: ref(a) })],
+  ["a queued reply to another thread", "pending[2].target", (f) => (f.pending[2].target = { parent: ref(b), root: ref(b) })],
 ];
 
 describe("parseSessionFile", () => {
@@ -107,6 +147,16 @@ describe("parseSessionFile", () => {
     const file = good() as Mutable;
     spoil(file);
     expect(() => parseSessionFile(file)).toThrow(`Session file: bad ${field}`);
+  });
+  it.each(clashes)("refuses %s", (_, field, spoil) => {
+    const file = good() as Mutable;
+    spoil(file);
+    expect(() => parseSessionFile(file)).toThrow(`Session file: bad ${field}`);
+  });
+  it("allows a cursor it has no entry for, such as a post continued from elsewhere", () => {
+    const file = good() as Mutable;
+    file.thread.cursor = ref("3lbx7kt5def2z");
+    expect(() => parseSessionFile(file)).not.toThrow();
   });
   it("refuses what isn't an object", () => {
     for (const raw of [null, 1, "text", []]) expect(() => parseSessionFile(raw)).toThrow("Session file");
@@ -142,11 +192,6 @@ describe("guards", () => {
     expect(isIsoUtc("2026-11-04T10:00:00.000Z")).toBe(true);
     expect(isIsoUtc("2026-11-04T10:00:00+01:00")).toBe(false);
     expect(isIsoUtc("2026-11-04")).toBe(false);
-  });
-  it("isMarker takes text with no spaces", () => {
-    expect(isMarker("///")).toBe(true);
-    expect(isMarker("")).toBe(false);
-    expect(isMarker("a b")).toBe(false);
   });
 });
 
@@ -204,6 +249,22 @@ describe("SessionStore", () => {
     expect(list.filter((l) => l.state === "unreadable").map((l) => l.id).sort()).toEqual(["bbbbbb", "cccccc"]);
     await store.delete(id("bbbbbb"));
     expect(existsSync(path("bbbbbb"))).toBe(false);
+  });
+  it("won't load a copy under another name, which would then save over the original", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("bbbbbb"), readFileSync(path("aaaaaa")));
+    await expect(store.load(id("bbbbbb"))).rejects.toThrow("Session file: bad id");
+    await expect(store.list()).resolves.toMatchObject([{ id: "aaaaaa" }, { id: "bbbbbb", state: "unreadable" }]);
+  });
+  it("lists a file whose name isn't a session as unreadable", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("backup copy"), readFileSync(path("aaaaaa")));
+    await expect(store.list()).resolves.toMatchObject([{ id: "aaaaaa", state: "ok" }, { id: "backup copy", state: "unreadable" }]);
+  });
+  it("won't replace a good file with one it couldn't load back", async () => {
+    await store.save(session("aaaaaa"));
+    await expect(store.save({ ...session("aaaaaa"), counters: { nextLabel: 0, nextViewed: 0, nextLetter: 0 } })).rejects.toThrow("Session file: bad counters.nextLabel");
+    await expect(store.load(id("aaaaaa"))).resolves.toEqual(session("aaaaaa"));
   });
   it("won't load a bad file", async () => {
     await store.save(session("aaaaaa"));

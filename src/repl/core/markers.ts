@@ -29,7 +29,7 @@ const CONFIG_KEYS: [Kind, "splitMarker" | "sendMarker" | "cutMarker", string][] 
 ];
 
 /** The marker rule `value` breaks, if any. */
-function brokenRule(value: unknown, seen: string[]): string | undefined {
+export function brokenRule(value: unknown, seen: string[]): string | undefined {
   if (typeof value !== "string") return "markers must be text";
   if (value === "") return "markers can't be empty";
   if (/\s/.test(value)) return "markers can't contain spaces";

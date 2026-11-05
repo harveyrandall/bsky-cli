@@ -42,7 +42,7 @@ export const isOwnLabel = (v: unknown): v is OwnLabel => isString(v) && /^(\d+|[
 export const isCooldown = (v: unknown): v is Cooldown => v === 0 || v === 5 || v === 10 || v === 15;
 export const isIsoUtc = (v: unknown): v is IsoUtc => isString(v) && v.endsWith("Z") && isDatetimeString(v);
 export const isSessionId = (v: unknown): v is SessionId => isString(v) && /^[a-z2-7]{6}$/.test(v);
-export const isMarker = (v: unknown): v is string => isString(v) && /^\S+$/.test(v);
+export const isThreadLetter = (v: unknown): v is ThreadLetter => isString(v) && /^[A-Z]{1,3}$/.test(v);
 
 // The whole string, canonical form only (no query, fragment or extra
 // segments), so what the guard checks is exactly what callers use.

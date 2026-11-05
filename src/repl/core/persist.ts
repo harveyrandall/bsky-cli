@@ -3,10 +3,10 @@ import type { FileHandle } from "node:fs/promises";
 import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { canStage, type StagedMedia } from "./media";
-import type { Markers } from "./markers";
+import { brokenRule, type Markers } from "./markers";
 import type { Unsent } from "./pipeline";
 import type { RegistryEntry } from "./refs";
-import type { ReplSettings } from "./repl";
+import type { ReplSettings, ReturnTo, ThreadState } from "./repl";
 import {
   isAtUri,
   isCid,
@@ -14,20 +14,16 @@ import {
   isDid,
   isHandle,
   isIsoUtc,
-  isMarker,
   isOwnLabel,
   isRkey,
   isSessionId,
+  isThreadLetter,
   type Did,
   type Handle,
   type IsoUtc,
   type OwnLabel,
   type SessionId,
-  type StrongRef,
-  type ThreadLetter,
 } from "./types";
-
-type ReturnTo = "idle" | "thread";
 
 /** The mode, with a target as its label: the registry knows the rest. */
 export type SavedMode =
@@ -48,7 +44,7 @@ export interface ReplSessionFile {
   posts: RegistryEntry[];
   /** `#n` labels, which arrive with viewing posts. */
   viewed: never[];
-  thread?: { root: StrongRef; cursor: StrongRef; letter?: ThreadLetter; count: number };
+  thread?: ThreadState;
   mode: SavedMode;
   composer: { text: string; cursor: number };
   staged: StagedMedia[];
@@ -60,10 +56,9 @@ export interface ReplSessionFile {
 type Fields = Record<string, unknown>;
 
 const isObject = (v: unknown): v is Fields => typeof v === "object" && v !== null && !Array.isArray(v);
-const isCount = (v: unknown) => Number.isInteger(v) && (v as number) >= 0;
+const isCount = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
 const isRef = (v: unknown) => isObject(v) && isAtUri(v.uri) && isCid(v.cid);
 const isTarget = (v: unknown) => isObject(v) && isRef(v.parent) && isRef(v.root);
-const isLetter = (v: unknown) => typeof v === "string" && /^[A-Z]{1,3}$/.test(v);
 const isReturnTo = (v: unknown) => v === "idle" || v === "thread";
 const optional = (v: unknown, ok: (v: unknown) => boolean) => v === undefined || ok(v);
 
@@ -80,7 +75,11 @@ function checkSettings(s: unknown): void {
   need(optional(s.undo, isCooldown), "settings.undo");
   need(optional(s.pace, isCooldown), "settings.pace");
   need(isObject(s.markers), "settings.markers");
-  for (const key of ["split", "send", "cut"]) need(isMarker(s.markers[key]), `settings.markers.${key}`);
+  const seen: string[] = [];
+  for (const key of ["split", "send", "cut"]) {
+    need(brokenRule(s.markers[key], seen) === undefined, `settings.markers.${key}`);
+    seen.push(s.markers[key] as string);
+  }
 }
 
 function checkEntry(e: unknown, at: string): void {
@@ -95,7 +94,7 @@ function checkEntry(e: unknown, at: string): void {
   need(typeof e.excerpt === "string", `${at}.excerpt`);
   need(optional(e.notes, (v) => typeof v === "string"), `${at}.notes`);
   need(optional(e.external, isHandle), `${at}.external`);
-  need(optional(e.letter, isLetter), `${at}.letter`);
+  need(optional(e.letter, isThreadLetter), `${at}.letter`);
 }
 
 function checkMode(m: unknown): void {
@@ -136,7 +135,33 @@ function checkItem(item: unknown, at: string): void {
   need(typeof item.createdAt === "number", `${at}.createdAt`);
   need(optional(item.target, isTarget), `${at}.target`);
   if (item.media !== undefined) checkMedia(item.media, `${at}.media`);
-  if ((item.intent as Fields).kind === "quote") need(item.posts.length === 1 && item.media === undefined, at);
+  const intent = item.intent as Fields;
+  if (intent.kind === "quote") need(item.posts.length === 1 && item.media === undefined && item.target === undefined, at);
+  if (intent.kind === "reply" && item.target) {
+    need(((item.target as Fields).root as Fields).uri === (intent.root as Fields).uri, `${at}.target`);
+  }
+}
+
+/**
+ * Fields that are each fine alone but would misdirect a post, or poison the next
+ * save. Only what does harm: a session refused here is a session lost, so a
+ * mismatch that's only shown, like `rkey`, is left alone.
+ */
+function checkTogether(f: ReplSessionFile): void {
+  const labels = new Set<string>();
+  const entries = new Map<string, RegistryEntry>();
+  f.posts.forEach((e, i) => {
+    const [, letter, n] = /^([A-Z]*)(\d+)$/.exec(e.label)!;
+    need(f.settings.prefixThread === (e.letter !== undefined), `posts[${i}].letter`);
+    need(!labels.has(e.label) && letter === (e.letter ?? "") && Number.isSafeInteger(Number(n)), `posts[${i}].label`);
+    need(!entries.has(e.uri), `posts[${i}].uri`);
+    if (!f.settings.prefixThread) need(Number(n) < f.counters.nextLabel, "counters.nextLabel");
+    labels.add(e.label);
+    entries.set(e.uri, e);
+  });
+  need(f.counters.nextLabel > 0, "counters.nextLabel");
+  const cursor = f.thread && entries.get(f.thread.cursor.uri);
+  if (cursor) need(cursor.cid === f.thread!.cursor.cid && cursor.root.uri === f.thread!.root.uri, "thread.cursor");
 }
 
 /** Every field, or an error naming the first bad one: a file is never loaded half-valid. */
@@ -152,13 +177,13 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   checkSettings(raw.settings);
   need(Array.isArray(raw.posts), "posts");
   raw.posts.forEach((e, i) => checkEntry(e, `posts[${i}]`));
-  need(Array.isArray(raw.viewed), "viewed");
+  need(Array.isArray(raw.viewed) && raw.viewed.length === 0, "viewed");
   if (raw.thread !== undefined) {
     const t = raw.thread;
     need(isObject(t), "thread");
     need(isRef(t.root), "thread.root");
     need(isRef(t.cursor), "thread.cursor");
-    need(optional(t.letter, isLetter), "thread.letter");
+    need(optional(t.letter, isThreadLetter), "thread.letter");
     need(isCount(t.count), "thread.count");
   }
   checkMode(raw.mode);
@@ -173,7 +198,9 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   const n = raw.counters;
   need(isObject(n), "counters");
   for (const key of ["nextLabel", "nextViewed", "nextLetter"]) need(isCount(n[key]), `counters.${key}`);
-  return raw as unknown as ReplSessionFile;
+  const file = raw as unknown as ReplSessionFile;
+  checkTogether(file);
+  return file;
 }
 
 /** Nothing to come back to, so not worth keeping. */
@@ -234,7 +261,9 @@ export class SessionStore {
       await mkdir(this.dir, { recursive: true, mode: 0o700 });
       const tmp = this.path(`${file.id}.${process.pid}`, "tmp");
       try {
-        await writeFile(tmp, JSON.stringify(file), { mode: 0o600 });
+        const json = JSON.stringify(file);
+        parseSessionFile(JSON.parse(json)); // never replace a good file with one load() would refuse
+        await writeFile(tmp, json, { mode: 0o600 });
         await rename(tmp, this.path(file.id));
       } catch (err) {
         await rm(tmp, { force: true });
@@ -246,14 +275,17 @@ export class SessionStore {
   }
 
   async load(id: SessionId): Promise<ReplSessionFile> {
-    return parseSessionFile(JSON.parse(await readFile(this.path(id), "utf-8")));
+    const file = parseSessionFile(JSON.parse(await readFile(this.path(id), "utf-8")));
+    need(file.id === id, "id"); // a copy would otherwise lock and save the original
+    return file;
   }
 
   /** Newest first; a file that won't parse sorts last, listed so it can be deleted. */
   async list(): Promise<SessionListing[]> {
     const names = await this.files();
     const ids = names.filter((n) => n.endsWith(".json")).map((n) => n.slice(0, -".json".length));
-    const listings = await Promise.all(ids.map((id) => this.listing(id)));
+    const unreadable = (id: string): SessionListing => ({ id, summary: "", state: "unreadable" });
+    const listings = await Promise.all(ids.map((id) => (isSessionId(id) ? this.listing(id) : unreadable(id))));
     return listings.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   }
 
