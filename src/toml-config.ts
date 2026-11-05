@@ -1,8 +1,9 @@
-import { readFileSync, existsSync, mkdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { parse } from "smol-toml";
 import { Command } from "commander";
 import { bskyDir } from "@/config";
+import { replaceFile } from "@/lib/files";
 
 // Keys in TOML that use a readable name but map to a different Commander attribute
 const OPTION_KEY_MAP: Record<string, Record<string, string>> = {
@@ -49,21 +50,6 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The comment after a `key = value` line's value. */
 const TRAILING_COMMENT = /^[^=]*=\s*(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^#\s]*)(\s*#.*)$/;
-
-/** Replace a file in one step, through a symlink and keeping its permissions. */
-function replaceFile(path: string, text: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const exists = existsSync(path);
-  const target = exists ? realpathSync(path) : path;
-  const tmp = `${target}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, text, exists ? { mode: statSync(target).mode } : {});
-    renameSync(tmp, target);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
-}
 
 /**
  * Set keys in one section of a TOML file without disturbing anything else.

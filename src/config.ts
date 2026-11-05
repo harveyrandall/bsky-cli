@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { readdirSync } from "node:fs";
 import chalk from "chalk";
+import { replaceFile } from "@/lib/files";
 import type { Config, SessionConfig, AuthInfo } from "@/lib/types";
 
 // ── Platform-appropriate config directory ────────────────────────────
@@ -145,7 +146,7 @@ async function migrateIfNeeded(profile?: string): Promise<SessionConfig | null> 
     };
 
     // Save to new location
-    await saveSessionConfig(session, profile);
+    saveSessionConfig(session, profile);
 
     // Rename old config (don't delete — keep as backup)
     await rename(legacyConfigFp, legacyConfigFp + ".bak").catch(() => {});
@@ -225,15 +226,12 @@ export async function loadSessionConfig(
   );
 }
 
-export async function saveSessionConfig(
-  session: SessionConfig,
-  profile?: string,
-): Promise<void> {
-  const fp = sessionPath(profile);
-  await mkdir(dirname(fp), { recursive: true });
-  await writeFile(fp, JSON.stringify(session, null, "  ") + "\n", {
-    mode: 0o600,
-  });
+/**
+ * Done before it returns, and in one step: a refresh has already spent the old
+ * token, and another process may be reading this file.
+ */
+export function saveSessionConfig(session: SessionConfig, profile?: string): void {
+  replaceFile(sessionPath(profile), JSON.stringify(session, null, "  ") + "\n", 0o600);
 }
 
 /** @deprecated Use saveSessionConfig — this persists passwords */

@@ -64,7 +64,7 @@ export function registerLogin(program: Command): void {
           refreshJwt: loginResponse.data.refreshJwt,
         };
 
-        await saveSessionConfig(session, profile);
+        saveSessionConfig(session, profile);
 
         // Try storing in OS keychain as well (best-effort)
         const key = sessionKey(loginResponse.data.handle, profile);
