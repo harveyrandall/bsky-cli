@@ -188,6 +188,17 @@ describe("startRepl", () => {
     });
   });
 
+  it("hands the App the flags a resume ignored", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const session = { store: {}, id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", did: "did:plc:me", keep: 7, ignoredFlags: ["--undo 10: /settings undo 10"] } as never;
+    const running = startRepl({ ...options, session });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    expect(render.mock.calls[0][0].props.ignoredFlags).toEqual(["--undo 10: /settings undo 10"]);
+    app.unmount();
+    await running.catch(() => {});
+  });
+
   it("doesn't count a scheduler that sends another profile's posts", async () => {
     const app = fakeInstance();
     render.mockReturnValue(app);
