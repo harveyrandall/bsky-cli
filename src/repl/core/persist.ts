@@ -336,7 +336,7 @@ export class SessionStore {
     return this.path(id, "lock");
   }
 
-  /** False if another REPL has it. */
+  /** False if a REPL has it, this one included. */
   async lock(id: SessionId): Promise<boolean> {
     const state = await this.lockState(id);
     if (state === "held") return false;

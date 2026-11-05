@@ -153,7 +153,7 @@ export function App(props: AppProps) {
   };
   changed.current = save;
   // Typing is saved once it pauses. A submit, a paste or text coming back is saved at
-  // once: a post must never be in the file both as text and as queued for long.
+  // once, so a post is never in the file for long as both text and queued.
   const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onEditor = (state: EditorState) => {
     const jumped = state.text === "" || Math.abs(state.text.length - composer.current.text.length) > 1;

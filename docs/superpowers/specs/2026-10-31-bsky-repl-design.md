@@ -355,19 +355,19 @@ interface StrongRef { uri: AtUri; cid: Cid }
 ```
 Resume a session?
 › + new
-  2026-10-31T14:05:22  k3f9xq  @you · 2 threads, 7 posts · "Launch day! Here's what…"
-  2026-10-30T21:40:03  p8m2wd  @you · 1 thread, 3 posts · "Thinking about lexicons…"
+  2026-10-31T14:05:22  k3f7xq  @you · 2 threads, 7 posts · "Launch day! Here's what…"
+  2026-10-30T21:40:03  p2m2wd  @you · 1 thread, 3 posts · "Thinking about lexicons…"
 ```
 
 Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from counts + first post text). `+ new` is pre-selected. Sessions locked by a running REPL show `in use` and cannot be opened.
 
-**On resume:** replay registry lines dimmed under `── resumed k3f9xq ──`; verify `cursor` with `getPosts` (if deleted, fall back to the nearest surviving ancestor, else stop the thread); pending items ask `send · edit · discard`; missing staged files are dropped with a warning; if the session's account differs, switch to its profile.
+**On resume:** replay registry lines dimmed under `── resumed k3f7xq ──`; verify `cursor` with `getPosts` (if deleted, fall back to the nearest surviving ancestor, else stop the thread); pending items ask `send · edit · discard`; missing staged files are dropped with a warning; if the session's account differs, switch to its profile.
 
 **Housekeeping:** lock file `<id>.lock` with the PID (stale locks with dead PIDs are cleared); sessions with no posts and no composer text are deleted on exit; prune to `keep-sessions`, oldest first.
 
 **Exit summary**
 
-- Normal: `7 posts in 2 threads · resume: bsky -r k3f9xq` (resume hint omitted with `-R`).
+- Normal: `7 posts in 2 threads · resume: bsky -r k3f7xq` (resume hint omitted with `-R`).
 - Verbose: session id, start–end time and duration, handle; per thread, every post as `(n) rkey (at://…) "excerpt"`; standalone posts; deleted posts; failures with draft ids; resume command.
 
 ## 13. Slash commands

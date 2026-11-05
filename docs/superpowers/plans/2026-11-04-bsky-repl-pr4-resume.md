@@ -18,6 +18,10 @@
 | `viewed`, `counters.nextViewed` in the file | Saved empty and 0 | `#n` labels arrive in PR 5; keeping the fields means `version: 1` needn't change then. |
 | `pending: QueueItem[]` | Saves `Unsent` (with `target`) | A resumed item must go to the same place, and PR 2's items resolve parents at send time. |
 | Pending items ask `send · edit · discard` | `edit` puts them in the composer as `asResend` does | Same behaviour as Esc, no second editor path. |
+| `thread` has `root`, `cursor`, `letter` | Also `count`, and a top-level `lastThreadLetter` | The "Thread stopped" line needs the count, and a bare number needs the last thread after a resume. |
+| `settings` has required `undo`, `pace` | Optional, plus `askToSave` | They can still be unset at a kill. |
+| Sessions with no posts and no composer text are deleted | Also no staged files and no unsent posts | Those are worth coming back to. |
+| Switch to the session's profile if the account differs | Always opens under the session's profile, and refuses if it's another account | It can't post as the wrong account. |
 
 ## Global Constraints
 
@@ -42,7 +46,7 @@
 4. Pending posts never send by themselves on resume, including one that may have been in flight at the kill. Test: Task 4 "asks before sending anything".
 5. A session belonging to another account is opened under its own profile, or refused; it never posts as the wrong account. Test: Task 5 account cases.
 
-The session file also closes a gap left by PR 3: when the terminal goes away, queued posts and staged media survive, because they're on disk. Saved `pending` items use `Pipeline.unsent()`, so a post in flight at the kill is saved too and must be offered, not assumed gone. A queued thread item's `target` is the cursor when saved, so items behind one another chain only if they're restored in order and resolve their parent at send time.
+The session file also closes a gap left by PR 3: when the terminal goes away, queued posts and staged media survive, because they're on disk. Saved `pending` items use `Pipeline.pending()`, not `unsent()`, so a post in flight at the kill is saved too and must be offered, not assumed gone. A queued thread item's `target` is the cursor when saved, so items behind one another chain only if they're restored in order and resolve their parent at send time.
 
 ---
 

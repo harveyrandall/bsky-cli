@@ -109,7 +109,7 @@ export function registerRepl(program: Command): void {
     .option("-f, --force-alt", "Require alt text for media")
     .option("--thread-label", "Add 🧵 to posts in the active thread")
     .option("--prepend-thread-label", "Put the 🧵 first instead of last")
-    .option("-r, --resume [id]", 'Resume a saved session (id, prefix or "last")')
+    .option("-r, --resume [id]", 'Resume a saved session: an id, a prefix or "last"; with no id, show the list')
     .option("--resumable", "Save this session so it can be resumed (default)")
     .option("-R, --no-resumable", "Don't save this session")
     .allowExcessArguments()

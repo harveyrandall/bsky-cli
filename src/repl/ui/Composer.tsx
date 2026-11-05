@@ -76,7 +76,7 @@ export interface ComposerProps {
   chips?: string;
   /** Text coming back (a rejected post, a paste that wasn't a drop): added whenever `id` changes. */
   restore?: { id: number; text: string };
-  /** The draft, whenever it changes. */
+  /** The editor's state after every action. */
   onEditor(state: EditorState): void;
   /** Where to start: a resumed session's draft. */
   initial?: EditorState;
