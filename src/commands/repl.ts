@@ -9,7 +9,7 @@ import { repostPost, unrepostPost } from "@/commands/repost";
 import { activeConfigPath } from "@/toml-config";
 import { resolveMarkers, type Markers } from "@/repl/core/markers";
 import { mediaOptions } from "@/repl/core/media";
-import { passthroughFlags, passthroughKnows, passthroughNames, runPassthrough } from "@/repl/core/passthrough";
+import { passthroughFlags, passthroughKnows, passthroughNames, runPassthrough, uriArguments } from "@/repl/core/passthrough";
 import { SessionStore, newSessionId, resolveId, type ReplSessionFile } from "@/repl/core/persist";
 import type { PostLookup } from "@/repl/core/refs";
 import type { ReplAgent, ReplSettings } from "@/repl/core/repl";
@@ -194,6 +194,7 @@ async function openRepl(
       names: () => passthroughNames(program),
       knows: (name) => passthroughKnows(program, name),
       flags: (name) => passthroughFlags(program, name),
+      uriArguments: (argv) => uriArguments(program, argv),
       run: (argv, print) => runPassthrough(program, argv, { print, profile }),
     },
     async switchAccount(name) {

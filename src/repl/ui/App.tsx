@@ -45,6 +45,7 @@ export interface AppProps {
     names(): string[];
     knows(name: string): boolean;
     flags(name: string): string[];
+    uriArguments(argv: string[]): ReadonlySet<number>;
     run(argv: string[], print: (text: string, style?: LineStyle) => void): Promise<SubmitOutcome>;
   };
   /** The config file's name, for the save offer. */
@@ -377,7 +378,7 @@ export function App(props: AppProps) {
   const passthrough = cli && {
     names: () => cli.names(),
     knows: (name: string) => cli.knows(name),
-    run: (argv: string[]) => cli.run(repl.expandLabels(argv), print),
+    run: (argv: string[]) => cli.run(repl.expandLabels(argv, cli.uriArguments(argv)), print),
   };
   const countdown = repl.countdown();
   const failure = repl.pausedBy();

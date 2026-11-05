@@ -399,8 +399,8 @@ export class Repl {
   }
 
   /** CLI arguments with each whole `#n` as its URI. A bare number is usually a count, so it's left alone. */
-  expandLabels(argv: readonly string[]): string[] {
-    return argv.map((arg) => this.registry.viewed(arg)?.uri ?? arg);
+  expandLabels(argv: readonly string[], at: ReadonlySet<number>): string[] {
+    return argv.map((arg, i) => (at.has(i) && this.registry.viewed(arg)?.uri) || arg);
   }
 
   /** Media waiting for the next post. */

@@ -1610,7 +1610,7 @@ describe("posts you read", () => {
   it("expand in CLI arguments, but only as a whole argument", () => {
     const { repl } = setup();
     repl.labelPost(seen(1));
-    expect(repl.expandLabels(["thread", "#1", "-n", "5", "#12", "see #1"])).toEqual(["thread", seen(1).uri, "-n", "5", "#12", "see #1"]);
+    expect(repl.expandLabels(["thread", "#1", "-n", "5", "#12", "see #1"], new Set([1, 4, 5]))).toEqual(["thread", seen(1).uri, "-n", "5", "#12", "see #1"]);
   });
   it("keep #n across a resume, and new ones carry on", async () => {
     const first = setup();
