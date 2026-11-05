@@ -369,12 +369,12 @@ export class Repl {
 
   /** Where a post goes whose thread has gone: a new thread, or one that's still there. False if they back out. */
   private async findThread(): Promise<boolean> {
-    const where = await this.deps.ask.choose("Its thread couldn't be found", ["Start a new thread", "Paste a link to it"], 0);
+    const where = await this.deps.ask.choose("Its thread couldn't be found", ["Start a new thread", "Paste a link to a post"], 0);
     if (where === undefined) return false;
     while (where === 1) {
       const link = await this.deps.ask.text("Link to the post to continue from:");
       if (!link?.trim()) return false;
-      const resolved = await this.resolve(link);
+      const resolved = await this.lookUp(link);
       if (!resolved) continue;
       const mode = this.current;
       this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
@@ -385,6 +385,21 @@ export class Repl {
     // Whatever's left of it follows this one.
     this.threadLost = false;
     return true;
+  }
+
+  /** A post that's really there: the registry still has the posts checkThread couldn't find. */
+  private async lookUp(link: string): Promise<ResolvedRef | undefined> {
+    this.deps.print("Looking up that post…", "dim");
+    const found = async () => {
+      const resolved = await this.resolve(link);
+      if (!resolved?.entry || (await this.agent.getPosts([resolved.ref.uri])).length > 0) return resolved;
+      this.deps.print(`Couldn't find (${resolved.entry.label}): paste a link to a post that's still there`, "error");
+      return undefined;
+    };
+    return this.within(found(), 10_000).catch((err: unknown) => {
+      this.deps.print(`Couldn't look that up (${err instanceof Error ? err.message : String(err)})`, "error");
+      return undefined;
+    });
   }
 
   private continueThread(resolved: ResolvedRef): void {

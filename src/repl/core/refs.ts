@@ -279,7 +279,7 @@ export async function resolveRef(
     if (!uri) throw new Error(`No post ${s} in this session`);
   }
   const atUri = /^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/?#]+)$/.exec(s);
-  const link = /^https:\/\/bsky\.app\/profile\/([^/]+)\/post\/([^/?#]+)\/?$/.exec(s);
+  const link = /^https:\/\/bsky\.app\/profile\/([^/]+)\/post\/([^/?#]+)\/?(?:[?#]\S*)?$/.exec(s);
   if (uri) {
     // A viewed post: found above.
   } else if (atUri || link) {

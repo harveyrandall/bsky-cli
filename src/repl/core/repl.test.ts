@@ -1059,7 +1059,7 @@ describe("resume", () => {
           const file = await queued();
           const { repl, ask } = sending(0);
           await repl.resume(file);
-          expect(ask.choose).toHaveBeenLastCalledWith("Its thread couldn't be found", ["Start a new thread", "Paste a link to it"], 0);
+          expect(ask.choose).toHaveBeenLastCalledWith("Its thread couldn't be found", ["Start a new thread", "Paste a link to a post"], 0);
         });
         it("continues from a link, as a reply to that post", async () => {
           const file = await queued();
@@ -1070,6 +1070,44 @@ describe("resume", () => {
           expect(repl.thread()?.root.uri).toBe(uri);
           expect(repl.mode().kind).toBe("thread");
           expect(printed()).toContain("Continuing the thread from (");
+        });
+        it("won't continue from a post of the thread it just failed to find", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("1").mockResolvedValueOnce(undefined);
+          const s = sending(1, text);
+          s.agent.getPosts.mockReset();
+          s.agent.getPosts.mockResolvedValue([]);
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.printed()).toContain("Couldn't find (1): paste a link to a post that's still there");
+          expect(s.posted).toEqual([]);
+          expect(s.deps.restore).toHaveBeenCalledWith("/thread waiting");
+        });
+        it("accepts a post from the session that's still there", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("1");
+          const s = sending(1, text);
+          s.agent.getPosts.mockReset();
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          s.agent.getPosts.mockResolvedValue([{ ...post, uri: ref(1).uri, cid: ref(1).cid }] as never);
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.posted[0].reply?.parent).toEqual(ref(1));
+        });
+        it("gives up on a lookup that hangs, and asks again", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce(link).mockResolvedValueOnce(undefined);
+          const s = sending(1, text);
+          s.agent.getPosts.mockReset();
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          s.agent.getPosts.mockReturnValue(new Promise(() => {}));
+          const resumed = s.repl.resume(file);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await resumed;
+          expect(s.printed()).toContain("Looking up that post…");
+          expect(s.printed()).toContain("Couldn't look that up (timed out)");
+          expect(text).toHaveBeenCalledTimes(2);
+          expect(s.posted).toEqual([]);
         });
         it("asks again after a link it can't use", async () => {
           const file = await queued();
