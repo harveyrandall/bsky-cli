@@ -250,18 +250,18 @@ export async function saveConfig(
 
 // ── Profile listing ──────────────────────────────────────────────────
 
+/** Profiles with a saved session. */
+export function profileNames(): string[] {
+  const dir = bskyDir();
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((file) => file.startsWith("session-") && file.endsWith(".json"))
+    .map((file) => file.slice(8, -5));
+}
+
 function listProfiles(): void {
   // Check new location first
-  const dir = bskyDir();
-  if (existsSync(dir)) {
-    const files = readdirSync(dir);
-    for (const file of files) {
-      if (file.startsWith("session-") && file.endsWith(".json")) {
-        const name = file.slice(8, -5);
-        console.log(name);
-      }
-    }
-  }
+  for (const name of profileNames()) console.log(name);
 
   // Also check legacy location for unmigrated profiles
   const legacyDir = legacyBskyDir();

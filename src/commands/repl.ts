@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { InvalidArgumentError, type Command } from "commander";
 import type { AppBskyFeedDefs, AtpAgent } from "@atproto/api";
-import { bskyDir } from "@/config";
+import { bskyDir, profileNames } from "@/config";
 import { getClient } from "@/index";
 import { likePost, unlikePost } from "@/commands/like";
 import { createPost } from "@/commands/post";
@@ -197,6 +197,8 @@ async function openRepl(
       run: (argv, print) => runPassthrough(program, argv, { print, profile }),
     },
     async switchAccount(name) {
+      // `-p ?` lists them and exits, which here would end the REPL.
+      if (name === "?") throw new Error(`Pick a profile: ${profileNames().join(", ") || "there are none yet"}`);
       const before = profile;
       program.setOptionValue("profile", name);
       try {

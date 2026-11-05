@@ -310,6 +310,33 @@ describe("saved sessions", () => {
     await expect(switchAccount("nope")).rejects.toThrow("Not logged in");
     expect(p.opts().profile).toBe("work");
   });
+  describe("/switch", () => {
+    let home: string;
+    const open = async () => {
+      await makeProgram().parseAsync(["repl"], { from: "user" });
+      return startRepl.mock.lastCall![0].switchAccount as (name: string) => Promise<{ profile: string }>;
+    };
+    let dir: string;
+    const session = (file: string, handle: string) => writeFileSync(join(dir, file), JSON.stringify({ handle }));
+    beforeEach(async () => {
+      home = mkdtempSync(join(tmpdir(), "bsky-switch-"));
+      vi.stubEnv("HOME", home);
+      vi.stubEnv("APPDATA", home);
+      dir = (await vi.importActual<typeof import("@/config")>("@/config")).bskyDir();
+      mkdirSync(dir, { recursive: true });
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    });
+    it("lists the profiles on ?, which would otherwise exit", async () => {
+      session("session-work.json", "work.bsky.social");
+      const exit = vi.spyOn(process, "exit");
+      const switchAccount = await open();
+      await expect(switchAccount("?")).rejects.toThrow("Pick a profile: work");
+      expect(exit).not.toHaveBeenCalled();
+    });
+  });
   it("uses the session's own profile", async () => {
     write({ profile: "work" });
     const p = makeProgram();
