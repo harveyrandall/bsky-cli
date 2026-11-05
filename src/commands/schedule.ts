@@ -9,6 +9,10 @@ import {
   saveScheduledPost,
   listScheduledPosts,
   deleteScheduledPost,
+  claimScheduledPost,
+  finishScheduledPost,
+  releaseScheduledPost,
+  unfinishedPosts,
   updateScheduledPost,
   isScheduledDirEmpty,
 } from "@/scheduled";
@@ -42,6 +46,10 @@ const PAGE_SIZE = 5;
  */
 async function postDueItems(program: Command): Promise<number> {
   const profile = program.opts().profile;
+  for (const { id, text, path } of await unfinishedPosts(profile)) {
+    const line = text.split("\n")[0];
+    console.error(`A run stopped while sending ${id} ("${line}"), so it may have gone out. Check, then delete ${path}, or rename it to end in .json to send it.`);
+  }
   const posts = await listScheduledPosts(profile);
   const due = posts.filter((p) => new Date(p.scheduledAt) <= new Date());
 
@@ -52,39 +60,51 @@ async function postDueItems(program: Command): Promise<number> {
 
   for (const post of due) {
     try {
-      const result = await createPost(agent, post.text, {
+      if (!(await claimScheduledPost(post.id, profile))) continue;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Couldn't take ${post.id} from the queue, so it wasn't sent: ${msg}`);
+      continue;
+    }
+
+    let result;
+    try {
+      result = await createPost(agent, post.text, {
         images: post.images,
         imageAlts: post.imageAlts,
         video: post.video,
         videoAlt: post.videoAlt,
       });
-      console.log(result.uri);
-      posted++;
-
-      // Handle recurring posts: mutate in place instead of deleting
-      if (post.rrule) {
-        const isLastOccurrence = post.remainingCount != null && post.remainingCount <= 1;
-        if (!isLastOccurrence) {
-          const freq = parseRRuleFrequency(post.rrule);
-          if (freq) {
-            const next = nextOccurrence(new Date(post.scheduledAt), freq);
-            if (next) {
-              post.scheduledAt = next.toISOString();
-              if (post.remainingCount != null) {
-                post.remainingCount = post.remainingCount - 1;
-                post.rrule = buildRRule(freq, post.remainingCount);
-              }
-              await updateScheduledPost(post, profile);
-              continue;
-            }
-          }
-        }
-      }
-      // One-shot post or last occurrence — delete
-      await deleteScheduledPost(post.id, profile);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Failed to post ${post.id}: ${msg}`);
+      await releaseScheduledPost(post.id, profile).catch((back: unknown) => {
+        console.error(`Couldn't put ${post.id} back in the queue: ${back instanceof Error ? back.message : String(back)}`);
+      });
+      continue;
+    }
+    console.log(result.uri);
+    posted++;
+
+    try {
+      // Handle recurring posts: mutate in place instead of deleting
+      if (post.rrule) {
+        const isLastOccurrence = post.remainingCount != null && post.remainingCount <= 1;
+        const freq = isLastOccurrence ? undefined : parseRRuleFrequency(post.rrule);
+        const next = freq && nextOccurrence(new Date(post.scheduledAt), freq);
+        if (freq && next) {
+          post.scheduledAt = next.toISOString();
+          if (post.remainingCount != null) {
+            post.remainingCount = post.remainingCount - 1;
+            post.rrule = buildRRule(freq, post.remainingCount);
+          }
+          await updateScheduledPost(post, profile);
+        }
+      }
+      await finishScheduledPost(post.id, profile);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Posted ${post.id}, but couldn't clear it from the queue: ${msg}. It won't send again.`);
     }
   }
 

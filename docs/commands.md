@@ -280,6 +280,10 @@ Post all scheduled items that are due. Designed for use with external cron jobs 
 bsky schedule run
 ```
 
+Each post leaves the queue before it's sent, so it can't go out twice, even with `schedule run` and `schedule watch` both running. If it can't be taken from the queue, it isn't sent and the run says why. If sending fails, it goes back for the next run.
+
+If a run is stopped while sending, that post may or may not have gone out, so it's kept aside in the scheduled folder as `<id>.sending`, and later runs tell you. Check your profile, then delete the file, or rename it to end in `.json` to send it.
+
 ### `bsky schedule watch`
 
 Run a foreground watcher that checks for due posts on a cron schedule. Stays open until you press Ctrl+C.

@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
+import { readFile, rename, stat, utimes, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { bskyDir } from "@/config";
@@ -12,6 +12,13 @@ export function scheduledDir(profile?: string): string {
 function scheduledPath(id: string, profile?: string): string {
   return join(scheduledDir(profile), `${id}.json`);
 }
+
+function claimPath(id: string, profile?: string): string {
+  return join(scheduledDir(profile), `${id}.sending`);
+}
+
+/** A send can take this long, video and all, so a claim younger than this may still be in use. */
+const STILL_SENDING_MS = 60 * 60_000;
 
 function generateId(): string {
   const ts = Date.now();
@@ -83,6 +90,51 @@ export async function deleteScheduledPost(
   profile?: string,
 ): Promise<void> {
   await unlink(scheduledPath(id, profile));
+}
+
+/**
+ * Takes a post out of the queue before it's sent, so nothing can send it twice: not a
+ * run that couldn't remove it afterwards, a kill mid-send, or another run at the same
+ * moment. False if another run got there first. If this throws, don't send it.
+ */
+export async function claimScheduledPost(id: string, profile?: string): Promise<boolean> {
+  try {
+    await rename(scheduledPath(id, profile), claimPath(id, profile));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw err;
+  }
+  // Renaming keeps the file's age, and unfinishedPosts goes by when it was taken.
+  const now = new Date();
+  await utimes(claimPath(id, profile), now, now).catch(() => {});
+  return true;
+}
+
+/** It couldn't be sent, so back it goes. */
+export async function releaseScheduledPost(id: string, profile?: string): Promise<void> {
+  await rename(claimPath(id, profile), scheduledPath(id, profile));
+}
+
+export async function finishScheduledPost(id: string, profile?: string): Promise<void> {
+  await unlink(claimPath(id, profile));
+}
+
+/** Posts a run took and never finished with, which may or may not have gone out. */
+export async function unfinishedPosts(profile?: string): Promise<(ScheduledPost & { path: string })[]> {
+  const dir = scheduledDir(profile);
+  const files = await readdir(dir).catch(() => [] as string[]);
+  const posts: (ScheduledPost & { path: string })[] = [];
+  for (const file of files) {
+    if (!file.endsWith(".sending")) continue;
+    const path = join(dir, file);
+    try {
+      if (Date.now() - (await stat(path)).mtimeMs < STILL_SENDING_MS) continue;
+      posts.push({ ...(JSON.parse(await readFile(path, "utf-8")) as ScheduledPost), path });
+    } catch {
+      // Gone since, or corrupted: there's nothing useful to say about it
+    }
+  }
+  return posts;
 }
 
 export async function updateScheduledPost(
