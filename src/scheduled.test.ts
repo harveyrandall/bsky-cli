@@ -6,6 +6,10 @@ vi.mock("node:fs/promises", () => ({
   readdir: vi.fn(),
   unlink: vi.fn(),
   mkdir: vi.fn(),
+  open: vi.fn(),
+  rename: vi.fn(),
+  stat: vi.fn(),
+  utimes: vi.fn(),
 }));
 
 vi.mock("node:crypto", () => ({
@@ -16,7 +20,7 @@ vi.mock("@/config", () => ({
   bskyDir: vi.fn(() => "/mock/bsky-cli"),
 }));
 
-import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
+import { open, readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   saveScheduledPost,
@@ -173,43 +177,32 @@ describe("deleteScheduledPost", () => {
 describe("updateScheduledPost", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  const opened = () => {
+    const file = { truncate: vi.fn(async () => {}), writeFile: vi.fn(async () => {}), close: vi.fn(async () => {}) };
+    (open as ReturnType<typeof vi.fn>).mockResolvedValue(file);
+    return file;
+  };
+  const post = { id: "1741392000000-a7f3", createdAt: "2026-03-26T12:00:00.000Z", scheduledAt: "2026-05-01T14:00:00.000Z", text: "Updated text" };
+
   it("overwrites the existing file with updated data", async () => {
-    (mkdir as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-    (writeFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-
-    const post = {
-      id: "1741392000000-a7f3",
-      createdAt: "2026-03-26T12:00:00.000Z",
-      scheduledAt: "2026-05-01T14:00:00.000Z",
-      text: "Updated text",
-    };
-
+    const file = opened();
     await updateScheduledPost(post);
-
-    expect(writeFile).toHaveBeenCalledWith(
-      join(defaultScheduledDir, "1741392000000-a7f3.json"),
-      expect.stringContaining('"Updated text"'),
-      { mode: 0o644 },
-    );
+    expect(open).toHaveBeenCalledWith(join(defaultScheduledDir, "1741392000000-a7f3.json"), "r+");
+    expect(file.truncate).toHaveBeenCalled();
+    expect(file.writeFile).toHaveBeenCalledWith(expect.stringContaining('"Updated text"'));
+    expect(file.close).toHaveBeenCalled();
   });
 
   it("uses profile-scoped path", async () => {
-    (mkdir as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-    (writeFile as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    opened();
+    await updateScheduledPost(post, "work");
+    expect(open).toHaveBeenCalledWith(join(mockBase, "scheduled-work", "1741392000000-a7f3.json"), "r+");
+  });
 
-    await updateScheduledPost(
-      {
-        id: "test-id",
-        createdAt: "2026-03-26T12:00:00.000Z",
-        scheduledAt: "2026-05-01T14:00:00.000Z",
-        text: "test",
-      },
-      "work",
-    );
-
-    expect(mkdir).toHaveBeenCalledWith(
-      join(mockBase, "scheduled-work"),
-      { recursive: true },
-    );
+  it("closes the file if the write fails", async () => {
+    const file = opened();
+    file.writeFile.mockRejectedValueOnce(new Error("ENOSPC"));
+    await expect(updateScheduledPost(post)).rejects.toThrow("ENOSPC");
+    expect(file.close).toHaveBeenCalled();
   });
 });

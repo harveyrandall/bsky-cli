@@ -9,6 +9,13 @@ import {
   saveScheduledPost,
   listScheduledPosts,
   deleteScheduledPost,
+  claimPath,
+  claimScheduledPost,
+  claimedPosts,
+  finishScheduledPost,
+  releaseScheduledPost,
+  rescheduleScheduledPost,
+  type ClaimedPost,
   updateScheduledPost,
   isScheduledDirEmpty,
 } from "@/scheduled";
@@ -40,8 +47,30 @@ const PAGE_SIZE = 5;
  * Find all scheduled posts that are due and publish them.
  * Returns the number of successfully posted items.
  */
+/** A recurring post as it'll be for its next run, if it has one. */
+function nextRun(post: ScheduledPost): ScheduledPost | undefined {
+  if (!post.rrule || (post.remainingCount != null && post.remainingCount <= 1)) return undefined;
+  const freq = parseRRuleFrequency(post.rrule);
+  const next = freq && nextOccurrence(new Date(post.scheduledAt), freq);
+  if (!freq || !next) return undefined;
+  if (post.remainingCount == null) return { ...post, scheduledAt: next.toISOString() };
+  const remainingCount = post.remainingCount - 1;
+  return { ...post, scheduledAt: next.toISOString(), remainingCount, rrule: buildRRule(freq, remainingCount) };
+}
+
+function warnAboutClaim({ id, path, text, rrule }: ClaimedPost): void {
+  if (text === undefined) {
+    console.error(`${path} holds a post that may not have gone out, and it can't be read. Fix it, or delete it.`);
+    return;
+  }
+  const line = text.split("\n")[0];
+  console.error(`A run may have stopped while sending ${id} ("${line}"), so it may have gone out. Check your Bluesky profile, then delete ${path}, or rename it to ${id}.json to send it.`);
+  if (rrule) console.error("It repeats: deleting it ends the series. To keep the series without sending this one again, change its scheduledAt to the next date first.");
+}
+
 async function postDueItems(program: Command): Promise<number> {
   const profile = program.opts().profile;
+  for (const claim of await claimedPosts(profile)) if (claim.stale) warnAboutClaim(claim);
   const posts = await listScheduledPosts(profile);
   const due = posts.filter((p) => new Date(p.scheduledAt) <= new Date());
 
@@ -50,41 +79,49 @@ async function postDueItems(program: Command): Promise<number> {
   const agent = await getClient(program);
   let posted = 0;
 
-  for (const post of due) {
+  for (const listed of due) {
+    let post: ScheduledPost | undefined;
     try {
-      const result = await createPost(agent, post.text, {
+      post = await claimScheduledPost(listed, profile);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Couldn't take ${listed.id} from the queue, so it wasn't sent: ${msg}`);
+      continue;
+    }
+    if (!post) continue;
+
+    let result;
+    try {
+      result = await createPost(agent, post.text, {
         images: post.images,
         imageAlts: post.imageAlts,
         video: post.video,
         videoAlt: post.videoAlt,
       });
-      console.log(result.uri);
-      posted++;
-
-      // Handle recurring posts: mutate in place instead of deleting
-      if (post.rrule) {
-        const isLastOccurrence = post.remainingCount != null && post.remainingCount <= 1;
-        if (!isLastOccurrence) {
-          const freq = parseRRuleFrequency(post.rrule);
-          if (freq) {
-            const next = nextOccurrence(new Date(post.scheduledAt), freq);
-            if (next) {
-              post.scheduledAt = next.toISOString();
-              if (post.remainingCount != null) {
-                post.remainingCount = post.remainingCount - 1;
-                post.rrule = buildRRule(freq, post.remainingCount);
-              }
-              await updateScheduledPost(post, profile);
-              continue;
-            }
-          }
-        }
-      }
-      // One-shot post or last occurrence — delete
-      await deleteScheduledPost(post.id, profile);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Failed to post ${post.id}: ${msg}`);
+      const { id } = post;
+      await releaseScheduledPost(id, profile).catch((back: unknown) => {
+        const reason = back instanceof Error ? back.message : String(back);
+        console.error(`Couldn't put ${id} back in the queue: ${reason}. It wasn't sent: rename ${claimPath(id, profile)} to ${id}.json to send it.`);
+      });
+      continue;
+    }
+    console.log(result.uri);
+    posted++;
+
+    const next = nextRun(post);
+    try {
+      if (next) await rescheduleScheduledPost(next, profile);
+      else await finishScheduledPost(post.id, profile);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(
+        next
+          ? `Posted ${post.id}, but couldn't save its next run (${next.scheduledAt}): ${msg}. The series has stopped: set scheduledAt to that date in ${claimPath(post.id, profile)}, then rename it to ${post.id}.json.`
+          : `Posted ${post.id}, but couldn't clear it from the queue: ${msg}. It won't send again.`,
+      );
     }
   }
 
@@ -339,9 +376,13 @@ To automate posting, you can:
         const profile = program.opts().profile;
         const json = isJson(program);
         let posts = await listScheduledPosts(profile);
+        const claims = await claimedPosts(profile);
+        for (const { id, path, stale } of claims) {
+          console.error(stale ? `${id} may have gone out: a run left ${path} behind, and schedule run says what to do` : `${id} is being sent`);
+        }
 
         if (posts.length === 0) {
-          if (!json) console.error("No scheduled posts.");
+          if (!json && claims.length === 0) console.error("No scheduled posts.");
           return;
         }
 
@@ -477,7 +518,13 @@ To automate posting, you can:
           }
         }
 
-        await updateScheduledPost(post, profile);
+        try {
+          await updateScheduledPost(post, profile);
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          console.error("That post is being sent, or has gone, so your changes weren't saved.");
+          return;
+        }
         console.error(`Scheduled post ${chalk.blue(post.id)} updated.`);
       } finally {
         rl.close();
@@ -546,7 +593,13 @@ To automate posting, you can:
           console.error(`Draft saved: ${chalk.blue(draft.id)}`);
         }
 
-        await deleteScheduledPost(post.id, profile);
+        try {
+          await deleteScheduledPost(post.id, profile);
+        } catch (err: unknown) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          console.error("That post is being sent, or has gone, so it wasn't deleted. If sending fails, it goes back in the queue.");
+          return;
+        }
         console.error("Scheduled post deleted.");
       } finally {
         rl.close();
@@ -588,7 +641,9 @@ To automate posting, you can:
       const shutdown = () => {
         console.error("\nWatcher stopped.");
         job.stop();
-        process.exit(0);
+        // Leaving mid-send would strand the post. A second Ctrl+C still leaves at once.
+        const leave = () => (job.isBusy() ? setTimeout(leave, 100) : process.exit(0));
+        leave();
       };
       process.once("SIGINT", shutdown);
       process.once("SIGTERM", shutdown);
