@@ -130,7 +130,7 @@ The REPL never exits on an error.
 - **Can't reach Bluesky, or a server error:** the failed post and the rest of its batch are saved as a draft, and the queue pauses. `/retry` sends them now and deletes the draft once they have all gone. Esc clears the pause and leaves the draft; the CLI's usual draft sync offers to send it on your next run.
 - **Rate limited:** waited out once if the limit resets within a minute, otherwise as above.
 - **Post rejected:** the error is shown, and the failed post and any after it come back as the command that sends them to the same place (`/post …`, `/reply 3 …`, `/quote 3 …`). If you've started typing, they're saved as a draft instead.
-- **Session expired:** run `bsky login`; unsent posts are saved as a draft.
+- **Session expired:** unsent posts are saved as a draft. Exit and reopen the REPL; if it still says so, run `bsky login`.
 - **A draft can't be saved:** the posts stay queued for `/retry` or Esc, and nothing is lost.
 
 ## Keys

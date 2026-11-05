@@ -46,6 +46,7 @@ function session(o: { settings?: Partial<ReplSettings>; resume?: ReplSessionFile
     repost: async () => {},
     unrepost: async () => true,
     deletePost: async () => {},
+    signedIn: () => false,
   };
   const keeper = new SessionKeeper(store, meta, 50, o.resume);
   let repl: Repl | undefined = undefined;

@@ -64,6 +64,8 @@ export interface PipelineDeps {
   saveDraft(d: Omit<Draft, "id" | "createdAt">): Promise<{ id: string }>;
   deleteDraft(id: string): Promise<void>;
   settings(): { undo: number; pace: number };
+  /** False once the server has refused the session's tokens. */
+  signedIn(): boolean;
   onSent(item: QueueItem, index: number, ref: StrongRef, target: SendTarget | undefined): void;
   onChange(): void;
   onFailed(f: Failure): void;
@@ -310,6 +312,8 @@ export class Pipeline {
       const ms = Number(e.headers?.["ratelimit-reset"]) * 1000 - this.deps.now();
       return a.limitedUntil === undefined && ms >= 0 && ms <= 60_000 ? { kind: "wait", ms } : { kind: "limited" };
     }
+    // The library hands back the expired response when it can't refresh, and only drops the session if the server said no.
+    if (e.error === "ExpiredToken" && this.deps.signedIn()) return { kind: "network" };
     if (e.status === 401 || e.error === "ExpiredToken" || e.error === "InvalidToken") return { kind: "expired" };
     // A 5xx says nothing about the post; only a 4xx rejects it.
     return isNetworkError(err) || (e.status ?? 0) >= 500 ? { kind: "network" } : { kind: "rejected" };

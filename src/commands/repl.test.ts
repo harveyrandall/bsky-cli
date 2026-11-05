@@ -453,6 +453,10 @@ describe("replAgent", () => {
     await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
     expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
   });
+  it("says whether the session is still good", () => {
+    const agent = replAgent({ session: { did: "did:plc:me" }, hasSession: true } as never);
+    expect(agent.signedIn()).toBe(true);
+  });
   it("deletes a post", async () => {
     const deletePost = vi.fn(async () => {});
     await replAgent({ session: { did: "did:plc:me" }, deletePost } as never).deletePost(uri as never);
