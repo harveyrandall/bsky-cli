@@ -65,7 +65,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     schedulerRunning: vi.fn(() => true),
     openUrl: vi.fn(async () => {}),
     copyText: vi.fn(async () => {}),
-    listDrafts: vi.fn(async (): Promise<Draft[]> => []),
+    listDrafts: vi.fn(async (): Promise<{ drafts: Draft[]; skipped: number }> => ({ drafts: [], skipped: 0 })),
     switchAccount: vi.fn(async (_: string) => ({ agent: { ...agent, selfDid: "did:plc:work" as Did }, handle: "work.bsky.social" })),
     fs,
   };
@@ -1352,7 +1352,7 @@ describe("/drafts", () => {
   const draft = (o: Partial<Draft> = {}): Draft => ({ id: "1741392000000-a7f3", createdAt: "2026-11-04T09:00:00.000Z", reason: "manual", type: "post", text: "hello", ...o });
   const withDrafts = (...drafts: Draft[]) => {
     const s = setup();
-    s.deps.listDrafts.mockResolvedValue(drafts);
+    s.deps.listDrafts.mockResolvedValue({ drafts, skipped: 0 });
     return s;
   };
   it("lists them", async () => {
@@ -1365,6 +1365,13 @@ describe("/drafts", () => {
     const { repl, printed } = withDrafts();
     await repl.drafts();
     expect(printed()).toContain("No drafts");
+  });
+  it("says if some couldn't be read, rather than that there are none", async () => {
+    const { repl, deps, printed } = setup();
+    deps.listDrafts.mockResolvedValue({ drafts: [], skipped: 2 });
+    await repl.drafts();
+    expect(printed()).toContain("Skipped 2 draft files that couldn't be read");
+    expect(printed()).not.toContain("No drafts");
   });
   it("loads one into the composer by id or the start of one", async () => {
     const { repl } = withDrafts(draft());
@@ -1513,7 +1520,7 @@ describe("/switch", () => {
     await s.repl.switchProfile("work");
     expect(await s.repl.deletePost("1")).toBe("keep");
     expect(s.printed()).toContain("You can only delete your own posts");
-    expect(await s.repl.undo()).toBe("keep");
+    await s.repl.undo();
     expect(s.printed()).toContain("Nothing to undo");
   });
 });

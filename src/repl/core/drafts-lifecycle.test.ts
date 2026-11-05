@@ -31,7 +31,7 @@ function setup(settings: Partial<ReplSettings> = {}, store = new Map<string, Dra
     saveDraft: vi.fn(async (d: Omit<Draft, "id" | "createdAt">) => { const id = `new${++ids}`; store.set(id, { ...d, id, createdAt: "2026-11-04T10:00:00.000Z" }); return { id }; }),
     deleteDraft: vi.fn(async (id: string) => { if (!store.delete(id)) throw new Error("ENOENT " + id); }),
     saveConfig: vi.fn(async () => {}), saveScheduled: vi.fn(async () => ({ id: "s1" })), composerBusy: vi.fn(() => false), schedulerRunning: vi.fn(() => true),
-    openUrl: vi.fn(async () => {}), copyText: vi.fn(async () => {}), listDrafts: vi.fn(async () => [...store.values()]),
+    openUrl: vi.fn(async () => {}), copyText: vi.fn(async () => {}), listDrafts: vi.fn(async () => ({ drafts: [...store.values()], skipped: 0 })),
     switchAccount: vi.fn(async () => ({ agent, handle: "work.bsky.social" })), fs,
   };
   const repl = new Repl({ autoThread: false, prefixThread: false, threadLabel: false, undo: 0, pace: 0, askToSave: false, verbose: false, forceAlt: false, ...settings }, DEFAULT_MARKERS, deps as never);

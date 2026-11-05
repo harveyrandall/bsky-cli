@@ -82,7 +82,7 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
-      listDrafts={async () => []}
+      listDrafts={async () => ({ drafts: [], skipped: 0 })}
       switchAccount={async () => ({ agent, handle: "work.bsky.social" })}
       keeper={o.keeper}
       resume={o.resume}

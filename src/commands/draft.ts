@@ -27,7 +27,8 @@ export async function syncNetworkDrafts(
   agent: Awaited<ReturnType<typeof getClient>>,
   profile?: string,
 ): Promise<void> {
-  const all = await listDrafts(profile);
+  // This runs before every command, none of which should fail over a bad drafts folder.
+  const all = await listDrafts(profile).catch(() => []);
   const pending = all.filter((d) => d.reason === "network");
   if (pending.length === 0) return;
 

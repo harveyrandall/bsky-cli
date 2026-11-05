@@ -242,6 +242,13 @@ describe("SessionStore", () => {
     await Promise.all([1, 2, 3].map((n) => store.save({ ...session("aaaaaa"), history: [`${n}`] })));
     expect((await store.load(id("aaaaaa"))).history).toEqual(["3"]);
   });
+  it("leaves deleted posts out of a listing's summary", async () => {
+    const file = session("aaaaaa");
+    await store.save({ ...file, posts: file.posts.map((p, i) => ({ ...p, deleted: i === 0 })) });
+    const [listing] = await store.list();
+    expect(listing.summary).not.toContain("Launch day");
+    expect(listing.summary).toContain("1 post");
+  });
   it("lists newest first, with a summary", async () => {
     await store.save(session("aaaaaa", "2026-11-03T10:00:00.000Z"));
     await store.save(session("bbbbbb", "2026-11-04T10:00:00.000Z"));

@@ -45,27 +45,40 @@ export async function loadDraft(
   return JSON.parse(data) as Draft;
 }
 
-export async function listDrafts(profile?: string): Promise<Draft[]> {
+const isDraft = (value: unknown): value is Draft => {
+  const d = value as Partial<Draft> | null;
+  return typeof d?.id === "string" && typeof d.createdAt === "string" && typeof d.text === "string";
+};
+
+/** The drafts that can be used, and how many files can't. A folder that can't be read throws. */
+export async function readDrafts(profile?: string): Promise<{ drafts: Draft[]; skipped: number }> {
   const dir = draftsDir(profile);
   await mkdir(dir, { recursive: true });
   let files: string[];
   try {
     files = await readdir(dir);
-  } catch {
-    return [];
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { drafts: [], skipped: 0 };
+    throw err;
   }
   const drafts: Draft[] = [];
+  let skipped = 0;
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
     try {
-      const data = await readFile(join(dir, file), "utf-8");
-      drafts.push(JSON.parse(data) as Draft);
+      const draft: unknown = JSON.parse(await readFile(join(dir, file), "utf-8"));
+      if (isDraft(draft)) drafts.push(draft);
+      else skipped++;
     } catch {
-      // Skip corrupted files
+      skipped++;
     }
   }
   drafts.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return drafts;
+  return { drafts, skipped };
+}
+
+export async function listDrafts(profile?: string): Promise<Draft[]> {
+  return (await readDrafts(profile)).drafts;
 }
 
 export async function deleteDraft(

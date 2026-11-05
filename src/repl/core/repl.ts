@@ -88,7 +88,7 @@ export interface ReplDeps {
   schedulerRunning(): boolean;
   openUrl(url: string): Promise<void>;
   copyText(text: string): Promise<void>;
-  listDrafts(): Promise<Draft[]>;
+  listDrafts(): Promise<{ drafts: Draft[]; skipped: number }>;
   /** Everything else that depends on the account follows it: drafts, the session file, CLI commands. */
   switchAccount(profile: string): Promise<{ agent: ReplAgent; handle: string }>;
   timers?: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
@@ -770,9 +770,10 @@ export class Repl {
 
   /** `/drafts [id]`: list them, or load one to send. It's deleted once it's gone. */
   async drafts(id?: string): Promise<SubmitOutcome> {
-    const all = await this.deps.listDrafts();
+    const { drafts: all, skipped } = await this.deps.listDrafts();
+    if (skipped > 0) this.deps.print(`Skipped ${skipped} draft file${skipped === 1 ? "" : "s"} that couldn't be read`, "error");
     if (id === undefined) {
-      if (all.length === 0) this.deps.print("No drafts", "dim");
+      if (all.length === 0 && skipped === 0) this.deps.print("No drafts", "dim");
       for (const d of all) this.deps.print(`${d.id}  ${d.type}  ${d.text.split("\n")[0]}`);
       return "done";
     }

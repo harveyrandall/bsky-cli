@@ -84,8 +84,9 @@ describe("complete", () => {
     expect(tab("/attach ~/do").text).toBe("/attach ~/docs/");
   });
   it("stays out of an open quote, where it can't tell what the word is", () => {
+    const paths = () => ["team.png", "pho.png"];
     for (const text of ['/attach a.png --alt "a te', '/attach "my pho', "/attach 'my pho"]) {
-      expect(tab(text)).toEqual({ text, cursor: text.length, candidates: [] });
+      expect(tab(text, { ...sources, paths })).toEqual({ text, cursor: text.length, candidates: [] });
     }
   });
   it("carries on after a closed one", () => {

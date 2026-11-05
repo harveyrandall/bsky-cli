@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { render, renderToString } from "ink";
 import { LaunchList } from "@/repl/ui/LaunchList";
-import { deleteDraft, listDrafts, saveDraft } from "@/drafts";
+import { deleteDraft, readDrafts, saveDraft } from "@/drafts";
 import { setPostLabeler } from "@/lib/format";
 import { getSchedulerStatus, schedulerProfile } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
@@ -96,7 +96,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
       saveScheduled={(p) => saveScheduledPost(p, profile)}
       schedulerRunning={() => schedulerRunning(profile)}
-      listDrafts={() => listDrafts(profile)}
+      listDrafts={() => readDrafts(profile)}
       switchAccount={async (name) => {
         if (!opts.switchAccount) throw new Error("Can't switch accounts here");
         const next = await opts.switchAccount(name);

@@ -75,7 +75,7 @@ function session(o: { settings?: Partial<ReplSettings>; resume?: ReplSessionFile
       schedulerRunning: () => true,
       openUrl: async () => {},
       copyText: async () => {},
-      listDrafts: async () => [],
+      listDrafts: async () => ({ drafts: [], skipped: 0 }),
       switchAccount: async () => ({ agent, handle: "me.bsky.social" }),
       fs: { size: async () => 10, head: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]) },
     },
