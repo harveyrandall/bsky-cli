@@ -207,6 +207,12 @@ export class Registry {
     return this.list;
   }
 
+  /** For Tab: your posts, then what you've read, newest first. */
+  recentLabels(): string[] {
+    const own = this.list.filter((e) => !e.deleted).map((e) => e.label);
+    return [...own.reverse(), ...this.snapshot().viewed.map((e) => e.label).reverse()];
+  }
+
   /** `(4) 3lbx7kt5def2v`, then ` (at://…)` when verbose, ` ↳ 2` when its parent isn't the entry before it, ` ext @handle` for someone else's post, and what went with it. */
   format(e: RegistryEntry, verbose: boolean): string {
     const previous = this.list[this.list.indexOf(e) - 1];

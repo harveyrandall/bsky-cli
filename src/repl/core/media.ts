@@ -1,3 +1,4 @@
+import { readdirSync, statSync } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -99,3 +100,18 @@ export function mediaOptions(media: readonly StagedMedia[] = []) {
 }
 
 export const expandHome = (path: string) => (path.startsWith("~/") ? join(homedir(), path.slice(2)) : path);
+
+/** For Tab: what `partial` could be, as typed, with folders ending in `/`. */
+export function pathMatches(partial: string): string[] {
+  const at = partial.lastIndexOf("/") + 1;
+  const [dir, base] = [partial.slice(0, at), partial.slice(at)];
+  const folder = expandHome(dir || ".");
+  try {
+    return readdirSync(folder)
+      .filter((name) => name.startsWith(base) && (base.startsWith(".") || !name.startsWith(".")))
+      .sort()
+      .map((name) => `${dir}${name}${statSync(join(folder, name), { throwIfNoEntry: false })?.isDirectory() ? "/" : ""}`);
+  } catch {
+    return []; // nothing to offer: the folder isn't there, or can't be read
+  }
+}

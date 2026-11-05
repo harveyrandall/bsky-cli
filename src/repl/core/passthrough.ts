@@ -93,6 +93,11 @@ export function passthroughNames(program: Command): string[] {
   return visible.map((c) => c.name()).filter((name) => name !== "help" && !BLOCKED.has(name));
 }
 
+export function passthroughFlags(program: Command, name: string): string[] {
+  const command = program.commands.find((c) => c.name() === name);
+  return command ? program.createHelp().visibleOptions(command).flatMap((o) => o.long ?? []) : [];
+}
+
 /** Runs a CLI command in this process, its output going to `print`. */
 export async function runPassthrough(
   program: Command,

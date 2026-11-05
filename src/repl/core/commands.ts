@@ -392,20 +392,70 @@ export function unknownMessage(name: string, others: readonly string[] = []): st
   return close ? `Unknown /${name}. Did you mean /${close}?` : `Unknown /${name}. /help lists commands.`;
 }
 
-/** Tab completion for a bare `/name` with the cursor at its end. */
-export function completeCommand(
-  text: string,
-  cursor: number,
-  others: readonly string[] = [],
-): { text: string; cursor: number; candidates: string[] } {
-  const unchanged = { text, cursor, candidates: [] };
-  if (cursor !== text.length || !/^\/[a-z-]*$/.test(text)) return unchanged;
-  const prefix = text.slice(1);
-  const matches = [...new Set([...allNames(), ...others])].filter((n) => n.startsWith(prefix)).sort();
-  if (matches.length === 0) return unchanged;
-  if (matches.length === 1) return { text: `/${matches[0]} `, cursor: matches[0].length + 2, candidates: [] };
+interface Completed {
+  text: string;
+  cursor: number;
+  candidates: string[];
+}
+
+/** What Tab can offer beyond the REPL's own command names. */
+export interface Completions {
+  cliNames: readonly string[];
+  flags(command: string): readonly string[];
+  /** Newest first. */
+  labels(): readonly string[];
+  paths(partial: string): readonly string[];
+}
+
+const MOST_LABELS = 8;
+
+/** `token` carried as far as `matches` agree, or the matches if they don't. A folder stays open for the next Tab. */
+function extend(before: string, token: string, matches: readonly string[]): Completed {
+  const at = (text: string, candidates: string[] = []) => ({ text, cursor: text.length, candidates });
+  if (matches.length === 0) return at(before + token);
+  if (matches.length === 1) return at(`${before}${matches[0]}${matches[0].endsWith("/") ? "" : " "}`);
   let common = matches[0];
-  for (const n of matches) while (!n.startsWith(common)) common = common.slice(0, -1);
-  if (common.length > prefix.length) return { text: `/${common}`, cursor: common.length + 1, candidates: [] };
-  return { ...unchanged, candidates: matches };
+  for (const m of matches) while (!m.startsWith(common)) common = common.slice(0, -1);
+  return common.length > token.length ? at(before + common) : at(before + token, [...matches]);
+}
+
+/** Tab completion for a bare `/name` with the cursor at its end. */
+export function completeCommand(text: string, cursor: number, others: readonly string[] = []): Completed {
+  if (cursor !== text.length || !/^\/[a-z-]*$/.test(text)) return { text, cursor, candidates: [] };
+  const prefix = text.slice(1);
+  return extend("/", prefix, [...new Set([...allNames(), ...others])].filter((n) => n.startsWith(prefix)).sort());
+}
+
+/** Tab: command names, then flags, `/attach` paths and labels where a ref goes. */
+export function complete(text: string, cursor: number, sources: Completions): Completed {
+  const unchanged = { text, cursor, candidates: [] };
+  if (cursor !== text.length) return unchanged;
+  if (!/\s/.test(text)) {
+    const names = completeCommand(text, cursor, sources.cliNames);
+    return { ...names, candidates: names.candidates.map((n) => `/${n}`) };
+  }
+  if (!/^\/[a-z-]+\s/.test(text)) return unchanged;
+  const token = /(?:\\.|[^\s\\])*$/.exec(text)![0];
+  const before = text.slice(0, text.length - token.length);
+  const starting = (list: readonly string[]) => list.filter((s) => s.startsWith(token));
+  const words = before.trim().split(/\s+/);
+  const viaRun = words[0] === "/run";
+  if (viaRun && words.length === 1) return extend(before, token, starting(sources.cliNames));
+  const name = viaRun ? words[1] : words[0].slice(1);
+  const native = viaRun ? undefined : findCommand(name);
+  if (token.startsWith("-")) return extend(before, token, starting(native ? (native.usage.match(/--[a-z-]+/g) ?? []) : sources.flags(name)));
+  if (native?.name === "attach") return completePath(before, token, sources);
+  if (native?.usage.includes("<ref>") && words.length === 1) {
+    const done = extend(before, token, starting(sources.labels()));
+    return { ...done, candidates: done.candidates.slice(0, MOST_LABELS) };
+  }
+  return unchanged;
+}
+
+function completePath(before: string, token: string, sources: Completions): Completed {
+  const partial = token.replace(/\\(.)/g, "$1");
+  const matches = sources.paths(partial).map((p) => p.replace(/[\s\\'"]/g, "\\$&"));
+  const done = extend(before, token, matches);
+  const folder = partial.lastIndexOf("/") + 1;
+  return { ...done, candidates: done.candidates.map((p) => p.replace(/\\(.)/g, "$1").slice(folder)) };
 }

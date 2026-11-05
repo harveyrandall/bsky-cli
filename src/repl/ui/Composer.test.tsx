@@ -22,6 +22,7 @@ function setup(overrides: Partial<ComposerProps> = {}) {
     onPaste: vi.fn(() => false),
     onSendNow: vi.fn(),
     onEditor: vi.fn(),
+    completions: { cliNames: ["timeline"], flags: () => [], labels: () => ["4"], paths: () => [] },
     onHint: vi.fn(),
     onError: vi.fn(),
     ...overrides,
@@ -139,5 +140,19 @@ describe("Composer", () => {
     const { type, lastFrame } = setup();
     await type(`\x1b[200~${"a".repeat(270)}\x1b[201~`);
     expect(lastFrame()).toContain("\x1b[33m◕ 270/300");
+  });
+});
+
+describe("Tab", () => {
+  it("fills in an argument", async () => {
+    const { lastFrame, type } = setup();
+    await type("/like ", "\t");
+    expect(lastFrame()).toContain("/like 4");
+  });
+  it("shows what it could be, as given", async () => {
+    const onHint = vi.fn();
+    const { type } = setup({ onHint, completions: { cliNames: [], flags: () => [], labels: () => ["4", "#2"], paths: () => [] } });
+    await type("/like ", "\t");
+    expect(onHint).toHaveBeenCalledWith("4  #2");
   });
 });

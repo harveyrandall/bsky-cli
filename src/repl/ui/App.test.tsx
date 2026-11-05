@@ -862,3 +862,13 @@ describe("App deleting", drawn, () => {
     expect(agent.deletePost).toHaveBeenCalledWith(ref(1).uri);
   });
 });
+
+describe("App Tab", drawn, () => {
+  it("offers the labels of the session", async () => {
+    const { type, shows } = setup();
+    await type("/post one", "\r");
+    await tick();
+    await type("/like ", "\t");
+    await shows("/like 1");
+  });
+});

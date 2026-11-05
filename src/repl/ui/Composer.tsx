@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef } from "react";
 import { Box, Text, useInput, usePaste, useWindowSize, type Key } from "ink";
-import { completeCommand } from "@/repl/core/commands";
+import { complete, type Completions } from "@/repl/core/commands";
 import { segmentAt, type Markers } from "@/repl/core/markers";
 import type { EscapeResult, Repl, SubmitOutcome } from "@/repl/core/repl";
 import { editorReducer, emptyEditor, type EditorAction, type EditorState } from "@/repl/ui/editor";
@@ -81,7 +81,7 @@ export interface ComposerProps {
   /** Where to start: a resumed session's draft. */
   initial?: EditorState;
   /** Names Tab completes as well as the REPL's own. */
-  commandNames?: readonly string[];
+  completions: Completions;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -171,9 +171,9 @@ export function Composer(props: ComposerProps) {
         props.onEdit(text).then((edited) => apply({ type: "set", text: edited }), report);
         return;
       case "complete": {
-        const completed = completeCommand(text, cursor, props.commandNames);
+        const completed = complete(text, cursor, props.completions);
         if (completed.text !== text) apply({ type: "set", text: completed.text });
-        else if (completed.candidates.length > 1) props.onHint(completed.candidates.map((c) => `/${c}`).join("  "));
+        else if (completed.candidates.length > 1) props.onHint(completed.candidates.join("  "));
         return;
       }
       default:

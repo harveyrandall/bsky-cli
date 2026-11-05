@@ -213,3 +213,22 @@ describe("an external reply", () => {
     expect(new Registry(false).addExternal(reply, {}).root).toEqual(aliceRoot);
   });
 });
+
+describe("recentLabels", () => {
+  it("lists your posts, then what you've read, newest first", () => {
+    const reg = new Registry(false, self);
+    const [a, b] = [ref(self, "3lbx7kt5aaa2a"), ref(self, "3lbx7kt5aaa2b")];
+    reg.addOwn(a, { root: a, text: "one" });
+    reg.addOwn(b, { root: a, parent: a.uri, text: "two" });
+    reg.addViewed(ref(alice, "3lbx7kt5aaa2c"));
+    reg.addViewed(ref(alice, "3lbx7kt5aaa2d"));
+    expect(reg.recentLabels()).toEqual(["2", "1", "#2", "#1"]);
+  });
+  it("leaves out what you've deleted", () => {
+    const reg = new Registry(false, self);
+    const a = ref(self, "3lbx7kt5aaa2a");
+    reg.addOwn(a, { root: a, text: "one" });
+    reg.markDeleted(a.uri);
+    expect(reg.recentLabels()).toEqual([]);
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Command } from "commander";
-import { BLOCKED, passthroughNames, runPassthrough } from "./passthrough";
+import { BLOCKED, passthroughFlags, passthroughNames, runPassthrough } from "./passthrough";
 
 function program() {
   const p = new Command().option("-p, --profile <name>").option("--json");
@@ -137,6 +137,15 @@ describe("runPassthrough", () => {
     const { lines, io, p } = setup();
     await runPassthrough(p, ["hello", "--stdin"], io);
     expect(lines).toEqual(["bsky hello can't read from stdin inside the REPL"]);
+  });
+});
+
+describe("passthroughFlags", () => {
+  it("lists a command's long flags", () => {
+    expect(passthroughFlags(program(), "hello")).toContain("--loud");
+  });
+  it("has none for a command that isn't there", () => {
+    expect(passthroughFlags(program(), "nope")).toEqual([]);
   });
 });
 

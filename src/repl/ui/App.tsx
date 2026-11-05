@@ -3,7 +3,7 @@ import { Static, Text, useApp } from "ink";
 import { basename } from "node:path";
 import type { Markers, SubmitPlan } from "@/repl/core/markers";
 import type { ReplSessionFile } from "@/repl/core/persist";
-import { chips, parseDroppedPaths, type StagedMedia } from "@/repl/core/media";
+import { chips, parseDroppedPaths, type StagedMedia, pathMatches } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
 import { copyText, openUrl } from "@/lib/desktop";
@@ -41,7 +41,7 @@ export interface AppProps {
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
   /** CLI commands that can run here. */
-  passthrough?: { names(): string[]; run(argv: string[], print: (text: string, style?: LineStyle) => void): Promise<void> };
+  passthrough?: { names(): string[]; flags(name: string): string[]; run(argv: string[], print: (text: string, style?: LineStyle) => void): Promise<void> };
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -402,7 +402,12 @@ export function App(props: AppProps) {
         onEof={requestExit}
         onSendNow={() => repl.sendNow()}
         onEdit={edit}
-        commandNames={passthrough?.names()}
+        completions={{
+          cliNames: cli?.names() ?? [],
+          flags: (name) => cli?.flags(name) ?? [],
+          labels: () => repl.registry.recentLabels(),
+          paths: pathMatches,
+        }}
         onPaste={takePaste}
         onHint={(text) => print(text, "dim")}
         onError={(text) => print(text, "error")}
