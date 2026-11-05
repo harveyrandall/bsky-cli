@@ -52,7 +52,7 @@ type Overlay =
   | { kind: "cooldown"; which: "undo" | "pace"; resolve(v: Cooldown | undefined): void }
   | { kind: "save"; values: { undo?: Cooldown; pace?: Cooldown }; resolve(a: "yes" | "no" | "never"): void }
   | { kind: "preview"; plan: SubmitPlan; labelled: boolean; media: readonly StagedMedia[]; resolve(ok: boolean): void }
-  | { kind: "choice"; label: string; options: readonly string[]; resolve(i: number | undefined): void }
+  | { kind: "choice"; label: string; options: readonly string[]; start?: number; resolve(i: number | undefined): void }
   | { kind: "text"; label: string; resolve(text: string | undefined): void }
   | { kind: "drop"; paths: readonly string[]; resolve(ok: boolean): void }
   | { kind: "exit" };
@@ -104,7 +104,7 @@ export function App(props: AppProps) {
                 resolve: (text) => resolve(text === undefined ? null : text.trim() === "" ? undefined : text),
               }),
             ),
-          choose: (label, options) => new Promise((resolve) => ask({ kind: "choice", label, options, resolve })),
+          choose: (label, options, start) => new Promise((resolve) => ask({ kind: "choice", label, options, start, resolve })),
           text: (label) => new Promise((resolve) => ask({ kind: "text", label, resolve })),
         },
         print,
@@ -310,6 +310,7 @@ export function App(props: AppProps) {
             key={overlay.label}
             label={overlay.label}
             options={overlay.options}
+            start={overlay.start}
             onPick={(i) => {
               close();
               overlay.resolve(i);

@@ -801,8 +801,8 @@ describe("App resuming", () => {
     const pending = [{ id: 1, intent: { kind: "standalone" }, posts: ["left over"], createdAt: 0 }];
     const { type, shows, agent } = setup({ resume: file({ composer: { text: "", cursor: 0 }, pending }) });
     await shows('Unsent from last time: "left over"');
-    await shows("Send");
-    await type("\r");
+    await shows("› Edit");
+    await type("\x1b[D", "\r");
     await vi.waitFor(() => expect(agent.post).toHaveBeenCalledWith("left over", undefined, undefined, undefined));
   });
 });

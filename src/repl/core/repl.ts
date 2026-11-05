@@ -53,8 +53,8 @@ export interface ReplAsk {
   confirm(plan: SubmitPlan, labelled: boolean, media: readonly StagedMedia[]): Promise<boolean>;
   /** Alt text for a file: undefined when skipped, null on Esc. */
   alt(file: string, required: boolean): Promise<string | undefined | null>;
-  /** undefined when dismissed. */
-  choose(label: string, options: readonly string[]): Promise<number | undefined>;
+  /** undefined when dismissed. `start` is the option selected to begin with. */
+  choose(label: string, options: readonly string[], start?: number): Promise<number | undefined>;
   /** A line of text; undefined when dismissed. */
   text(label: string): Promise<string | undefined>;
 }
@@ -120,6 +120,8 @@ export class Repl {
   private media: StagedMedia[] = [];
   /** Saved posts waiting for Send, Edit or Discard. */
   private unanswered: Unsent[] = [];
+  /** A resumed thread's posts couldn't be found. */
+  private threadLost = false;
   private readonly timers: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   private readonly letters = new Map<number, ThreadLetter | undefined>();
 
@@ -264,6 +266,7 @@ export class Repl {
   /** The cursor, or the nearest of its ancestors that's still there. */
   private async checkThread(saved: ThreadState): Promise<void> {
     const chain: string[] = [];
+    // getPosts takes at most 25.
     for (let uri: string | undefined = saved.cursor.uri; uri && chain.length < 25; uri = this.registry.byUri(uri)?.parent) chain.push(uri);
     let found: Set<string>;
     try {
@@ -275,34 +278,39 @@ export class Repl {
     if (found.has(saved.cursor.uri)) return;
     const survivor = this.registry.byUri(chain.find((uri) => found.has(uri)) ?? "");
     if (!survivor) {
-      this.deps.print("The thread's posts have gone; thread stopped", "dim");
+      this.deps.print("Couldn't find the thread's posts; thread stopped", "dim");
       this.threadState = undefined;
+      this.threadLost = true;
       const m = this.current;
       if (m.kind === "thread") this.current = { kind: "idle" };
       else if (m.kind !== "idle") this.current = { ...m, returnTo: "idle" };
       return;
     }
     this.threadState = { ...saved, cursor: { uri: survivor.uri, cid: survivor.cid } };
-    this.deps.print(`The post you were replying to has gone; continuing from (${survivor.label})`, "dim");
+    this.deps.print(`Couldn't find the post you were replying to; continuing from (${survivor.label})`, "dim");
   }
 
   private resumeMode(saved: SavedMode): ReplMode {
-    if (!("returnTo" in saved)) return { kind: saved.kind === "thread" && this.threadState ? "thread" : "idle" };
-    const returnTo = saved.returnTo === "thread" && this.threadState ? "thread" : "idle";
-    if (!("target" in saved)) return { ...saved, returnTo };
+    if (!("target" in saved)) return saved;
     const entry = this.registry.byLabel(saved.target);
-    if (!entry) return { kind: returnTo };
+    if (!entry) return { kind: saved.returnTo };
     const target = { ref: { uri: entry.uri, cid: entry.cid }, root: entry.root, entry };
-    return { kind: saved.kind, target, label: entry.label, returnTo };
+    return { kind: saved.kind, target, label: entry.label, returnTo: saved.returnTo };
   }
 
-  private async resumeItem(item: Unsent): Promise<void> {
+  private async resumeItem(saved: Unsent): Promise<void> {
+    const threadPost = saved.intent.kind === "thread";
+    const orphan = threadPost && this.threadLost;
+    // A thread post goes after the cursor, whatever it was when saved.
+    const item = threadPost ? { ...saved, target: undefined } : saved;
     const line = stripLabel(item.posts[0]).split("\n")[0];
-    const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"`, ["Send", "Edit", "Discard"]);
+    const note = orphan ? " (its thread couldn't be found, so Send starts a new one)" : "";
+    // Edit first: a post in flight at a kill may already have gone.
+    const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"${note}`, ["Send", "Edit", "Discard"], 1);
     if (answer === 0) {
-      // A thread post goes after the cursor, whatever it was when saved.
-      const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item.intent.kind === "thread" ? undefined : item.target);
+      const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item.target);
       this.letters.set(sent.id, this.letterFor(item.intent));
+      if (threadPost && this.current.kind === "idle") this.current = { kind: "thread" };
     } else if (answer !== 2 && (this.deps.composerBusy() || !this.fits(item.media ?? []))) {
       await this.saveToDrafts([item], (id) => `Saved as draft ${id}`);
     } else if (answer !== 2) {
@@ -310,7 +318,7 @@ export class Repl {
       this.deps.restore(this.asResend(item));
     }
     // Only now: until it's somewhere else, a kill must leave it to ask about again.
-    this.unanswered = this.unanswered.filter((i) => i !== item);
+    this.unanswered = this.unanswered.filter((i) => i !== saved);
     this.deps.onChange();
   }
 

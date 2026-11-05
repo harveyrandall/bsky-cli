@@ -12,13 +12,15 @@ const segmenter = new Intl.Segmenter();
 export function Choice({
   label,
   options,
+  start = 0,
   onPick,
 }: {
   label: string;
   options: readonly string[];
+  start?: number;
   onPick(index: number | undefined): void;
 }) {
-  const [at, setAt] = useState(0);
+  const [at, setAt] = useState(start);
   useInput((input, key) => {
     if (key.leftArrow) setAt((i) => Math.max(0, i - 1));
     else if (key.rightArrow || key.tab) setAt((i) => Math.min(options.length - 1, i + 1));

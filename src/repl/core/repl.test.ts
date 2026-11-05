@@ -10,9 +10,10 @@ import type { LineStyle } from "./commands";
 import type { MediaFs, StagedMedia } from "./media";
 
 const me = "did:plc:me" as Did;
+const letter = (n: number) => String.fromCharCode(97 + n);
 const ref = (n: number): StrongRef => ({
-  uri: `at://${me}/app.bsky.feed.post/3lbx7kt5def${String.fromCharCode(97 + n)}a` as AtUri,
-  cid: `bafy${String.fromCharCode(97 + n)}` as Cid,
+  uri: `at://${me}/app.bsky.feed.post/3lbx7kt5def${letter(n % 26)}${letter(Math.floor(n / 26))}` as AtUri,
+  cid: `bafy${letter(n % 26)}${n < 26 ? "" : letter(Math.floor(n / 26))}` as Cid,
 });
 
 const rejected = () => Object.assign(new Error("Invalid record"), { status: 400 });
@@ -781,7 +782,7 @@ describe("resume", () => {
     await repl.resume(file);
     expect(agent.getPosts).toHaveBeenCalledWith([ref(3).uri, ref(2).uri, ref(1).uri]);
     expect(repl.thread()?.cursor).toEqual(ref(1));
-    expect(printed()).toContain("The post you were replying to has gone; continuing from (1)");
+    expect(printed()).toContain("Couldn't find the post you were replying to; continuing from (1)");
   });
   it("stops the thread if none of it is left", async () => {
     const file = await saved();
@@ -790,7 +791,31 @@ describe("resume", () => {
     await repl.resume(file);
     expect(repl.thread()).toBeUndefined();
     expect(repl.mode().kind).toBe("idle");
-    expect(printed()).toContain("The thread's posts have gone; thread stopped");
+    expect(printed()).toContain("Couldn't find the thread's posts; thread stopped");
+  });
+  it("picks the nearest post still there, not just any", async () => {
+    const file = await saved({ posts: ["one", "two", "three"] });
+    const { repl, agent } = setup();
+    agent.getPosts.mockResolvedValueOnce(alive(1, 2) as never);
+    await repl.resume(file);
+    expect(repl.thread()?.cursor).toEqual(ref(2));
+  });
+  it("asks about 25 posts at most, as getPosts allows", async () => {
+    const file = await saved({ posts: Array.from({ length: 30 }, (_, i) => `post ${i}`) });
+    const { repl, agent } = setup();
+    await repl.resume(file);
+    expect(agent.getPosts.mock.lastCall).toMatchObject([expect.any(Array)]);
+    expect((agent.getPosts.mock.lastCall as unknown as [string[]])[0]).toHaveLength(25);
+  });
+  it("keeps a thread with nothing sent yet, whose first post may be queued", async () => {
+    const first = setup();
+    await first.repl.startThread();
+    const file = parseSessionFile(JSON.parse(JSON.stringify(first.repl.snapshot(meta, { text: "first", cursor: 5 }, []))));
+    const { repl, printed } = setup();
+    await repl.resume(file);
+    expect(repl.mode().kind).toBe("thread");
+    await repl.submitText("first");
+    expect(printed()).not.toContain(IDLE_HINT);
   });
   it("keeps the thread if it can't check, and says so", async () => {
     const file = await saved();
@@ -924,9 +949,10 @@ describe("resume", () => {
     it("asks before sending anything", async () => {
       const file = await queued();
       const { repl, ask, agent, flush } = setup({ undo: 0 });
+      agent.getPosts.mockResolvedValueOnce(alive(2, 1) as never);
       await repl.resume(file);
       await flush();
-      expect(ask.choose).toHaveBeenCalledWith('Unsent from last time: "waiting"', ["Send", "Edit", "Discard"]);
+      expect(ask.choose).toHaveBeenCalledWith('Unsent from last time: "waiting"', ["Send", "Edit", "Discard"], 1);
       expect(agent.post).not.toHaveBeenCalled();
     });
     it("sends on Send, into the thread", async () => {
@@ -960,6 +986,41 @@ describe("resume", () => {
       await flush();
       expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ text: "waiting" }));
       expect(deps.restore).not.toHaveBeenCalled();
+    });
+    it("starts on Edit, since a post may already have gone", async () => {
+      const file = await queued();
+      const { repl, ask } = setup({ undo: 0 });
+      await repl.resume(file);
+      expect(vi.mocked(ask.choose).mock.lastCall?.[2]).toBe(1);
+    });
+    describe("when its thread can't be found", () => {
+      const lost = (answer: number) => {
+        const s = setup({ undo: 0 }, { choose: vi.fn(async () => answer) });
+        s.agent.getPosts.mockResolvedValueOnce([]);
+        return s;
+      };
+      it("says Send will start a new thread", async () => {
+        const file = await queued();
+        const { repl, ask } = lost(0);
+        await repl.resume(file);
+        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "waiting" (its thread couldn't be found, so Send starts a new one)`);
+      });
+      it("carries on as a thread after Send", async () => {
+        const file = await queued();
+        const { repl, posted, flush } = lost(0);
+        await repl.resume(file);
+        await flush();
+        expect(posted).toMatchObject([{ text: "waiting" }]);
+        expect(posted[0].reply).toBeUndefined();
+        expect(repl.mode().kind).toBe("thread");
+      });
+      it("doesn't point Edit at a post it couldn't find", async () => {
+        const file = await queued();
+        const { repl, deps, flush } = lost(1);
+        await repl.resume(file);
+        await flush();
+        expect(deps.restore).toHaveBeenCalledWith("/thread waiting");
+      });
     });
     it("forgets it on Discard", async () => {
       const file = await queued();
