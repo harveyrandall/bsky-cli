@@ -147,7 +147,7 @@ bsky delete <uri1> <uri2> <uri3>
 
 ### `bsky repl`
 
-An interactive composer for writing threads, posts, quotes, scheduled posts and drafts, with media, an undo window, a split preview, slash commands and sessions you can resume. Every other CLI command runs from its prompt too, and `#n` labels let you like, reply to or quote what you read. Plain `bsky` in a terminal opens it too. See [REPL](repl.md) for keys, markers and options.
+An interactive composer for writing threads, posts, quotes, scheduled posts and drafts, with media, an undo window, a split preview, slash commands and sessions you can resume. Most other CLI commands run from its prompt too, and `#n` labels let you like, reply to or quote what you read. Plain `bsky` in a terminal opens it too. See [REPL](repl.md) for keys, markers and options.
 
 ## Drafts
 

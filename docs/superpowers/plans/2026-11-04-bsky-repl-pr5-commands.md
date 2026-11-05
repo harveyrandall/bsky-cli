@@ -16,12 +16,15 @@
 |---|---|---|
 | Passthrough output via `useStdout().write()` | Through the REPL's `print`, a line at a time | `print` is held while `$EDITOR` has the terminal and goes through `<Static>`, so it can't be dropped or tear the frame. |
 | §6 Tab: names, flags, paths, labels | Adds flags, `/attach` paths and recent labels here | Left out of PRs 1 to 3. |
+| `#n` expands in any argument | Only where the command takes a post | `/run post we are #1` must post those words. |
+| `/drafts` deletes only after a successful send | The same, and a draft partly sent is replaced by one holding the rest | Keeping it whole would send the first posts twice. |
+| `/switch <profile>` | Also a handle, and `default` or no name for the unnamed profile | Otherwise there's no way back. |
 
 ## Global Constraints
 
 - PR 1 to PR 4 Global Constraints hold.
-- Resolution order: native command → Commander subcommand (passthrough) → `Unknown /usr. Did you mean /undo?` (edit distance over both sets). `/run` skips the native lookup. `/help` and Tab read one registry; passthrough entries are marked `↗`.
-- Blocked with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and whatever the Task 1 audit finds.
+- Resolution order: native command → Commander subcommand (passthrough) → `Unknown /hlp. Did you mean /help?` (edit distance over both sets). `/run` skips the native lookup. `/help` and Tab read one registry; `/help` lists passthrough entries on one `↗ From the CLI:` line, and Tab offers them unmarked.
+- Blocked with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and whatever the Task 1 audit finds (`schedule post`, `edit`, `delete`, `uninstall`, `watch`, and `--stdin` on anything).
 - `#n` labels are session-wide, deduplicated by URI, with `uri` and `cid` stored and saved with the session. With no labeller set, `printPost` output is byte-for-byte unchanged.
 - In passthrough arguments only an argument that is entirely a `#n` is expanded; a bare number is left alone, as it's usually a count (`-n 5`).
 - `/delete` and `/undo` confirm first, and only ever act on your own posts.
@@ -29,7 +32,7 @@
   - `/undo` prompt `Delete (4) "first line…"? [y/N]`, then `Deleted (4)`
   - `/switch` `Now posting as @work.bsky.social`
   - blocked `bsky login can't run inside the REPL: run it in another terminal`
-  - `/copy` `Copied (4)`; no clipboard tool `Couldn't find a clipboard tool (tried pbcopy, wl-copy, xclip, clip)`
+  - `/copy` `Copied (4)`, or what you typed for a post not in the session; no clipboard tool `/copy: Couldn't find a clipboard tool (tried pbcopy, wl-copy, xclip, clip): <link>`
 
 ## Review Focus
 
@@ -70,7 +73,7 @@
 
 ### Task 5: `/undo`, `/delete`, `/drafts`, `/switch`
 
-**Produces:** `Repl.deletePost(ref)`, `Repl.undo()`, `Repl.drafts()`, `Repl.switchProfile(name)`; `ReplAgent.deletePost(uri)`; `Registry.markDeleted`; `ReplDeps.listDrafts`, `switchAgent`.
+**Produces:** `Repl.deletePost(ref)`, `Repl.undo()`, `Repl.drafts()`, `Repl.switchProfile(name)`; `ReplAgent.deletePost(uri)`; `Registry.markDeleted`; `ReplDeps.listDrafts`, `switchAccount`.
 
 - [ ] Tests: confirm first, default No; someone else's post is refused; a deleted post is marked, shown in the summary, and the cursor falls back as on resume; `/drafts` lists, loads one into the composer (threads joined with the split marker) and deletes it only after a successful send; `/switch` refuses while posts are queued, stops the thread and clears staged media with a warning. Red → implement → green → commit `feat(repl): add /undo, /delete, /drafts and /switch`.
 
