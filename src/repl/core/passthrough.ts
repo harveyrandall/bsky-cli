@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { format } from "node:util";
-import { CommanderError, type Command } from "commander";
+import { Command, CommanderError } from "commander";
 import type { LineStyle } from "./commands";
 import type { SubmitOutcome } from "./repl";
 
@@ -87,13 +87,42 @@ const allCommands = (c: Command): Command[] => [c, ...c.commands.flatMap(allComm
 const named = (commands: readonly Command[], token: string) =>
   commands.find((c) => c.name() === token || c.aliases().includes(token));
 
+/** `argv` without `command`'s options, on a throwaway: parsing fires listeners and sets values. */
+function operands(command: Command, argv: readonly string[]): string[] {
+  const probe = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+  for (const option of command.options) probe.addOption(option);
+  try {
+    return probe.parseOptions([...argv]).operands;
+  } catch {
+    return [];
+  }
+}
+
 /** The command and subcommand argv names, as Commander would find them. */
 function commandPath(program: Command, argv: readonly string[]): string[] {
-  const at = argv.findIndex((a) => named(program.commands, a));
-  if (at === -1) return [];
-  const command = named(program.commands, argv[at])!;
-  const sub = argv.slice(at + 1).map((a) => named(command.commands, a)).find(Boolean);
+  const [first, second] = operands(program, argv);
+  if (first === "help") return [first];
+  const command = first === undefined ? undefined : named(program.commands, first);
+  if (!command) return [];
+  const sub = second === undefined ? undefined : named(command.commands, second);
   return sub ? [command.name(), sub.name()] : [command.name()];
+}
+
+/** Where in `argv` a post goes, by the command's own argument names. Anywhere else `#1` is just text. */
+export function uriArguments(program: Command, argv: readonly string[]): Set<number> {
+  const found = new Set<number>();
+  const path = commandPath(program, argv);
+  if (path.length === 0) return found;
+  const target = path.reduce((c, name) => named(c.commands, name) ?? c, program);
+  const args = target.registeredArguments;
+  let at = argv.indexOf(operands(program, argv)[path.length - 1]) + 1;
+  operands(target, argv.slice(at)).forEach((value, i) => {
+    at = argv.indexOf(value, at);
+    const arg = args[i] ?? (args.at(-1)?.variadic ? args.at(-1) : undefined);
+    if (arg?.name() === "uri") found.add(at);
+    at += 1;
+  });
+  return found;
 }
 
 function refusal(program: Command, argv: readonly string[]): string | undefined {

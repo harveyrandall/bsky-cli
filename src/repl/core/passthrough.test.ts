@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Command } from "commander";
-import { BLOCKED, outsideCommands, passthroughFlags, passthroughKnows, passthroughNames, runPassthrough } from "./passthrough";
+import { BLOCKED, outsideCommands, passthroughFlags, passthroughKnows, passthroughNames, runPassthrough, uriArguments } from "./passthrough";
 
 function program() {
   const p = new Command().option("-p, --profile <name>").option("--json");
@@ -140,6 +140,41 @@ describe("runPassthrough", () => {
   });
 });
 
+describe("what a run would really reach", () => {
+  const withDefault = () => {
+    const p = program().option("-c, --config <path>").version("1.2.3");
+    const repl = vi.fn();
+    p.command("repl", { isDefault: true }).action(repl);
+    return { p, repl, lines: [] as string[] };
+  };
+  it.each([[["-p", "hello"]], [["-c", "hello"]], [["--", "-p", "hello"]], [["-V"]], [["-p"]]])("%j runs nothing, not even the default command", async (argv) => {
+    const { p, repl, lines } = withDefault();
+    expect(await runPassthrough(p, argv, { print: (text) => lines.push(text) })).toBe("keep");
+    expect(repl).not.toHaveBeenCalled();
+    expect(lines.join()).toContain("No such command");
+  });
+  it("sees a blocked command past an option's value", async () => {
+    const { p, lines } = withDefault();
+    await runPassthrough(p, ["-c", "hello", "login"], { print: (text) => lines.push(text) });
+    expect(lines.join()).toContain("bsky login can't run inside the REPL");
+  });
+  it("sees a blocked subcommand past an option's value", async () => {
+    const { p, lines } = withDefault();
+    await runPassthrough(p, ["schedule", "-c", "list", "post"], { print: (text) => lines.push(text) });
+    expect(lines.join()).toContain("bsky schedule post can't run inside the REPL");
+  });
+  it("isn't fooled the other way, by an option's value that names something blocked", async () => {
+    const { p, lines } = withDefault();
+    await runPassthrough(p, ["-p", "login", "hello"], { print: (text) => lines.push(text) });
+    expect(lines).toContain("hello quiet");
+  });
+  it("leaves the real program's options alone", async () => {
+    const { p } = withDefault();
+    await runPassthrough(p, ["-p", "hello"], { print() {} });
+    expect(p.opts().profile).toBeUndefined();
+  });
+});
+
 describe("an unnamed profile after a /switch", () => {
   it("is passed on as empty, which beats a profile from the config", async () => {
     const p = program();
@@ -191,6 +226,31 @@ describe("schedule uninstall", () => {
     await runPassthrough(p, ["schedule", "uninstall"], { print: (text) => printed.push(text) });
     expect(action).not.toHaveBeenCalled();
     expect(printed.join()).toContain("bsky schedule uninstall can't run inside the REPL");
+  });
+});
+
+describe("uriArguments", () => {
+  const cli = () => {
+    const p = program();
+    p.command("thread").argument("<uri>").option("-n <count>");
+    p.command("like").argument("<uri...>");
+    p.command("post").argument("<text...>");
+    p.command("reply").argument("<uri>").argument("<text...>");
+    p.command("bookmarks").command("add").argument("<uri...>");
+    return p;
+  };
+  it.each([
+    [["thread", "#1"], [1]],
+    [["thread", "-n", "5", "#1"], [3]],
+    [["thread", "#1", "-n", "5"], [1]],
+    [["like", "#1", "#2"], [1, 2]],
+    [["post", "we", "are", "#1"], []],
+    [["reply", "#1", "hi", "#2"], [1]],
+    [["-p", "work", "thread", "#1"], [3]],
+    [["bookmarks", "add", "#1"], [2]],
+    [["nonsense", "#1"], []],
+  ])("%j is %j", (argv, at) => {
+    expect([...uriArguments(cli(), argv)]).toEqual(at);
   });
 });
 
