@@ -400,7 +400,7 @@ interface Completed {
 export interface Completions {
   cliNames: readonly string[];
   flags(command: string): readonly string[];
-  /** Newest first. */
+  /** Most useful first. */
   labels(): readonly string[];
   paths(partial: string): readonly string[];
 }

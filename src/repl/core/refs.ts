@@ -207,7 +207,7 @@ export class Registry {
     return this.list;
   }
 
-  /** For Tab: your posts, then what you've read, newest first. */
+  /** For Tab: the session's posts, then what you've read, each newest first. */
   recentLabels(): string[] {
     const own = this.list.filter((e) => !e.deleted).map((e) => e.label);
     return [...own.reverse(), ...this.snapshot().viewed.map((e) => e.label).reverse()];

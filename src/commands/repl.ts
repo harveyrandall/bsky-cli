@@ -54,7 +54,7 @@ function toLookup(post: AppBskyFeedDefs.PostView): PostLookup | undefined {
   };
 }
 
-/** The few agent calls the REPL needs, with every response checked. */
+/** The few agent calls the REPL needs, with every post reference checked. */
 export function replAgent(agent: AtpAgent): ReplAgent {
   const did = agent.session?.did;
   if (!isDid(did)) throw new Error("Not logged in — run `bsky login` first");

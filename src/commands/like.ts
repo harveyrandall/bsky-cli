@@ -13,7 +13,8 @@ export async function likePost(agent: Client, post: { uri: string; cid: string }
 /** Removes your like of a post, which the post itself knows. False if there wasn't one. */
 export async function unlikePost(agent: Client, postUri: string): Promise<boolean> {
   const { data } = await agent.getPosts({ uris: [postUri] });
-  const like = data.posts[0]?.viewer?.like;
+  if (data.posts.length === 0) throw new Error("Post not found");
+  const like = data.posts[0].viewer?.like;
   if (like) await agent.deleteLike(like);
   return like !== undefined;
 }

@@ -20,7 +20,7 @@ const NEW_ITEMS = ["Post", "Thread", "Image post", "Video post", "Quote post", "
 const NEW_QUESTIONS: Partial<Record<(typeof NEW_ITEMS)[number], string>> = {
   "Image post": "Path to the file:",
   "Video post": "Path to the file:",
-  "Quote post": "Post to quote (number, link or at:// URI):",
+  "Quote post": "Post to quote (number, #n, link or at:// URI):",
 };
 
 export type ReturnTo = "idle" | "thread";
@@ -89,7 +89,7 @@ export interface ReplDeps {
   openUrl(url: string): Promise<void>;
   copyText(text: string): Promise<void>;
   listDrafts(): Promise<{ drafts: Draft[]; skipped: number }>;
-  /** Everything else that depends on the account follows it: drafts, the session file, CLI commands. */
+  /** Everything else that depends on the account follows it: drafts, scheduled posts, the session file, CLI commands. */
   switchAccount(profile: string): Promise<{ agent: ReplAgent; handle: string }>;
   timers?: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   fs?: MediaFs;
@@ -726,13 +726,13 @@ export class Repl {
     return resolved ? this.remove(resolved.ref, resolved.post?.text ?? "") : "keep";
   }
 
-  /** `/undo`: the last post you made. What's still queued is Esc's. */
+  /** `/undo`: this account's last post this session. What's still queued is Esc's. */
   async undo(): Promise<SubmitOutcome> {
     if (this.blockedByPending()) return "keep";
     const last = this.registry.entries().filter((e) => !e.external && !e.deleted && didOf(e.uri) === this.agent.selfDid).at(-1);
     if (!last) {
       this.deps.print("Nothing to undo", "dim");
-      return "keep";
+      return "done";
     }
     return this.remove({ uri: last.uri, cid: last.cid }, last.excerpt);
   }
@@ -758,7 +758,7 @@ export class Repl {
     return "done";
   }
 
-  /** A deleted cursor can't be replied to, so the thread goes back to the post before it. */
+  /** A deleted cursor can't be replied to, so the thread goes back to the post before it, or stops if none is left. */
   private stepBackFrom(uri: string): void {
     const t = this.threadState;
     if (t?.cursor.uri !== uri) return;
@@ -768,7 +768,7 @@ export class Repl {
     else this.stopThread();
   }
 
-  /** `/drafts [id]`: list them, or load one to send. It's deleted once it's gone. */
+  /** `/drafts [id]`: list them, or load one to send. The draft goes once that text has been sent. */
   async drafts(id?: string): Promise<SubmitOutcome> {
     const { drafts: all, skipped } = await this.deps.listDrafts();
     if (skipped > 0) this.deps.print(`Skipped ${skipped} draft file${skipped === 1 ? "" : "s"} that couldn't be read`, "error");
@@ -840,11 +840,19 @@ export class Repl {
     return "done";
   }
 
+  /** The link is what `/open` and `/copy` were after, so a failure still gives it. */
+  private async withLink(uri: AtUri, use: (url: string) => Promise<void>): Promise<void> {
+    const url = postUrl(uri);
+    await use(url).catch((err: unknown) => {
+      throw new Error(`${err instanceof Error ? err.message : String(err)}: ${url}`);
+    });
+  }
+
   /** `/open`: the post in a browser. */
   async openPost(input: string): Promise<SubmitOutcome> {
     const resolved = await this.resolve(input);
     if (!resolved) return "keep";
-    await this.deps.openUrl(postUrl(resolved.ref.uri));
+    await this.withLink(resolved.ref.uri, (url) => this.deps.openUrl(url));
     return "done";
   }
 
@@ -852,7 +860,7 @@ export class Repl {
   async copyPost(input: string): Promise<SubmitOutcome> {
     const resolved = await this.resolve(input);
     if (!resolved) return "keep";
-    await this.deps.copyText(postUrl(resolved.ref.uri));
+    await this.withLink(resolved.ref.uri, (url) => this.deps.copyText(url));
     this.deps.print(`Copied ${resolved.entry ? `(${resolved.entry.label})` : input}`, "dim");
     return "done";
   }

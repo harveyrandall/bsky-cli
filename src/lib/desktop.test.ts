@@ -6,17 +6,18 @@ import { copyText, openUrl } from "@/lib/desktop";
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 
 /** A child process that ends how each program's outcome says. */
-function programs(outcome: (command: string) => number | "missing") {
+function programs(outcome: (command: string) => number | "missing" | "stays") {
   const input: string[] = [];
   vi.mocked(spawn).mockImplementation(((command: string) => {
     const child = Object.assign(new EventEmitter(), {
       stdin: { on() {}, end: (text: string) => void input.push(text) },
+      unref() {},
     });
     queueMicrotask(() => {
       if (command === undefined) return; // vitest touches the mock itself when reporting
       const result = outcome(command);
       if (result === "missing") child.emit("error", Object.assign(new Error("not found"), { code: "ENOENT" }));
-      else child.emit("close", result);
+      else if (result !== "stays") child.emit("close", result);
     });
     return child;
   }) as never);
@@ -44,6 +45,15 @@ describe("desktop", () => {
     programs(() => 3);
     await expect(openUrl("https://x")).rejects.toThrow("xdg-open exited with status 3");
   });
+  it("doesn't wait for an opener that stays until the browser closes", async () => {
+    vi.useFakeTimers();
+    on("linux");
+    programs(() => "stays");
+    const opened = openUrl("https://x");
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(opened).resolves.toBeUndefined();
+    vi.useRealTimers();
+  });
   it("copies with the first tool there is", async () => {
     const input = programs((c) => (c === "pbcopy" ? "missing" : 0));
     await copyText("hello");
@@ -54,8 +64,12 @@ describe("desktop", () => {
     programs(() => "missing");
     await expect(copyText("hello")).rejects.toThrow("Couldn't find a clipboard tool (tried pbcopy, wl-copy, xclip, clip)");
   });
-  it("stops at a tool that's there but fails", async () => {
-    programs(() => 1);
-    await expect(copyText("hello")).rejects.toThrow("pbcopy exited with status 1");
+  it("tries the next tool after one that's there but fails", async () => {
+    programs((c) => (c === "wl-copy" ? 1 : c === "xclip" ? 0 : "missing"));
+    await expect(copyText("hello")).resolves.toBeUndefined();
+  });
+  it("says why, if every tool there failed", async () => {
+    programs((c) => (c === "wl-copy" ? 1 : "missing"));
+    await expect(copyText("hello")).rejects.toThrow("wl-copy exited with status 1");
   });
 });

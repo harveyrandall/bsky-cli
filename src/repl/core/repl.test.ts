@@ -1330,7 +1330,7 @@ describe("/delete and /undo", () => {
   });
   it("/undo says when there's nothing to take back", async () => {
     const { repl, printed } = setup();
-    expect(await repl.undo()).toBe("keep");
+    expect(await repl.undo()).toBe("done");
     expect(printed()).toContain("Nothing to undo");
   });
   it("/undo waits for what's queued, which Esc takes back", async () => {
@@ -1522,6 +1522,16 @@ describe("/switch", () => {
     expect(s.printed()).toContain("You can only delete your own posts");
     await s.repl.undo();
     expect(s.printed()).toContain("Nothing to undo");
+  });
+});
+
+describe("a link that can't be opened or copied", () => {
+  it.each(["openUrl", "copyText"] as const)("is still shown when %s fails", async (dep) => {
+    const { repl, deps, flush } = setup();
+    await repl.post("one");
+    await flush();
+    deps[dep].mockRejectedValueOnce(new Error("no browser"));
+    await expect(dep === "openUrl" ? repl.openPost("1") : repl.copyPost("1")).rejects.toThrow(`no browser: https://bsky.app/profile/${me}/post/`);
   });
 });
 
@@ -1809,7 +1819,7 @@ describe("/new", () => {
     await s.repl.post("first");
     await s.flush();
     await s.repl.newMenu();
-    expect(s.ask.text).toHaveBeenCalledWith("Post to quote (number, link or at:// URI):");
+    expect(s.ask.text).toHaveBeenCalledWith("Post to quote (number, #n, link or at:// URI):");
     expect(s.repl.prompt()).toBe("quote→1 ›");
   });
   it("writes a draft", async () => {

@@ -170,8 +170,12 @@ describe("unrepostPost", () => {
     await expect(unrepostPost(agent as never, "at://post")).resolves.toBe(true);
     expect(agent.deleteRepost).toHaveBeenCalledWith("at://me/repost/1");
   });
-  it("says so if you hadn't reposted it, or the post has gone", async () => {
-    await expect(unrepostPost(client([{ viewer: {} }]) as never, "at://post")).resolves.toBe(false);
-    await expect(unrepostPost(client([]) as never, "at://post")).resolves.toBe(false);
+  it("says so if you hadn't reposted it", async () => {
+    const agent = client([{}]);
+    await expect(unrepostPost(agent as never, "at://post")).resolves.toBe(false);
+    expect(agent.deleteRepost).not.toHaveBeenCalled();
+  });
+  it("says if the post has gone, rather than that it wasn't reposted", async () => {
+    await expect(unrepostPost(client([]) as never, "at://post")).rejects.toThrow("Post not found");
   });
 });

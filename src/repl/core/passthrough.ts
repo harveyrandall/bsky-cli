@@ -34,7 +34,8 @@ type Writer = typeof process.stdout.write;
 /**
  * Sends what a command prints to its `sink`, and leaves everything else alone:
  * Ink draws through these same streams while the command runs. Only code running
- * as part of the command, by async context, is caught. Returns how to undo it.
+ * as part of the command, by async context, is caught, and its `process.exit`
+ * throws. Returns how to undo it.
  */
 function redirect(): () => void {
   const { stdout, stderr } = process;

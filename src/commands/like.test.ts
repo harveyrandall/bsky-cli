@@ -164,6 +164,10 @@ describe("likes command", () => {
 });
 
 describe("unlikePost", () => {
+  it("says if the post has gone, rather than that it wasn't liked", async () => {
+    const agent = { getPosts: vi.fn(async () => ({ data: { posts: [] } })), deleteLike: vi.fn() };
+    await expect(unlikePost(agent as never, "at://post")).rejects.toThrow("Post not found");
+  });
   const client = (viewer: object) => ({ getPosts: vi.fn(async () => ({ data: { posts: [{ viewer }] } })), deleteLike: vi.fn(async () => {}) });
   it("deletes your like of a post, from what the post says it is", async () => {
     const agent = client({ like: "at://me/like/1" });

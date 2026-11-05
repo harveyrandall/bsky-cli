@@ -13,7 +13,8 @@ export async function repostPost(agent: Client, post: { uri: string; cid: string
 /** Removes your repost of a post, which the post itself knows. False if there wasn't one. */
 export async function unrepostPost(agent: Client, postUri: string): Promise<boolean> {
   const { data } = await agent.getPosts({ uris: [postUri] });
-  const repost = data.posts[0]?.viewer?.repost;
+  if (data.posts.length === 0) throw new Error("Post not found");
+  const repost = data.posts[0].viewer?.repost;
   if (repost) await agent.deleteRepost(repost);
   return repost !== undefined;
 }

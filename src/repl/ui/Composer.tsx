@@ -80,7 +80,7 @@ export interface ComposerProps {
   onEditor(state: EditorState): void;
   /** Where to start: a resumed session's draft. */
   initial?: EditorState;
-  /** Names Tab completes as well as the REPL's own. */
+  /** What Tab offers beyond the REPL's own command names. */
   completions: Completions;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
