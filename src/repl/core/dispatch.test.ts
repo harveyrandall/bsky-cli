@@ -83,14 +83,14 @@ describe("/open, /copy and /view", () => {
     expect(await dispatch("/view", c)).toBe("keep");
   });
   it("/view prints the thread through the CLI", async () => {
-    const run = vi.fn(async () => {});
-    const c = { ...ctx(), passthrough: { names: () => [], run } };
+    const run = vi.fn(async (_: string[]) => "done" as const);
+    const c = { ...ctx(), passthrough: { names: () => [], knows: () => false, run } };
     expect(await dispatch("/view #2", c)).toBe("done");
     expect(run).toHaveBeenCalledWith(["thread", "at://x"]);
   });
   it("/view keeps the text on a bad ref", async () => {
-    const run = vi.fn(async () => {});
-    const c = { ...ctx(), passthrough: { names: () => [], run } };
+    const run = vi.fn(async (_: string[]) => "done" as const);
+    const c = { ...ctx(), passthrough: { names: () => [], knows: () => false, run } };
     c.fake.uriOf.mockResolvedValueOnce(undefined);
     expect(await dispatch("/view 9", c)).toBe("keep");
     expect(run).not.toHaveBeenCalled();
@@ -109,9 +109,27 @@ describe("likes and reposts", () => {
 describe("CLI commands", () => {
   const withCli = () => {
     const c = ctx();
-    const run = vi.fn(async () => {});
-    return { c: { ...c, passthrough: { names: () => ["timeline", "search", "post"], run } }, run };
+    const run = vi.fn(async (_: string[]) => "done" as const);
+    return { c: { ...c, passthrough: { names: () => ["timeline", "search", "post"], knows: (n: string) => ["timeline", "search", "post", "login", "tl"].includes(n), run } }, run };
   };
+  it("say what became of the text", async () => {
+    const { c, run } = withCli();
+    run.mockResolvedValueOnce("keep" as never);
+    expect(await dispatch("/timeline --nope", c)).toBe("keep");
+    run.mockResolvedValueOnce("keep" as never);
+    expect(await dispatch("/run timeline --nope", c)).toBe("keep");
+  });
+  it("reach blocked commands and aliases, which aren't offered but can say why", async () => {
+    const { c, run } = withCli();
+    await dispatch("/login me", c);
+    await dispatch("/tl -n 5", c);
+    expect(run.mock.calls.map(([argv]) => argv)).toEqual([["login", "me"], ["tl", "-n", "5"]]);
+  });
+  it("/help on a blocked command says why", async () => {
+    const { c, run } = withCli();
+    await dispatch("/help login", c);
+    expect(run).toHaveBeenCalledWith(["login", "--help"]);
+  });
   it("run when no REPL command has the name, with shell-style arguments", async () => {
     const { c, run } = withCli();
     expect(await dispatch(`/search "two words" -n 5`, c)).toBe("done");

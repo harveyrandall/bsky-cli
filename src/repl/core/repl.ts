@@ -96,7 +96,8 @@ export interface ReplDeps {
 }
 
 /** "done" clears the composer, "keep" leaves it, `restore` replaces it. */
-export type SubmitOutcome = "done" | "keep" | { restore: string };
+/** `clear` empties the composer without remembering the text. */
+export type SubmitOutcome = "done" | "keep" | "clear" | { restore: string };
 export type EscapeResult = "handled" | "unhandled" | { restore: string };
 
 export interface ThreadState {

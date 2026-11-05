@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Command } from "commander";
-import { BLOCKED, outsideCommands, passthroughFlags, passthroughNames, runPassthrough } from "./passthrough";
+import { BLOCKED, outsideCommands, passthroughFlags, passthroughKnows, passthroughNames, runPassthrough } from "./passthrough";
 
 function program() {
   const p = new Command().option("-p, --profile <name>").option("--json");
@@ -140,6 +140,38 @@ describe("runPassthrough", () => {
   });
 });
 
+describe("what a run comes to", () => {
+  it.each([
+    [["hello"], "done"],
+    [["hello", "--help"], "done"],
+    [["quits"], "done"],
+    [["hello", "--nope"], "keep"],
+    [["bye"], "keep"],
+    [["boom"], "keep"],
+    [["failing"], "keep"],
+    [["hello", "--stdin"], "keep"],
+    [["nonsense"], "keep"],
+  ])("%j is %s", async (argv, outcome) => {
+    const p = program();
+    p.command("quits").action(() => process.exit(0));
+    expect(await runPassthrough(p, argv, { print() {} })).toBe(outcome);
+  });
+  it("clears a refused login, which may hold a password", async () => {
+    expect(await runPassthrough(program(), ["login", "me", "secret"], { print() {} })).toBe("clear");
+  });
+  it("marks refusals and thrown errors as errors, after what was printed", async () => {
+    const p = program();
+    p.command("half").action(async () => {
+      process.stdout.write("no newline");
+      throw new Error("it broke");
+    });
+    const print = vi.fn();
+    await runPassthrough(p, ["half"], { print });
+    await runPassthrough(p, ["login"], { print });
+    expect(print.mock.calls).toEqual([["no newline", undefined], ["it broke", "error"], [expect.stringContaining("bsky login"), "error"]]);
+  });
+});
+
 describe("schedule uninstall", () => {
   it("is refused, as it asks a question that would take the terminal out of raw mode", async () => {
     const p = program();
@@ -166,6 +198,16 @@ describe("outsideCommands", () => {
     expect(terminal).toHaveBeenCalledWith("FRAME");
     terminal.mockRestore();
     expect(printed).toEqual(["done"]);
+  });
+});
+
+describe("passthroughKnows", () => {
+  it("knows blocked commands and aliases, which /help and Tab leave out", () => {
+    const p = program();
+    p.commands.find((c) => c.name() === "hello")!.alias("hi");
+    expect(passthroughKnows(p, "login")).toBe(true);
+    expect(passthroughKnows(p, "hi")).toBe(true);
+    expect(passthroughKnows(p, "nope")).toBe(false);
   });
 });
 

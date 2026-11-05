@@ -8,7 +8,7 @@ export interface CommandContext {
   print(text: string, style?: LineStyle): void;
   exit(): void;
   /** CLI commands that can run in the REPL. */
-  passthrough?: { names(): string[]; run(argv: string[]): Promise<void> };
+  passthrough?: { names(): string[]; knows(name: string): boolean; run(argv: string[]): Promise<SubmitOutcome> };
   repl: Repl;
   /** Open text in $EDITOR, handing it the terminal. */
   edit(text: string): Promise<string>;
@@ -57,7 +57,7 @@ export const COMMANDS: readonly ReplCommand[] = [
       }
       const bare = name.replace(/^\//, "");
       const cmd = findCommand(bare);
-      if (!cmd && ctx.passthrough?.names().includes(bare)) {
+      if (!cmd && ctx.passthrough?.knows(bare)) {
         await ctx.passthrough.run([bare, "--help"]);
         return;
       }
@@ -224,8 +224,7 @@ export const COMMANDS: readonly ReplCommand[] = [
       if (!ctx.passthrough) throw new Error("CLI commands aren't available here");
       const uri = await ctx.repl.uriOf(ref);
       if (!uri) return "keep";
-      await ctx.passthrough.run(["thread", uri]);
-      return "done";
+      return ctx.passthrough.run(["thread", uri]);
     },
   },
   {
@@ -250,7 +249,7 @@ export const COMMANDS: readonly ReplCommand[] = [
     async run(args, ctx) {
       if (args.length === 0) throw new Error("Usage: /run <command> [args]");
       if (!ctx.passthrough) throw new Error("CLI commands aren't available here");
-      await ctx.passthrough.run(args);
+      return ctx.passthrough.run(args);
     },
   },
   {

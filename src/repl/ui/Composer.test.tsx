@@ -156,3 +156,13 @@ describe("Tab", () => {
     expect(onHint).toHaveBeenCalledWith("4  #2");
   });
 });
+
+describe("a submit that clears", () => {
+  it("empties the composer without remembering the text", async () => {
+    const { lastFrame, type } = setup({ onSubmit: vi.fn(async () => "clear" as const) });
+    await type("/login me secret", "\r");
+    expect(lastFrame()).not.toContain("secret");
+    await type("\x1b[A");
+    expect(lastFrame()).not.toContain("secret");
+  });
+});

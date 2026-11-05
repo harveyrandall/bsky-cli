@@ -8,7 +8,7 @@ import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
 import { copyText, openUrl } from "@/lib/desktop";
 import { editInEditor } from "@/lib/editor";
-import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
+import { Repl, type ReplAgent, type ReplDeps, type ReplSettings, type SubmitOutcome } from "@/repl/core/repl";
 import type { SessionKeeper } from "@/repl/core/session";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
@@ -41,7 +41,12 @@ export interface AppProps {
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
   /** CLI commands that can run here. */
-  passthrough?: { names(): string[]; flags(name: string): string[]; run(argv: string[], print: (text: string, style?: LineStyle) => void): Promise<void> };
+  passthrough?: {
+    names(): string[];
+    knows(name: string): boolean;
+    flags(name: string): string[];
+    run(argv: string[], print: (text: string, style?: LineStyle) => void): Promise<SubmitOutcome>;
+  };
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -369,7 +374,11 @@ export function App(props: AppProps) {
   })();
 
   const cli = props.passthrough;
-  const passthrough = cli && { names: () => cli.names(), run: (argv: string[]) => cli.run(repl.expandLabels(argv), print) };
+  const passthrough = cli && {
+    names: () => cli.names(),
+    knows: (name: string) => cli.knows(name),
+    run: (argv: string[]) => cli.run(repl.expandLabels(argv), print),
+  };
   const countdown = repl.countdown();
   const failure = repl.pausedBy();
 

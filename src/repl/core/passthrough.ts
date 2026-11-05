@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { format } from "node:util";
 import { CommanderError, type Command } from "commander";
 import type { LineStyle } from "./commands";
+import type { SubmitOutcome } from "./repl";
 
 // Commands that need the terminal, from an audit of createInterface, setRawMode,
 // promptDateTime and stdin under src/commands. `drafts send` and the like are safe:
@@ -19,7 +20,11 @@ export const BLOCKED = new Map<string, string>([
   ["schedule watch", "it runs until stopped: run it in another terminal"],
 ]);
 
-class Exited extends Error {}
+class Exited extends Error {
+  constructor(readonly code: number) {
+    super();
+  }
+}
 
 /** Where the running command's output goes, for code running as part of it. */
 const output = new AsyncLocalStorage<(text: string) => void>();
@@ -52,7 +57,7 @@ function redirect(): () => void {
   stderr.write = writer(writers[1], stderr);
   Object.assign(console, { log: logger(log), info: logger(info), warn: logger(warn), error: logger(error) });
   process.exit = ((code?: number) => {
-    if (output.getStore()) throw new Exited();
+    if (output.getStore()) throw new Exited(Number(code ?? process.exitCode ?? 0));
     return exit(code);
   }) as typeof process.exit;
   return () => {
@@ -109,21 +114,25 @@ export function passthroughNames(program: Command): string[] {
   return visible.map((c) => c.name()).filter((name) => name !== "help" && !BLOCKED.has(name));
 }
 
+/** Whether `/name` is a CLI command: blocked ones get to say why, and aliases work. */
+export const passthroughKnows = (program: Command, name: string) => named(program.commands, name) !== undefined;
+
 export function passthroughFlags(program: Command, name: string): string[] {
   const command = program.commands.find((c) => c.name() === name);
   return command ? program.createHelp().visibleOptions(command).flatMap((o) => o.long ?? []) : [];
 }
 
-/** Runs a CLI command in this process, its output going to `print`. */
+/** Runs a CLI command in this process, its output going to `print`. A failure keeps the text. */
 export async function runPassthrough(
   program: Command,
   argv: readonly string[],
   io: { print(text: string, style?: LineStyle): void; profile?: string },
-): Promise<void> {
+): Promise<SubmitOutcome> {
   const refused = refusal(program, argv);
   if (refused) {
-    io.print(refused);
-    return;
+    io.print(refused, "error");
+    // `/login me hunter2` is the CLI's form: the password can't stay in the composer or history.
+    return commandPath(program, argv)[0] === "login" ? "clear" : "keep";
   }
   // Outside the command's context, so that drawing the line isn't caught as more output.
   const print = (text: string, style?: LineStyle) => output.exit(() => io.print(text, style));
@@ -134,19 +143,28 @@ export async function runPassthrough(
     for (const part of parts) print(part);
   };
   const { exitCode } = process;
+  process.exitCode = undefined;
   for (const c of allCommands(program)) c.exitOverride();
   const restore = redirect();
+  let ok = true;
+  let thrown: string | undefined;
   try {
     const args = io.profile ? ["-p", io.profile, ...argv] : [...argv];
     await output.run(sink, () => program.parseAsync(args, { from: "user" }));
+    ok = !process.exitCode;
   } catch (err) {
     // Commander has already written its own errors, and a command that exits has said why.
-    if (!(err instanceof Exited) && !(err instanceof CommanderError)) {
-      sink(`${err instanceof Error ? err.message : String(err)}\n`);
+    if (err instanceof Exited) ok = err.code === 0;
+    else if (err instanceof CommanderError) ok = err.exitCode === 0;
+    else {
+      ok = false;
+      thrown = err instanceof Error ? err.message : String(err);
     }
   } finally {
     restore();
     process.exitCode = exitCode;
   }
   if (line) print(line);
+  if (thrown !== undefined) print(thrown, "error");
+  return ok ? "done" : "keep";
 }
