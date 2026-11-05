@@ -74,8 +74,24 @@ describe("a command with a capital", () => {
   it("is refused with a suggestion, so a typo in a thread can't be posted", async () => {
     const c = ctx();
     expect(await dispatch("/Exit", c)).toBe("keep");
-    expect(c.print).toHaveBeenCalledWith("Unknown /Exit. Did you mean /exit?", "error");
+    expect(c.print).toHaveBeenCalledWith("Unknown /Exit. Did you mean /exit? Start with \\/ to post it as text.", "error");
     expect(c.exit).not.toHaveBeenCalled();
+  });
+  it.each(["/EXIT", "/THREAD hi", "/Post hello"])("gets a suggestion with caps lock on too: %s", async (input) => {
+    const c = ctx();
+    await dispatch(input, c);
+    expect(c.print).toHaveBeenCalledWith(expect.stringContaining("Did you mean"), "error");
+  });
+  it("says how to post a path, which is what it may have been", async () => {
+    const c = ctx();
+    expect(await dispatch("/Users/me/notes.txt is my file", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith("Unknown /Users/me/notes.txt. /help lists commands. Start with \\/ to post it as text.", "error");
+  });
+  it("needs a letter, so times and the like are text", () => {
+    expect(parseInput("/5pm is late")).toEqual({ kind: "text", text: "/5pm is late" });
+  });
+  it.each(["Thread", "Zebra"])("takes any capital: /%s", (name) => {
+    expect(parseInput(`/${name}`)).toEqual({ kind: "command", name, rest: "" });
   });
   it("is still text with a backslash", () => {
     expect(parseInput("\\/Exit stage left")).toEqual({ kind: "text", text: "/Exit stage left" });
@@ -301,12 +317,12 @@ describe("dispatch", () => {
   it("suggests a close command and keeps the text", async () => {
     const c = ctx();
     expect(await dispatch("/hlp", c)).toBe("keep");
-    expect(c.print).toHaveBeenCalledWith("Unknown /hlp. Did you mean /help?", "error");
+    expect(c.print).toHaveBeenCalledWith("Unknown /hlp. Did you mean /help? Start with \\/ to post it as text.", "error");
   });
   it("points at /help when nothing is close", async () => {
     const c = ctx();
     expect(await dispatch("/zzzz", c)).toBe("keep");
-    expect(c.print).toHaveBeenCalledWith("Unknown /zzzz. /help lists commands.", "error");
+    expect(c.print).toHaveBeenCalledWith("Unknown /zzzz. /help lists commands. Start with \\/ to post it as text.", "error");
   });
   it.each([
     ['/help "exit', '/help: Unclosed " quote'],

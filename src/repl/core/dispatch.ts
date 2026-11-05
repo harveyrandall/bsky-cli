@@ -32,7 +32,7 @@ export async function dispatch(input: string, ctx: CommandContext): Promise<Subm
       return await ctx.passthrough.run([parsed.name, ...tokenize(parsed.rest)]);
     }
     if (!cmd) {
-      ctx.print(unknownMessage(parsed.name, ctx.passthrough?.names()), "error");
+      ctx.print(`${unknownMessage(parsed.name, ctx.passthrough?.names())} Start with \\/ to post it as text.`, "error");
       return "keep";
     }
     return (await cmd.run(cmd.raw ? [] : tokenize(parsed.rest), ctx, parsed.rest)) ?? "done";

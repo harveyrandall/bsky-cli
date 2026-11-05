@@ -398,7 +398,7 @@ Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from co
 
 **Dispatcher**
 
-1. Input is a command only if it matches `^/[a-zA-Z]`, so a mistyped `/Exit` is caught rather than posted (markers never match; a leading `\/` posts a literal `/`).
+1. Input is a command only if it matches `^/[a-zA-Z]`, so a mistyped `/Exit` is caught rather than posted (a marker can't start with `/` and a letter, except in a session saved before capitals counted, where it now reads as a command; a leading `\/` posts a literal `/`).
 2. Shell-style tokenizer (quotes, backslash escapes).
 3. Native command → Commander subcommand (passthrough) → `Unknown /hlp. Did you mean /help?` (edit distance over both sets). `/run` skips native lookup.
 4. `/help` and Tab completion come from one registry; `/help` lists passthrough entries on one `↗ From the CLI:` line.

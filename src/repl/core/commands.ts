@@ -393,7 +393,7 @@ export function suggest(name: string, candidates: readonly string[]): string | u
   let best: string | undefined;
   let bestDistance = 3;
   for (const c of [...candidates].sort()) {
-    const d = distance(name, c);
+    const d = distance(name.toLowerCase(), c);
     if (d < bestDistance) [best, bestDistance] = [c, d];
   }
   return best;

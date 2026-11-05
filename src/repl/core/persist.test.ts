@@ -403,3 +403,11 @@ describe("resolveId", () => {
     expect(() => resolveId("last", [listing("k3f7xq", "in use")])).toThrow("No saved session is free to resume");
   });
 });
+
+describe("a session saved with a marker that's since been refused", () => {
+  it("still opens, as refusing it would lose the session", () => {
+    const file = good() as Mutable;
+    file.settings.markers = { ...file.settings.markers, send: "/Go" };
+    expect(() => parseSessionFile(file)).not.toThrow();
+  });
+});
