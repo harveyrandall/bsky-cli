@@ -32,7 +32,7 @@ export class SessionKeeper {
   }
 
   /** After a `/switch`: the session follows the account. */
-  setAccount(account: Pick<Meta, "handle" | "did" | "profile">): void {
+  setAccount(account: Pick<Meta, "handle" | "did"> & { profile: string | undefined }): void {
     this.meta = { ...this.meta, ...account };
   }
 

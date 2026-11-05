@@ -820,10 +820,17 @@ export class Repl {
   async switchProfile(profile: string): Promise<SubmitOutcome> {
     if (this.blockedByPending()) return "keep";
     const { agent, handle } = await this.deps.switchAccount(profile);
-    if (this.threadState) this.stopThread();
+    this.loaded = undefined; // its draft stays with the profile it came from
+    if (agent.selfDid === this.agent.selfDid) {
+      // Another name for this account, so nothing here belongs to anyone else.
+      this.agent = agent;
+      this.deps.print(`Still posting as @${handle}`, "dim");
+      this.deps.onChange();
+      return "done";
+    }
+    if (this.inThread()) this.stopThread();
     if (this.media.length > 0) this.deps.print(`Unstaged ${chips(this.media)}`, "dim");
     this.media = [];
-    this.loaded = undefined;
     this.current = { kind: "idle" };
     this.agent = agent;
     this.registry.setSelf(agent.selfDid);

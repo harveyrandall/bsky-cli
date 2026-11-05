@@ -210,8 +210,11 @@ async function openRepl(
       program.setOptionValue("profile", target);
       try {
         const next = await getClient(program);
+        const handle = next.session?.handle;
+        if (!isHandle(handle)) throw new Error(`Unexpected handle from the server: ${handle}`);
+        const agent = replAgent(next);
         profile = target;
-        return { agent: replAgent(next), handle: next.session?.handle ?? "", profile: target };
+        return { agent, handle, profile: target };
       } catch (err) {
         program.setOptionValue("profile", before);
         throw err;

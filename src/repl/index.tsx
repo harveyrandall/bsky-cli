@@ -26,7 +26,7 @@ export interface ReplOptions {
   profile?: string;
   passthrough?: AppProps["passthrough"];
   /** `/switch`: the account behind a profile. */
-  switchAccount?(profile: string): Promise<{ agent: ReplAgent; handle: string; profile: string }>;
+  switchAccount?(profile: string): Promise<{ agent: ReplAgent; handle: Handle; profile: string }>;
   session?: {
     store: Pick<SessionStore, "save" | "delete" | "lock" | "unlock" | "prune">;
     id: SessionId;
@@ -74,7 +74,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const kitty = await detectKittyKeyboard(process.stdin, process.stdout);
   const session = opts.session;
   // /switch changes these.
-  let { profile, handle } = opts;
+  let { profile } = opts;
+  const handles = new Set([opts.handle]);
   const startedAt = session?.resume ? new Date(session.createdAt) : new Date();
   let repl: Repl | undefined;
   const keeper =
@@ -100,8 +101,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         if (!opts.switchAccount) throw new Error("Can't switch accounts here");
         const next = await opts.switchAccount(name);
         profile = next.profile;
-        handle = next.handle;
-        keeper?.setAccount({ handle: handle as Handle, did: next.agent.selfDid, profile: profile || undefined });
+        handles.add(next.handle);
+        keeper?.setAccount({ handle: next.handle, did: next.agent.selfDid, profile: profile || undefined });
         return next;
       }}
       keeper={keeper}
@@ -158,7 +159,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       verbose: opts.settings.verbose,
       startedAt,
       endedAt: new Date(),
-      handle,
+      handle: [...handles].join(", @"),
       resumeId: resumable ? session?.id : undefined,
     });
     for (const line of lines) process.stdout.write(`${line}\n`);

@@ -221,7 +221,7 @@ export async function loadSessionConfig(
   if (migrated) return migrated;
 
   throw new Error(
-    "No session found. Run 'bsky login' or set BSKY_HANDLE and BSKY_PASSWORD.",
+    `No session found${profile ? ` for profile ${profile}` : ""}. Run 'bsky ${profile ? `-p ${profile} ` : ""}login' or set BSKY_HANDLE and BSKY_PASSWORD.`,
   );
 }
 

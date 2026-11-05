@@ -66,7 +66,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     openUrl: vi.fn(async () => {}),
     copyText: vi.fn(async () => {}),
     listDrafts: vi.fn(async (): Promise<Draft[]> => []),
-    switchAccount: vi.fn(async (_: string) => ({ agent, handle: "work.bsky.social" })),
+    switchAccount: vi.fn(async (_: string) => ({ agent: { ...agent, selfDid: "did:plc:work" as Did }, handle: "work.bsky.social" })),
     fs,
   };
   const repl = new Repl(
@@ -1478,6 +1478,24 @@ describe("/switch", () => {
     await repl.switchProfile("work");
     expect(repl.staged()).toEqual([]);
     expect(printed()).toContain("Unstaged 📎 a.png");
+  });
+  it("leaves everything be if it turns out to be the same account", async () => {
+    const s = setup();
+    await s.repl.startThread("one");
+    await s.flush();
+    await s.repl.attach(["/x/a.png"]);
+    s.deps.switchAccount.mockResolvedValueOnce({ agent: s.agent, handle: "me.bsky.social" });
+    expect(await s.repl.switchProfile("me")).toBe("done");
+    expect(s.repl.thread()).toBeDefined();
+    expect(s.repl.staged()).toHaveLength(1);
+    expect(s.printed()).toContain("Still posting as @me.bsky.social");
+  });
+  it("stops a thread that hasn't had a post yet", async () => {
+    const { repl, printed } = setup();
+    await repl.startThread();
+    await repl.switchProfile("work");
+    expect(repl.mode().kind).toBe("idle");
+    expect(printed()).toContain("Thread stopped");
   });
   it("changes nothing if the account can't be opened", async () => {
     const { repl, deps, flush } = setup();
