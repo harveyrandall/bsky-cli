@@ -336,6 +336,15 @@ describe("saved sessions", () => {
       await expect(switchAccount("?")).rejects.toThrow("Pick a profile: work");
       expect(exit).not.toHaveBeenCalled();
     });
+    it("refuses when the environment chooses the account", async () => {
+      const { getClient } = await import("@/index");
+      const switchAccount = await open();
+      vi.mocked(getClient).mockClear();
+      vi.stubEnv("BSKY_HANDLE", "me.bsky.social");
+      vi.stubEnv("BSKY_PASSWORD", "fake");
+      await expect(switchAccount("work")).rejects.toThrow("BSKY_HANDLE and BSKY_PASSWORD choose the account here");
+      expect(getClient).not.toHaveBeenCalled();
+    });
   });
   it("uses the session's own profile", async () => {
     write({ profile: "work" });

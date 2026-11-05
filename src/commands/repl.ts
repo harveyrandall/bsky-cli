@@ -197,6 +197,10 @@ async function openRepl(
       run: (argv, print) => runPassthrough(program, argv, { print, profile }),
     },
     async switchAccount(name) {
+      // getClient would stay on that account, whatever the profile.
+      if (process.env.BSKY_HANDLE && process.env.BSKY_PASSWORD) {
+        throw new Error("BSKY_HANDLE and BSKY_PASSWORD choose the account here: unset them to switch");
+      }
       // `-p ?` lists them and exits, which here would end the REPL.
       if (name === "?") throw new Error(`Pick a profile: ${profileNames().join(", ") || "there are none yet"}`);
       const before = profile;
