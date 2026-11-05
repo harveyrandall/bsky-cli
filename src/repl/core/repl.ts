@@ -113,6 +113,8 @@ export interface ThreadState {
 type WriteKind = Intent["kind"];
 
 const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
+/** Text as the composer must hold it for Enter to send it, rather than read it as a command. */
+const typed = (text: string) => text.replace(/^(\s*)\/(?=[a-zA-Z])/, "$1\\/");
 /** Whether a draft still holds exactly these posts, so they needn't be saved again. */
 const held = (item: Unsent) => item.draftId !== undefined && !item.stale;
 const manualDraft = (item: Unsent) =>
@@ -226,7 +228,9 @@ export class Repl {
 
   /** Where composer text would go: a command that came back says, or else the mode does. */
   private destination(text: string): { words: string; target?: { parent: { uri: string } }; quote?: { uri: string } } {
-    const command = /^\/(post|thread|reply|quote)\s+([\s\S]*)$/.exec(text.trim());
+    const escaped = text.trimStart().startsWith("\\/");
+    const plain = escaped ? text.replace("\\/", "/") : text;
+    const command = escaped ? null : /^\/(post|thread|reply|quote)\s+([\s\S]*)$/.exec(text.trim());
     if (command?.[1] === "post" || command?.[1] === "thread") return { words: command[2] };
     if (command) {
       const [, label = "", words = ""] = /^(\S+)\s*([\s\S]*)$/.exec(command[2]) ?? [];
@@ -234,10 +238,10 @@ export class Repl {
       if (uri) return command[1] === "quote" ? { words, quote: { uri } } : { words, target: { parent: { uri } } };
     }
     const m = this.current;
-    if (m.kind === "reply-once") return { words: text, target: { parent: m.target.ref } };
-    if (m.kind === "quote-once") return { words: text, quote: m.target.ref };
+    if (m.kind === "reply-once") return { words: plain, target: { parent: m.target.ref } };
+    if (m.kind === "quote-once") return { words: plain, quote: m.target.ref };
     const t = this.threadState;
-    return { words: text, ...(m.kind === "thread" && t && { target: { parent: t.cursor } }) };
+    return { words: plain, ...(m.kind === "thread" && t && { target: { parent: t.cursor } }) };
   }
 
   private isLoaded(text: string): boolean {
@@ -253,8 +257,11 @@ export class Repl {
     this.pipeline.sendNow();
   }
 
-  /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
-  async resume(file: ReplSessionFile): Promise<void> {
+  /**
+   * Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling
+   * what went. `ignored` is flags given now that the session overrules, with what to run instead.
+   */
+  async resume(file: ReplSessionFile, ignored: readonly string[] = []): Promise<void> {
     // All of it first, so a save at any moment from here has the whole session.
     this.registry.restore(file.posts, file.counters, file.viewed);
     this.threadState = file.thread;
@@ -262,9 +269,14 @@ export class Repl {
     this.media = [...file.staged];
     this.loaded = file.loaded;
     this.unanswered = [...file.pending];
+    // A kill at the question leaves no thread, and a post that still says where it was going.
+    this.threadLost = !file.thread && file.pending.some((p) => p.intent.kind === "thread" && p.target !== undefined);
     this.current = this.resumeMode(file.mode);
     this.deps.print(`── resumed ${file.id} ──`, "dim");
     for (const entry of this.registry.entries()) this.deps.print(this.registry.format(entry, this.s.verbose), "dim");
+    this.deps.print(`Settings: ${this.settingsLine()}`, "dim");
+    if (ignored.length > 0) this.deps.print("A resumed session keeps its own settings, so these flags changed nothing. To use them now:", "dim");
+    for (const line of ignored) this.deps.print(`  ${line}`, "dim");
     this.deps.onChange();
     await this.checkStaged();
     if (file.thread) await this.checkThread(file.thread);
@@ -336,10 +348,11 @@ export class Repl {
     // A thread post goes after the cursor, whatever it was when saved.
     const item = threadPost ? { ...saved, target: undefined } : saved;
     const line = stripLabel(item.posts[0]).split("\n")[0];
-    const note = orphan ? " (its thread couldn't be found, so Send starts a new one)" : "";
+    const note = orphan ? " (its thread couldn't be found)" : "";
     // Edit first: a post in flight at a kill may already have gone.
     const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"${note}`, ["Send", "Edit", "Discard"], 1);
-    if (answer === 0) {
+    const send = answer === 0 && (!orphan || (await this.findThread()));
+    if (send) {
       const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item);
       this.letters.set(sent.id, this.letterFor(item.intent));
       if (threadPost && this.current.kind === "idle") this.current = { kind: "thread" };
@@ -352,7 +365,7 @@ export class Repl {
       this.deps.restore(this.asResend(item));
     }
     // It holds posts that went, so sending it would send them twice.
-    if (answer !== 0 && item.stale && item.draftId) {
+    if (!send && item.stale && item.draftId) {
       await this.deps.deleteDraft(item.draftId).catch((err: unknown) => {
         this.deps.print(`Couldn't delete draft ${item.draftId}, so it may send again on your next run: ${err instanceof Error ? err.message : String(err)}`, "error");
       });
@@ -360,6 +373,45 @@ export class Repl {
     // Only now: until it's somewhere else, a kill must leave it to ask about again.
     this.unanswered = this.unanswered.filter((i) => i !== saved);
     this.deps.onChange();
+  }
+
+  /** Where a post goes whose thread has gone: a new thread, or one that's still there. False if they back out. */
+  private async findThread(): Promise<boolean> {
+    const where = await this.deps.ask.choose("Its thread couldn't be found", ["Start a new thread", "Paste a link to a post"], 0);
+    if (where === undefined) return false;
+    let resolved: ResolvedRef | undefined;
+    while (where === 1 && !resolved) {
+      const link = await this.deps.ask.text("Link to the post to continue from:");
+      if (!link?.trim()) return false;
+      resolved = await this.lookUp(link);
+    }
+    this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
+    if (resolved) this.continueThread(resolved);
+    if ("returnTo" in this.current) this.current = { ...this.current, returnTo: "thread" };
+    // Whatever's left of it follows this one.
+    this.threadLost = false;
+    return true;
+  }
+
+  /** A post that's really there: the registry still has the posts checkThread couldn't find. */
+  private async lookUp(link: string): Promise<ResolvedRef | undefined> {
+    this.deps.print("Looking up that post…", "dim");
+    const found = async () => {
+      const resolved = await this.resolve(link);
+      if (!resolved?.entry || (await this.agent.getPosts([resolved.ref.uri])).length > 0) return resolved;
+      this.deps.print(`Couldn't find (${resolved.entry.label}): paste a link to a post that's still there`, "error");
+      return undefined;
+    };
+    return this.within(found(), 10_000).catch((err: unknown) => {
+      this.deps.print(`Couldn't look that up (${err instanceof Error ? err.message : String(err)})`, "error");
+      return undefined;
+    });
+  }
+
+  private continueThread(resolved: ResolvedRef): void {
+    const entry = this.entryFor(resolved, { letter: this.threadLetter, startsThread: true });
+    this.threadState = { root: resolved.root, cursor: resolved.ref, letter: entry.letter ?? this.threadLetter, count: 0 };
+    this.deps.print(`Continuing the thread from (${entry.label})`, "dim");
   }
 
   /** The session as a file. Tokens aren't part of it: the profile's own session file has those. */
@@ -582,11 +634,7 @@ export class Repl {
     this.current = { kind: "thread" };
     this.threadState = undefined;
     this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
-    if (resolved) {
-      const entry = this.entryFor(resolved, { letter: this.threadLetter, startsThread: true });
-      this.threadState = { root: resolved.root, cursor: resolved.ref, letter: entry.letter ?? this.threadLetter, count: 0 };
-      this.deps.print(`Continuing the thread from (${entry.label})`, "dim");
-    }
+    if (resolved) this.continueThread(resolved);
     this.deps.onChange();
     return firstPost !== undefined ? this.write({ kind: "thread" }, firstPost) : "done";
   }
@@ -651,7 +699,7 @@ export class Repl {
         explained = true;
         const answer = await this.askAlt(basename(path));
         if (answer === null) {
-          this.deps.print(`Left out ${basename(path)}`, "dim");
+          this.deps.print(`Left out ${basename(path)}: Esc leaves a file out, and nothing's wrong with it. /attach it again to add it.`, "dim");
           continue;
         }
         text = answer;
@@ -755,8 +803,14 @@ export class Repl {
     this.deps.print(`Deleted ${name}`, "dim");
     const mode = this.current;
     if ("target" in mode && mode.target.ref.uri === ref.uri) this.current = { kind: mode.returnTo };
-    if (stops) this.stopThread();
-    else this.stepBackFrom(ref.uri);
+    if (stops) {
+      const cursor = this.registry.byUri(this.threadState!.cursor.uri);
+      this.stopThread();
+      const last = cursor && !cursor.deleted ? cursor : this.registry.entries().filter((e) => e.root.uri === ref.uri && !e.deleted && !e.external).at(-1);
+      if (last) this.deps.print(`To carry on from its last post: /thread ${last.label}`, "dim");
+    } else {
+      this.stepBackFrom(ref.uri);
+    }
     this.deps.onChange();
     return "done";
   }
@@ -1007,6 +1061,18 @@ export class Repl {
     this.deps.onChange();
   }
 
+  setSetting(changes: Pick<Partial<ReplSettings>, "forceAlt" | "threadLabel" | "verbose">): void {
+    Object.assign(this.s, changes);
+    // It's asked on attaching, so what's staged has missed it.
+    const bare = changes.forceAlt ? this.media.filter((m) => !m.alt) : [];
+    if (bare.length > 0) this.deps.print(`Already staged with no alt text: ${bare.map((m) => basename(m.path)).join(", ")}. /detach and /attach it to add some.`, "dim");
+    this.deps.onChange();
+  }
+
+  isVerbose(): boolean {
+    return this.s.verbose;
+  }
+
   /** `/settings` with no arguments: ask for each; dismissing keeps the current value. */
   async askSettings(): Promise<void> {
     for (const kind of ["undo", "pace"] as const) {
@@ -1017,7 +1083,9 @@ export class Repl {
 
   settingsLine(): string {
     const show = (v?: Cooldown) => (v === undefined ? "ask" : v === 0 ? "off" : `${v}s`);
-    return `undo ${show(this.s.undo)} · pace ${show(this.s.pace)} · auto-thread ${this.s.autoThread ? "on" : "off"}`;
+    const onOff = (on: boolean) => (on ? "on" : "off");
+    const { autoThread, threadLabel, forceAlt, verbose } = this.s;
+    return `undo ${show(this.s.undo)} · pace ${show(this.s.pace)} · auto-thread ${onOff(autoThread)} · thread-label ${threadLabel || "off"} · force-alt ${onOff(forceAlt)} · verbose ${onOff(verbose)}`;
   }
 
   async retry(): Promise<void> {
@@ -1084,7 +1152,7 @@ export class Repl {
       return "handled";
     }
     this.restage(media);
-    return { restore: items.length === 1 ? this.asResend(items[0]) : this.join(items.flatMap((i) => i.posts)) };
+    return { restore: items.length === 1 ? this.asResend(items[0]) : typed(this.join(items.flatMap((i) => i.posts))) };
   }
 
   private async saveToDrafts(items: readonly Unsent[], saved: (id: string) => string): Promise<void> {
@@ -1218,7 +1286,7 @@ export class Repl {
     const text = this.join(item.posts);
     if (held(item)) this.loaded = { id: item.draftId!, text, media: (item.media ?? []).map((m) => m.path) };
     const { kind } = item.intent;
-    if (kind === "thread" && this.current.kind === "thread") return text;
+    if (kind === "thread" && this.current.kind === "thread") return typed(text);
     if (kind === "quote") return `/quote ${this.registry.byUri(item.intent.target.uri)?.label ?? item.intent.target.uri} ${text}`;
     const parent = item.target && this.registry.byUri(item.target.parent.uri);
     if (parent) return `/reply ${parent.label} ${text}`;

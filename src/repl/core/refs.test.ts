@@ -250,3 +250,12 @@ describe("a session saved before #n labels existed", () => {
     expect(reg.addViewed(ref(alice, "3lbx7kt5aaa2c")).label).toBe("#1");
   });
 });
+
+describe("a link copied with something on the end", () => {
+  it.each(["?ref_src=embed", "#x", "/?ref_src=embed", "/"])("still resolves: %s", async (tail) => {
+    const uri = `at://${alice}/app.bsky.feed.post/3lbx7kt5aaa2c` as AtUri;
+    const agent = { resolveHandle: vi.fn(), getPosts: vi.fn(async () => [{ uri, cid: "bafyabc" as Cid, authorDid: alice, authorHandle: "alice.test", text: "" }]) };
+    const resolved = await resolveRef(`https://bsky.app/profile/${alice}/post/3lbx7kt5aaa2c${tail}`, { registry: new Registry(false, self), agent: agent as never });
+    expect(resolved.ref.uri).toBe(uri);
+  });
+});

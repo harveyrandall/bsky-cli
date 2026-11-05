@@ -50,6 +50,7 @@ const added = (event: "uncaughtException" | "unhandledRejection", before: Functi
 beforeEach(() => {
   vi.clearAllMocks();
   detectKittyKeyboard.mockResolvedValue(true);
+  process.exitCode = undefined; // an app that unmounts sets it, and a test checks it
 });
 
 describe("pickSession", () => {
@@ -124,7 +125,7 @@ describe("startRepl", () => {
     render.mockReturnValue(app);
     const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
-    const repl = { registry: new Registry(false), failures: () => [], close: vi.fn(() => []), labelPost: vi.fn(() => "#7") };
+    const repl = { registry: new Registry(false), failures: () => [], close: vi.fn(() => []), labelPost: vi.fn(() => "#7"), isVerbose: () => false };
     render.mock.calls[0][0].props.onReady(repl);
     const [labeler] = setPostLabeler.mock.lastCall!;
     expect(labeler({ uri: "at://x", cid: "bafy" })).toBe("#7");
@@ -166,16 +167,37 @@ describe("startRepl", () => {
       app.unmount();
       await running;
     });
+    it("the summary follows /settings verbose", async () => {
+      const { app, running, props } = await opened();
+      const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+      props.onReady({ registry: new Registry(false), failures: () => [], close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => ({ posts: [], staged: [], pending: [], composer: { text: "", cursor: 0 } })), isVerbose: () => true });
+      app.unmount();
+      await running;
+      const printed = write.mock.calls.map(([chunk]) => String(chunk)).join("");
+      write.mockRestore();
+      expect(printed).toContain("as @me.bsky.social");
+    });
     it("the verbose summary names both accounts", async () => {
       const { app, running, props } = await opened({ ...options.settings, verbose: true });
       const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
-      props.onReady({ registry: new Registry(false), failures: () => [], close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => ({ posts: [], staged: [], pending: [], composer: { text: "", cursor: 0 } })) });
+      props.onReady({ registry: new Registry(false), failures: () => [], close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => ({ posts: [], staged: [], pending: [], composer: { text: "", cursor: 0 } })), isVerbose: () => true });
       app.unmount();
       await running;
       const printed = write.mock.calls.map(([chunk]) => String(chunk)).join("");
       write.mockRestore();
       expect(printed).toContain("as @me.bsky.social, @work.bsky.social");
     });
+  });
+
+  it("hands the App the flags a resume ignored", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const session = { store: {}, id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", did: "did:plc:me", keep: 7, ignoredFlags: ["--undo 10: /settings undo 10"] } as never;
+    const running = startRepl({ ...options, session });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    expect(render.mock.calls[0][0].props.ignoredFlags).toEqual(["--undo 10: /settings undo 10"]);
+    app.unmount();
+    await running;
   });
 
   it("doesn't count a scheduler that sends another profile's posts", async () => {
@@ -261,14 +283,14 @@ describe("startRepl", () => {
       prune: vi.fn(async () => {}),
     });
     const fileOf = (o: object = {}) => ({ posts: [{}], staged: [], pending: [], composer: { text: "", cursor: 0 }, ...o });
-    const fakeRepl = () => ({ registry: new Registry(false), failures: () => [], close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => fileOf()) });
+    const fakeRepl = (verbose = false) => ({ registry: new Registry(false), failures: () => [], isVerbose: () => verbose, close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => fileOf()) });
     const start = async (session: object, settings = options.settings) => {
       const app = fakeInstance();
       render.mockReturnValue(app);
       const running = startRepl({ ...options, settings, profile: "work", session: { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", did: "did:plc:me", keep: 7, ...session } as never });
       await vi.waitFor(() => expect(render).toHaveBeenCalled());
       const { props } = render.mock.calls[0][0];
-      const repl = fakeRepl();
+      const repl = fakeRepl(settings.verbose);
       props.onReady(repl);
       return { app, running, props, repl };
     };
@@ -337,7 +359,7 @@ describe("startRepl", () => {
     const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     const [element] = render.mock.calls[0];
-    element.props.onReady({ registry: new Registry(false), failures: () => [], close: () => [], settled: async () => {} });
+    element.props.onReady({ registry: new Registry(false), failures: () => [], isVerbose: () => false, close: () => [], settled: async () => {} });
     app.exit(LEFT);
     await running;
     expect(write).toHaveBeenCalledWith("No posts this session\n");

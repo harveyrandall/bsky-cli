@@ -35,7 +35,7 @@ The prompt shows what Enter will do with plain text:
 | `/attach <path…> [--alt "…"]` | Stage images or a video for the next post |
 | `/detach [n\|all]` | Unstage one file (counting from 1, in the order shown above the composer), or all of them, which is what `/detach` alone does |
 | `/edit [text]` | Write in `$EDITOR` (same as Ctrl+G) |
-| `/delete <ref>` | Delete one of your posts, after asking. A thread that was continuing from it goes back to the post before, or stops if there isn't one, and deleting a thread's first post stops the thread, as the question says. Refused while anything is queued |
+| `/delete <ref>` | Delete one of your posts, after asking. A thread that was continuing from it goes back to the post before, or stops if there isn't one, and deleting a thread's first post stops the thread, as the question says, and gives you the command to carry on from what's left. Refused while anything is queued |
 | `/undo` | Delete the last post you made this session, after asking. Refused while anything is queued: wait, or Esc takes back what hasn't gone yet |
 | `/drafts [id]` | List your drafts, or load one into the composer by its id or the start of it |
 | `/switch [profile]` | Post as another account, or with no name, the unnamed profile's. See [Switching account](#switching-account) |
@@ -45,7 +45,7 @@ The prompt shows what Enter will do with plain text:
 | `/view <ref>` | Print a post and its replies |
 | `/run <command> [args]` | Run a CLI command, even one whose name a REPL command has taken |
 | `/auto-thread [on\|off]` | Toggle starting a thread from plain text |
-| `/settings [undo\|pace N]` | Change the undo window or pace, then show the settings; with no arguments it asks for each |
+| `/settings [name value]` | Change a setting for this session, then show the settings: `undo` or `pace` with 0, 5, 10 or 15, `force-alt` or `verbose` with `on` or `off`, or `thread-label` with `off`, `append` or `prepend`. With no arguments it asks for the undo window and pace |
 | `/history` | List this session's posts, marking any you've deleted |
 | `/retry` | Resend what couldn't be sent (network error, rate limit or expired session) |
 | `/help [command]` | List commands, or show help for one |
@@ -55,7 +55,7 @@ Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it re
 
 **Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), a `#n` label from something you've read, its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
 
-A name that isn't a command gets a suggestion and your text stays. Command names start with a lowercase letter, so `/Help` and `/ x` are text; start with `\/` to post text that begins like a command.
+A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command.
 
 ## Reading and CLI commands
 
@@ -205,10 +205,10 @@ Enter on `+ new` starts afresh, as does Esc; Ctrl+C quits. A session open in ano
 | The thread | From its last post, or the nearest one that can still be found. If none can, the thread stops |
 | The mode, the composer and ↑ history | As you left them, along with which draft the composer came from |
 | Staged files | Those still usable; the rest are dropped, with a message saying which and why |
-| Settings and markers | The session's own, whatever flags you start with |
+| Settings and markers | The session's own, whatever flags you start with. The settings are printed as it opens, with any flags that changed nothing and what to run to use them. That covers `-p` and `-R` too |
 | Unsent posts | Each asks `Send · Edit · Discard`, and nothing goes out until you choose. They stay saved until you've answered |
 
-`Edit` is selected first, because an unsent post can be one that was sending when the terminal closed, which may already have gone: check before choosing `Send`. `Send` starts its undo window again. `Edit` or Esc puts it back in the composer, or saves it as a draft if there's text there already or its media won't fit. If its thread couldn't be found, the question says that `Send` starts a new one.
+`Edit` is selected first, because an unsent post can be one that was sending when the terminal closed, which may already have gone: check before choosing `Send`. `Send` starts its undo window again. `Edit` or Esc puts it back in the composer, or saves it as a draft if there's text there already or its media won't fit. If its thread couldn't be found, the question says so, and `Send` then asks whether to start a new thread, which is selected first, or paste a link to a post to continue from. The post has to still be there, and Esc or an empty link counts as `Edit`. Once you've answered, the rest of that thread's unsent posts that you send follow it, without asking again.
 
 A session opens under the profile it was started with, whatever `-p` you give, and is refused if that profile is logged in to another account. Text you were typing is saved after a second's pause. Sessions are kept in `repl/sessions/` in the [config folder](configuration.md), readable only by you, with no tokens in them. Empty sessions aren't kept. When a REPL exits, sessions beyond the newest `keep-sessions` (50 by default) are removed, unless they have unsent posts or can't be read. `-R` saves nothing and leaves the resume hint out of the exit summary. Unless you also use `-r`, it skips the list; a session you resume keeps saving, so your answers aren't asked again.
 

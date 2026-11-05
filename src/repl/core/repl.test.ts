@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Repl, IDLE_HINT, type ReplAsk, type ReplSettings } from "./repl";
 import { DEFAULT_MARKERS } from "./markers";
-import { parseSessionFile } from "./persist";
+import { parseSessionFile, type ReplSessionFile } from "./persist";
 import type { AtUri, Cid, Did, StrongRef } from "./types";
 import type { SendTarget } from "./pipeline";
 import type { Draft } from "@/lib/types";
@@ -498,7 +498,7 @@ describe("media", () => {
     const { repl, printed } = setup({}, { alt: vi.fn(async () => null) });
     await repl.attach(["/x/a.png"]);
     expect(repl.staged()).toEqual([]);
-    expect(printed()).toContain("Left out a.png");
+    expect(printed()).toContain("Left out a.png: Esc leaves a file out, and nothing's wrong with it. /attach it again to add it.");
   });
   it("calls paths media only if all of them are", async () => {
     const { repl } = setup();
@@ -525,7 +525,7 @@ describe("media", () => {
     const { repl, printed } = setup({ forceAlt: true }, { alt: vi.fn(async () => answers.shift()) });
     await repl.attach(["/x/a.png", "/x/b.png"]);
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/b.png"]);
-    expect(printed()).toContain("Left out a.png");
+    expect(printed()).toContain("Left out a.png: Esc leaves a file out, and nothing's wrong with it. /attach it again to add it.");
   });
   it("says why a file can't be attached and carries on", async () => {
     const { repl, printed } = setup();
@@ -1025,11 +1025,248 @@ describe("resume", () => {
         s.agent.getPosts.mockResolvedValueOnce([]);
         return s;
       };
-      it("says Send will start a new thread", async () => {
+      it("shows its settings, as they're not what the flags say", async () => {
         const file = await queued();
-        const { repl, ask } = lost(0);
+        const { repl, printed } = lost(1);
         await repl.resume(file);
-        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "waiting" (its thread couldn't be found, so Send starts a new one)`);
+        expect(printed()).toContain(`Settings: ${repl.settingsLine()}`);
+        expect(printed()).not.toContain("changed nothing");
+      });
+      it("says which flags changed nothing, and what to run instead", async () => {
+        const file = await queued();
+        const { repl, printed } = lost(1);
+        await repl.resume(file, ["--undo 10: /settings undo 10"]);
+        expect(printed()).toContain("A resumed session keeps its own settings, so these flags changed nothing. To use them now:");
+        expect(printed()).toContain("--undo 10: /settings undo 10");
+      });
+      describe("and you quit at the question", () => {
+        const atTheQuestion = async () => {
+          const file = await queued();
+          let quit: ReplSessionFile | undefined;
+          const s = setup({ undo: 0 }, { choose: vi.fn(async () => {
+            quit = parseSessionFile(JSON.parse(JSON.stringify(s.repl.snapshot({ id: file.id, createdAt: file.createdAt, handle: file.handle, did: file.did }, { text: "", cursor: 0 }, []))));
+            return 2;
+          }) });
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          await s.repl.resume(file);
+          return quit!;
+        };
+        it("still knows on the next resume, and offers the choice", async () => {
+          const file = await atTheQuestion();
+          const { repl, ask } = setup({ undo: 0 }, { choose: vi.fn(async () => 0) });
+          await repl.resume(file);
+          expect(vi.mocked(ask.choose).mock.calls.map(([label]) => label)).toEqual([
+            `Unsent from last time: "waiting" (its thread couldn't be found)`,
+            "Its thread couldn't be found",
+          ]);
+        });
+      });
+      it("doesn't call a thread lost that's only just begun", async () => {
+        const file = await saved({
+          posts: [],
+          then: async (s) => {
+            s.repl.setCooldown("undo", 5);
+            await s.repl.startThread("first");
+          },
+        });
+        const { repl, ask } = setup({ undo: 0 }, { choose: vi.fn(async () => 1) });
+        await repl.resume(file);
+        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "first"`);
+      });
+      it("doesn't call a live thread lost after an Edit moved on", async () => {
+        const file = await queued();
+        const first = lost(1);
+        first.agent.post.mockResolvedValueOnce(ref(7)); // its own numbering would repeat the session's
+        await first.repl.resume(file);
+        await first.repl.startThread("fresh one");
+        await first.flush();
+        first.repl.setCooldown("undo", 5);
+        await first.repl.submitText("fresh two");
+        const later = parseSessionFile(JSON.parse(JSON.stringify(first.repl.snapshot({ id: file.id, createdAt: file.createdAt, handle: file.handle, did: file.did }, { text: "", cursor: 0 }, []))));
+        const { repl, ask, agent } = setup({ undo: 0 }, { choose: vi.fn(async () => 1) });
+        agent.getPosts.mockResolvedValue(later.posts.map((p) => ({ uri: p.uri, cid: p.cid })) as never);
+        await repl.resume(later);
+        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "fresh two"`);
+      });
+      it("says so, leaving what Send does to the next question", async () => {
+        const file = await queued();
+        const { repl, ask } = lost(1);
+        await repl.resume(file);
+        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "waiting" (its thread couldn't be found)`);
+      });
+      describe("on Send", () => {
+        const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5defbb";
+        const link = "https://bsky.app/profile/did:plc:alice/post/3lbx7kt5defbb";
+        const post = { uri, cid: "bafyb", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "still here" };
+        const sending = (where: number | undefined, text: ReplAsk["text"] = vi.fn(async () => link), settings: Partial<ReplSettings> = {}) => {
+          const s = setup({ undo: 0, ...settings }, { choose: vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(where), text });
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          s.agent.getPosts.mockResolvedValue([post] as never);
+          return s;
+        };
+        it("offers a new thread first, or a link", async () => {
+          const file = await queued();
+          const { repl, ask } = sending(0);
+          await repl.resume(file);
+          expect(ask.choose).toHaveBeenLastCalledWith("Its thread couldn't be found", ["Start a new thread", "Paste a link to a post"], 0);
+        });
+        it("continues from a link, as a reply to that post", async () => {
+          const file = await queued();
+          const { repl, posted, flush, printed } = sending(1);
+          await repl.resume(file);
+          await flush();
+          expect(posted[0]).toMatchObject({ text: "waiting", reply: { parent: { uri } } });
+          expect(repl.thread()?.root.uri).toBe(uri);
+          expect(repl.mode().kind).toBe("thread");
+          expect(printed()).toContain("Continuing the thread from (");
+        });
+        it("won't continue from a post of the thread it just failed to find", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("1").mockResolvedValueOnce(undefined);
+          const s = sending(1, text);
+          s.agent.getPosts.mockReset();
+          s.agent.getPosts.mockResolvedValue([]);
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.printed()).toContain("Couldn't find (1): paste a link to a post that's still there");
+          expect(s.posted).toEqual([]);
+          expect(s.deps.restore).toHaveBeenCalledWith("/thread waiting");
+        });
+        it("accepts a post from the session that's still there", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("1");
+          const s = sending(1, text);
+          s.agent.getPosts.mockReset();
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          s.agent.getPosts.mockResolvedValue([{ ...post, uri: ref(1).uri, cid: ref(1).cid }] as never);
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.posted[0].reply?.parent).toEqual(ref(1));
+        });
+        it("gives up on a lookup that hangs, and asks again", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce(link).mockResolvedValueOnce(undefined);
+          const s = sending(1, text);
+          s.agent.getPosts.mockReset();
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          s.agent.getPosts.mockReturnValue(new Promise(() => {}));
+          const resumed = s.repl.resume(file);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await resumed;
+          expect(s.printed()).toContain("Looking up that post…");
+          expect(s.printed()).toContain("Couldn't look that up (timed out)");
+          expect(text).toHaveBeenCalledTimes(2);
+          expect(s.posted).toEqual([]);
+        });
+        it("asks again after a link it can't use", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("nonsense").mockResolvedValueOnce(link);
+          const { repl, posted, flush, printed } = sending(1, text);
+          await repl.resume(file);
+          await flush();
+          expect(printed()).toContain(`Can't resolve "nonsense"`);
+          expect(posted[0].reply?.parent.uri).toBe(uri);
+        });
+        it.each([["the second question", undefined, undefined], ["the link", 1, undefined]])("counts as Edit if you back out of %s, so nothing's lost", async (_, where, answer) => {
+          const file = await queued();
+          const { repl, deps, posted, flush } = sending(where, vi.fn(async () => answer));
+          await repl.resume(file);
+          await flush();
+          expect(posted).toEqual([]);
+          expect(deps.restore).toHaveBeenCalledWith("/thread waiting");
+        });
+        describe.each([["a new thread", 0], ["a link", 1]])("for %s", (_, where) => {
+          it("goes back to the thread after a once mode", async () => {
+            const file = { ...(await queued()), mode: { kind: "post-once", returnTo: "thread" } } as ReplSessionFile;
+            const { repl, flush } = sending(where);
+            await repl.resume(file);
+            await flush();
+            expect(repl.mode()).toEqual({ kind: "post-once", returnTo: "thread" });
+          });
+          it("asks once for what's left of the thread", async () => {
+            const file = await saved({
+              settings: { undo: 0 },
+              then: async (s) => {
+                s.repl.setCooldown("undo", 5);
+                await s.repl.submitText("first");
+                await s.repl.submitText("second");
+              },
+            });
+            const s = sending(where);
+            vi.mocked(s.ask.choose).mockReset().mockResolvedValueOnce(0).mockResolvedValueOnce(where).mockResolvedValueOnce(0);
+            await s.repl.resume(file);
+            await s.flush();
+            expect(s.ask.choose).toHaveBeenCalledTimes(3);
+            expect(s.posted.map((p) => p.text)).toEqual(["first", "second"]);
+            expect(s.posted[1].reply?.parent).toEqual(ref(1));
+          });
+        });
+        it("gives a labelled session's new thread one letter", async () => {
+          const file = await saved({
+            settings: { undo: 0, prefixThread: true },
+            then: async (s) => {
+              s.repl.setCooldown("undo", 5);
+              await s.repl.submitText("first /// second");
+            },
+          });
+          const s = sending(0, undefined, { prefixThread: true });
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.repl.registry.entries().slice(-2).map((e) => e.label)).toEqual(["B1", "B2"]);
+        });
+        it("gives a linked post a letter in a labelled session, and none otherwise", async () => {
+          const file = await saved({
+            settings: { undo: 0, prefixThread: true },
+            then: async (s) => {
+              s.repl.setCooldown("undo", 5);
+              await s.repl.submitText("first");
+            },
+          });
+          const labelled = sending(1, undefined, { prefixThread: true });
+          await labelled.repl.resume(file);
+          await labelled.flush();
+          expect(labelled.printed()).toContain("Continuing the thread from (B0)");
+          expect(labelled.repl.thread()?.letter).toBe("B");
+          const plain = sending(1);
+          await plain.repl.resume(await queued());
+          await plain.flush();
+          expect(plain.repl.thread()?.letter).toBeUndefined();
+        });
+        it("takes a blank link as backing out", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("   ").mockResolvedValueOnce(undefined);
+          const { repl, deps, printed } = sending(1, text);
+          await repl.resume(file);
+          expect(text).toHaveBeenCalledOnce();
+          expect(printed()).not.toContain("Can't resolve");
+          expect(deps.restore).toHaveBeenCalledWith("/thread waiting");
+        });
+        it("still deals with a stale draft when you back out, or its posts could go twice", async () => {
+          const file = await queued();
+          const stale = { ...file, pending: file.pending.map((p) => ({ ...p, stale: true, draftId: "d9" })) };
+          const { repl, deps, flush } = sending(undefined);
+          await repl.resume(stale);
+          await flush();
+          expect(deps.saveDraft).toHaveBeenCalled();
+          expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
+        });
+        it("asks once for everything left of that thread", async () => {
+          const file = await saved({
+            settings: { undo: 0 },
+            then: async (s) => {
+              s.repl.setCooldown("undo", 5);
+              await s.repl.submitText("first");
+              await s.repl.submitText("second");
+            },
+          });
+          const s = sending(1);
+          vi.mocked(s.ask.choose).mockReset().mockResolvedValueOnce(0).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.ask.text).toHaveBeenCalledOnce();
+          expect(s.posted.map((p) => p.text)).toEqual(["first", "second"]);
+          expect(s.posted[1].reply?.parent).toEqual(ref(1));
+        });
       });
       it("carries on as a thread after Send", async () => {
         const file = await queued();
@@ -1206,6 +1443,71 @@ describe("changes that aren't posts", () => {
   });
 });
 
+describe("text that looks like a command", () => {
+  const resent = async (...posts: string[]) => {
+    const s = setup({ undo: 5, pace: 0 });
+    await s.repl.startThread();
+    for (const text of posts) await s.repl.submitText(text);
+    return { ...s, back: s.repl.escape("") };
+  };
+  it("comes back from Esc still escaped, so Enter sends it", async () => {
+    const { back } = await resent("/Users/me is my home");
+    expect(back).toEqual({ restore: "\\/Users/me is my home" });
+  });
+  it("comes back the same way when several go together", async () => {
+    const { back } = await resent("/Users/me", "second");
+    expect(back).toEqual({ restore: "\\/Users/me /// second" });
+  });
+  it("comes back escaped from a rejection", async () => {
+    const s = setup({ undo: 0, pace: 0 });
+    await s.repl.startThread();
+    s.agent.post.mockRejectedValueOnce(rejected());
+    await s.repl.submitText("/delete 1 is a good command");
+    await s.flush();
+    expect(s.deps.restore).toHaveBeenCalledWith("\\/delete 1 is a good command");
+  });
+  it("leaves ordinary text alone", async () => {
+    const { back } = await resent("hello");
+    expect(back).toEqual({ restore: "hello" });
+  });
+  it("isn't saved as a draft with its backslash", () => {
+    const { repl } = setup();
+    expect(repl.composerDrafts("\\/Users/me hello")).toMatchObject([{ text: "/Users/me hello" }]);
+  });
+  it("isn't taken for a command that looks like one, once escaped", () => {
+    const { repl } = setup();
+    expect(repl.composerDrafts("\\/reply 3 hello")).toMatchObject([{ text: "/reply 3 hello", type: "post" }]);
+  });
+});
+
+describe("settings that a session can change", () => {
+  it("are all shown", () => {
+    const { repl } = setup({ undo: 5, pace: 0 });
+    expect(repl.settingsLine()).toBe("undo 5s · pace off · auto-thread off · thread-label off · force-alt off · verbose off");
+  });
+  it("change, and are saved", () => {
+    const { repl, deps } = setup();
+    deps.onChange.mockClear();
+    repl.setSetting({ forceAlt: true, threadLabel: "prepend", verbose: true });
+    expect(repl.settingsLine()).toContain("thread-label prepend · force-alt on · verbose on");
+    expect(deps.onChange).toHaveBeenCalled();
+  });
+  it("say which files force-alt comes too late for, as it's only asked on attaching", async () => {
+    const { repl, printed } = setup({}, { alt: vi.fn(async () => undefined) });
+    await repl.attach(["/x/a.png"]);
+    await repl.attach(["/x/b.png"], "described");
+    repl.setSetting({ forceAlt: true });
+    expect(printed()).toContain("Already staged with no alt text: a.png. /detach and /attach it to add some.");
+    expect(printed()).not.toContain("b.png");
+  });
+  it("say whether the summary should be full", () => {
+    const { repl } = setup();
+    expect(repl.isVerbose()).toBe(false);
+    repl.setSetting({ verbose: true });
+    expect(repl.isVerbose()).toBe(true);
+  });
+});
+
 describe("/delete and /undo", () => {
   const written = async (answers: Partial<ReplAsk> = {}, posts = ["one", "two"]) => {
     const s = setup({}, answers);
@@ -1282,6 +1584,38 @@ describe("/delete and /undo", () => {
     await repl.deletePost("1");
     expect(ask.yesNo).toHaveBeenCalledWith('Delete (1) "one"? This stops the thread.');
     expect(repl.thread()).toBeUndefined();
+  });
+  it("says how to carry on from what's left of a stopped thread", async () => {
+    const { repl, printed } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 3");
+  });
+  it("offers where the thread had got to, not a side reply", async () => {
+    const { repl, flush, printed } = await written({}, ["one", "two", "three"]);
+    await repl.reply("2", "side reply");
+    await flush();
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 3");
+  });
+  it("offers one of your own if the thread had no further to go", async () => {
+    const { repl, flush, printed } = await written({}, ["one"]);
+    await repl.reply("1", "a reply");
+    await flush();
+    await repl.post("not in the thread");
+    await flush();
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 2");
+  });
+  it("offers nothing to carry on from if nothing's left", async () => {
+    const { repl, printed } = await written({}, ["one"]);
+    await repl.deletePost("1");
+    expect(printed()).not.toContain("To carry on");
+  });
+  it("won't offer a post that's gone too", async () => {
+    const { repl, printed } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("3");
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 2");
   });
   it("waits for what's queued, which may be replying to it", async () => {
     const { repl, agent, printed } = await written();

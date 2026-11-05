@@ -41,6 +41,17 @@ const engagement = (name: "like" | "unlike" | "repost" | "unrepost", summary: st
   },
 });
 
+function onOrOff(name: string, value?: string): boolean {
+  if (value !== "on" && value !== "off") throw new Error(`Usage: /settings ${name} on|off`);
+  return value === "on";
+}
+
+function threadLabel(value?: string): "append" | "prepend" | false {
+  if (value === "append" || value === "prepend") return value;
+  if (value === "off") return false;
+  throw new Error("Usage: /settings thread-label off|append|prepend");
+}
+
 export const COMMANDS: readonly ReplCommand[] = [
   {
     name: "help",
@@ -274,12 +285,18 @@ export const COMMANDS: readonly ReplCommand[] = [
   {
     name: "settings",
     aliases: [],
-    usage: "/settings [undo|pace N]",
-    summary: "Change undo or pace, then show the settings",
-    async run([key, value], ctx) {
+    usage: "/settings [name value]",
+    summary: "Change undo, pace, force-alt, thread-label or verbose, then show the settings; alone, asks for undo and pace",
+    async run([key, value, ...extra], ctx) {
+      const usage = "Usage: /settings undo|pace 0|5|10|15, force-alt|verbose on|off, or thread-label off|append|prepend";
+      if (extra.length > 0) throw new Error(usage);
+      if (key === "auto-thread") throw new Error("Use /auto-thread on|off");
       if (key === undefined) await ctx.repl.askSettings();
       else if (key === "undo" || key === "pace") ctx.repl.setCooldown(key, cooldown(key, value));
-      else throw new Error("Usage: /settings [undo|pace N]");
+      else if (key === "force-alt") ctx.repl.setSetting({ forceAlt: onOrOff(key, value) });
+      else if (key === "verbose") ctx.repl.setSetting({ verbose: onOrOff(key, value) });
+      else if (key === "thread-label") ctx.repl.setSetting({ threadLabel: threadLabel(value) });
+      else throw new Error(usage);
       ctx.print(ctx.repl.settingsLine());
     },
   },
@@ -379,7 +396,7 @@ export function suggest(name: string, candidates: readonly string[]): string | u
   let best: string | undefined;
   let bestDistance = 3;
   for (const c of [...candidates].sort()) {
-    const d = distance(name, c);
+    const d = distance(name.toLowerCase(), c);
     if (d < bestDistance) [best, bestDistance] = [c, d];
   }
   return best;

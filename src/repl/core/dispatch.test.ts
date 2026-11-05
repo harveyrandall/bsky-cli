@@ -13,6 +13,7 @@ function fakeRepl() {
     setCooldown: vi.fn(),
     askSettings: vi.fn(async () => {}),
     settingsLine: vi.fn(() => "undo 5s · pace off · auto-thread off"),
+    setSetting: vi.fn(),
     retry: vi.fn(async () => {}),
     attach: vi.fn(async () => {}),
     detach: vi.fn(),
@@ -40,10 +41,70 @@ describe("parseInput", () => {
   it("classifies input", () => {
     expect(parseInput("   ")).toEqual({ kind: "empty" });
     expect(parseInput("/help exit")).toEqual({ kind: "command", name: "help", rest: "exit" });
-    expect(parseInput("/Help")).toEqual({ kind: "text", text: "/Help" });
+    expect(parseInput("/Help")).toEqual({ kind: "command", name: "Help", rest: "" });
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
     expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
+  });
+});
+
+describe("/settings", () => {
+  it.each([
+    ["/settings force-alt on", { forceAlt: true }],
+    ["/settings force-alt off", { forceAlt: false }],
+    ["/settings verbose on", { verbose: true }],
+    ["/settings thread-label prepend", { threadLabel: "prepend" }],
+    ["/settings thread-label append", { threadLabel: "append" }],
+    ["/settings thread-label off", { threadLabel: false }],
+  ])("%s", async (input, changes) => {
+    const c = ctx();
+    await dispatch(input, c);
+    expect(c.fake.setSetting).toHaveBeenCalledWith(changes);
+    expect(c.print).toHaveBeenCalledWith(c.fake.settingsLine());
+  });
+  it.each(["/settings force-alt maybe", "/settings verbose", "/settings thread-label sideways", "/settings nonsense"])("refuses %s", async (input) => {
+    const c = ctx();
+    expect(await dispatch(input, c)).toBe("keep");
+    expect(c.fake.setSetting).not.toHaveBeenCalled();
+    expect(c.print).toHaveBeenCalledWith(expect.stringContaining("Usage: /settings"), "error");
+  });
+  it("takes one setting at a time, rather than quietly dropping the rest", async () => {
+    const c = ctx();
+    expect(await dispatch("/settings undo 10 pace 5", c)).toBe("keep");
+    expect(c.fake.setCooldown).not.toHaveBeenCalled();
+  });
+  it("points auto-thread at its own command", async () => {
+    const c = ctx();
+    expect(await dispatch("/settings auto-thread on", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith(expect.stringContaining("/auto-thread on|off"), "error");
+  });
+});
+
+describe("a command with a capital", () => {
+  it("is refused with a suggestion, so a typo in a thread can't be posted", async () => {
+    const c = ctx();
+    expect(await dispatch("/Exit", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith("Unknown /Exit. Did you mean /exit? Start with \\/ to post it as text.", "error");
+    expect(c.exit).not.toHaveBeenCalled();
+  });
+  it.each(["/EXIT", "/THREAD hi", "/Post hello"])("gets a suggestion with caps lock on too: %s", async (input) => {
+    const c = ctx();
+    await dispatch(input, c);
+    expect(c.print).toHaveBeenCalledWith(expect.stringContaining("Did you mean"), "error");
+  });
+  it("says how to post a path, which is what it may have been", async () => {
+    const c = ctx();
+    expect(await dispatch("/Users/me/notes.txt is my file", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith("Unknown /Users/me/notes.txt. /help lists commands. Start with \\/ to post it as text.", "error");
+  });
+  it("needs a letter, so times and the like are text", () => {
+    expect(parseInput("/5pm is late")).toEqual({ kind: "text", text: "/5pm is late" });
+  });
+  it.each(["Thread", "Zebra"])("takes any capital: /%s", (name) => {
+    expect(parseInput(`/${name}`)).toEqual({ kind: "command", name, rest: "" });
+  });
+  it("is still text with a backslash", () => {
+    expect(parseInput("\\/Exit stage left")).toEqual({ kind: "text", text: "/Exit stage left" });
   });
 });
 
@@ -266,12 +327,12 @@ describe("dispatch", () => {
   it("suggests a close command and keeps the text", async () => {
     const c = ctx();
     expect(await dispatch("/hlp", c)).toBe("keep");
-    expect(c.print).toHaveBeenCalledWith("Unknown /hlp. Did you mean /help?", "error");
+    expect(c.print).toHaveBeenCalledWith("Unknown /hlp. Did you mean /help? Start with \\/ to post it as text.", "error");
   });
   it("points at /help when nothing is close", async () => {
     const c = ctx();
     expect(await dispatch("/zzzz", c)).toBe("keep");
-    expect(c.print).toHaveBeenCalledWith("Unknown /zzzz. /help lists commands.", "error");
+    expect(c.print).toHaveBeenCalledWith("Unknown /zzzz. /help lists commands. Start with \\/ to post it as text.", "error");
   });
   it.each([
     ['/help "exit', '/help: Unclosed " quote'],

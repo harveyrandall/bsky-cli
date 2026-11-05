@@ -28,12 +28,14 @@ const CONFIG_KEYS: [Kind, "splitMarker" | "sendMarker" | "cutMarker", string][] 
   ["cut", "cutMarker", "cut-marker"],
 ];
 
-/** The marker rule `value` breaks, if any. */
+const STARTS_COMMAND = "markers can't start with / and a letter, which begins a command";
+
+/** The marker rule `value` breaks, if any. A saved session keeps to this, as refusing one loses it. */
 export function brokenRule(value: unknown, seen: string[]): string | undefined {
   if (typeof value !== "string") return "markers must be text";
   if (value === "") return "markers can't be empty";
   if (/\s/.test(value)) return "markers can't contain spaces";
-  if (/^\/[a-z]/.test(value)) return "markers can't start with / and a letter, which begins a command";
+  if (/^\/[a-z]/.test(value)) return STARTS_COMMAND;
   if (seen.includes(value)) return "markers must differ from each other";
 }
 
@@ -46,7 +48,7 @@ export function resolveMarkers(opts: {
   const seen: string[] = [];
   for (const [kind, opt, key] of CONFIG_KEYS) {
     const value = opts[opt] ?? markers[kind];
-    const broken = brokenRule(value, seen);
+    const broken = brokenRule(value, seen) ?? (/^\/[A-Z]/.test(value as string) ? STARTS_COMMAND : undefined);
     if (broken) throw new Error(`Invalid [repl] ${key} = ${JSON.stringify(value)}: ${broken}`);
     markers[kind] = value as string;
     seen.push(value as string);

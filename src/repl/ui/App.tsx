@@ -40,6 +40,8 @@ export interface AppProps {
   keeper?: Pick<SessionKeeper, "track" | "save">;
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
+  /** Flags that a resumed session's own settings overrule, with what to run instead. */
+  ignoredFlags?: readonly string[];
   /** CLI commands that can run here. */
   passthrough?: {
     names(): string[];
@@ -150,7 +152,7 @@ export function App(props: AppProps) {
     props.onReady?.(repl);
     if (!props.resume) return;
     repl
-      .resume(props.resume)
+      .resume(props.resume, props.ignoredFlags)
       .catch((err: unknown) => print(err instanceof Error ? err.message : String(err), "error"))
       .finally(() => setResuming(false));
   }, [repl]);

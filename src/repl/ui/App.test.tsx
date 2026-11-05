@@ -58,7 +58,7 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]>; passthrough?: AppProps["passthrough"]; listDrafts?: AppProps["listDrafts"] } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]>; passthrough?: AppProps["passthrough"]; listDrafts?: AppProps["listDrafts"]; ignoredFlags?: AppProps["ignoredFlags"] } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
@@ -90,6 +90,7 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
       switchAccount={async () => ({ agent: { ...agent, selfDid: "did:plc:work" as const }, handle: "work.bsky.social" })}
       keeper={o.keeper}
       resume={o.resume}
+      ignoredFlags={o.ignoredFlags}
       configName="config.toml"
       passthrough={o.passthrough}
       onReady={(r) => (session = r)}
@@ -781,6 +782,11 @@ describe("App session saving", drawn, () => {
 describe("App resuming", drawn, () => {
   const file = (o: object = {}) =>
     ({ id: "k3f7xq", posts: [], staged: [], pending: [], mode: { kind: "idle" }, composer: { text: "half a thought", cursor: 4 }, history: ["/thread"], counters: { nextLabel: 1, nextViewed: 0, nextLetter: 0 }, ...o }) as never;
+  it("shows the settings on resume, and which flags changed nothing", async () => {
+    const { shows } = setup({ resume: file(), ignoredFlags: ["--undo 10: /settings undo 10"] });
+    await shows("Settings: undo");
+    await shows("--undo 10: /settings undo 10");
+  });
   it("puts the composer back as it was, cursor and history included", async () => {
     const { lastFrame, type, shows } = setup({ resume: file() });
     await shows("── resumed k3f7xq ──");

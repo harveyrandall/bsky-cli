@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
-import { registerRepl, replAgent } from "@/commands/repl";
+import { ignoredFlags, registerRepl, replAgent } from "@/commands/repl";
 import { applyConfigToProgram } from "@/toml-config";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 
@@ -201,6 +201,41 @@ describe("bsky repl", () => {
   });
 });
 
+describe("ignoredFlags", () => {
+  const saved = { autoThread: false, prefixThread: false, threadLabel: false, undo: 5, pace: 0, askToSave: true, verbose: false, forceAlt: false } as const;
+  const notes = (flags: Record<string, unknown>, settings: object = saved) =>
+    ignoredFlags((name) => name in flags, flags, { ...saved, ...settings });
+  it.each([
+    [{ undo: 10 }, "--undo 10: /settings undo 10"],
+    [{ pace: 15 }, "--pace 15: /settings pace 15"],
+    [{ autoThread: true }, "-t: /auto-thread on"],
+    [{ forceAlt: true }, "-f: /settings force-alt on"],
+    [{ threadLabel: true }, "--thread-label: /settings thread-label append"],
+    [{ prependThreadLabel: true }, "--prepend-thread-label: /settings thread-label prepend"],
+    [{ verbose: true }, "-v: /settings verbose on"],
+    [{ prefixThread: true }, "-l: start a new session, as a session's labels can't change"],
+  ])("gives what to run for %j", (flags, note) => {
+    expect(notes(flags)).toEqual([note]);
+  });
+  it("handles turning something off", () => {
+    expect(notes({ autoThread: false }, { autoThread: true })).toEqual(["--no-auto-thread: /auto-thread off"]);
+  });
+  it.each<[Record<string, unknown>, object]>([
+    [{ undo: 5, pace: 0, autoThread: false }, {}],
+    [{ prefixThread: true }, { prefixThread: true }],
+    [{ forceAlt: true }, { forceAlt: true }],
+    [{ verbose: true }, { verbose: true }],
+    [{ prependThreadLabel: true }, { threadLabel: "prepend" }],
+    [{ threadLabel: true }, { threadLabel: "append" }],
+    [{ threadLabel: true, prependThreadLabel: true }, { threadLabel: "prepend" }],
+  ])("says nothing about %j when the session already has it", (flags, settings) => {
+    expect(notes(flags, settings)).toEqual([]);
+  });
+  it("only asks about a flag if given says it was typed", () => {
+    expect(ignoredFlags(() => false, { undo: 10, forceAlt: true }, saved)).toEqual([]);
+  });
+});
+
 describe("saved sessions", () => {
   const uri = "at://did:plc:me/app.bsky.feed.post/3lbx7kt5def2a";
   const file = (o: object = {}) => ({
@@ -235,6 +270,9 @@ describe("saved sessions", () => {
     sessionsHome.dir = mkdtempSync(join(tmpdir(), "bsky-repl-"));
     // The bskyDir mock above doesn't reach sessionPath, which calls its own.
     vi.stubEnv("XDG_CONFIG_HOME", sessionsHome.dir);
+    // Set in some shells, and /switch refuses to run with them.
+    vi.stubEnv("BSKY_HANDLE", "");
+    vi.stubEnv("BSKY_PASSWORD", "");
     setTTY(true, true);
     pickSession.mockResolvedValue(undefined);
   });
@@ -314,6 +352,66 @@ describe("saved sessions", () => {
     vi.mocked(getClient).mockRejectedValueOnce(new Error("Not logged in"));
     await expect(switchAccount("nope")).rejects.toThrow("Not logged in");
     expect(p.opts().profile).toBe("work");
+  });
+  it("passes on the flags a resume ignores", async () => {
+    write();
+    await makeProgram().parseAsync(["repl", "-r", "k3f7xq", "--undo", "10"], { from: "user" });
+    expect(session().ignoredFlags).toEqual(["--undo 10: /settings undo 10"]);
+  });
+  describe("flags a session overrules that aren't settings", () => {
+    const withProfile = () => {
+      const p = new Command().exitOverride().option("-p, --profile <name>");
+      registerRepl(p);
+      return p;
+    };
+    it("says when -p lost to the session's own profile, so you don't post as the wrong account", async () => {
+      write({ profile: "home" });
+      await withProfile().parseAsync(["-p", "work", "repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual(["-p work: /switch work, as this session belongs to @me.bsky.social"]);
+    });
+    it("says so when the session has no profile of its own", async () => {
+      write();
+      await withProfile().parseAsync(["-p", "work", "repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual(["-p work: /switch work, as this session belongs to @me.bsky.social"]);
+    });
+    it("says nothing when -p is the session's own", async () => {
+      write({ profile: "home" });
+      await withProfile().parseAsync(["-p", "home", "repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual([]);
+    });
+    it("doesn't count a profile from the environment", async () => {
+      write({ profile: "home" });
+      const p = withProfile();
+      p.setOptionValueWithSource("profile", "work", "env");
+      await p.parseAsync(["repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual([]);
+    });
+    it("says -R can't stop a resumed session saving", async () => {
+      write();
+      await makeProgram().parseAsync(["repl", "-r", "k3f7xq", "-R"], { from: "user" });
+      expect(session().ignoredFlags).toEqual(["-R: start a new session, as one you resume keeps saving"]);
+    });
+    it("doesn't count resumable = false from the config", async () => {
+      write();
+      await makeProgram({ repl: { resumable: false } }).parseAsync(["repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual([]);
+    });
+  });
+  it("doesn't count a setting from the config as a flag you typed", async () => {
+    write();
+    await makeProgram({ repl: { undo: 10 } }).parseAsync(["repl", "-r", "k3f7xq"], { from: "user" });
+    expect(session().ignoredFlags).toEqual([]);
+  });
+  it.each([[["repl", "-r", "k3f7xq", "-v"]], [["-v", "repl", "-r", "k3f7xq"]]])("finds -v on the program, wherever it's typed: %j", async (argv) => {
+    write();
+    const p = new Command().exitOverride().option("-v, --verbose");
+    registerRepl(p);
+    await p.parseAsync(argv, { from: "user" });
+    expect(session().ignoredFlags).toEqual(["-v: /settings verbose on"]);
+  });
+  it("has none to pass on for a new session", async () => {
+    await makeProgram().parseAsync(["repl", "--undo", "10"], { from: "user" });
+    expect(session().ignoredFlags).toEqual([]);
   });
   describe("/switch", () => {
     let home: string;

@@ -169,7 +169,7 @@ Anything else: `Can't resolve "<x>": use a number, #n, rkey, at:// URI or bsky.a
 
 **Output per post:** `(4) 3lbx7kt5def2v`; verbose `(4) 3lbx7kt5def2v (at://did:plc:…/app.bsky.feed.post/3lbx7kt5def2v)`. Suffixes: `↳ 1` when the parent is not the previous post, `❝ #2` for quotes, `📷 2` / `🎞` for media.
 
-**Deletes** (`/undo`, `/delete <ref>`, own posts only, confirmation required): entry marked `deleted` (shown as `deleted` in `/history`). If it was the cursor, the cursor moves to its parent. Deleting the root stops the thread (confirmation says so).
+**Deletes** (`/undo`, `/delete <ref>`, own posts only, confirmation required): entry marked `deleted` (shown as `deleted` in `/history`). If it was the cursor, the cursor moves to its parent. Deleting the root stops the thread (confirmation says so) and prints `/thread <label>` for the thread's last post, if any is left.
 
 **`/switch <profile>`** stops the active thread; the registry is kept.
 
@@ -232,7 +232,8 @@ Result: `{ posts: string[], keep?: string, discard?: string, autoSplit: boolean,
 **Alt-text prompt** opens with one sentence: *"Alt text tells people using screen readers what's in your image — without it, they're left out of the post."*
 
 - Default: Enter skips (alt falls back to the file name, current `createPost` behaviour).
-- `--force-alt` / `force-alt = true`: re-prompts until non-blank text is given; Esc drops that file instead.
+- `--force-alt` / `force-alt = true`: re-prompts until non-blank text is given.
+- Esc, with or without `--force-alt`, drops that file and says it isn't an error.
 - `TODO(alt-text-ai)` comment at the prompt: future local-model generation (Future work).
 
 ## 9. Posting pipeline
@@ -361,7 +362,7 @@ Resume a session?
 
 Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from counts + first post text). `+ new` is pre-selected. Sessions locked by a running REPL show `in use` and cannot be opened.
 
-**On resume:** replay registry lines dimmed under `── resumed k3f7xq ──`; verify `cursor` with `getPosts` (if deleted, fall back to the nearest surviving ancestor, else stop the thread); pending items ask `send · edit · discard`; missing staged files are dropped with a warning; if the session's account differs, switch to its profile.
+**On resume:** replay registry lines dimmed under `── resumed k3f7xq ──`, then print the session's settings and, for each flag given on this run that it overrules, what to run instead (saved settings win); verify `cursor` with `getPosts` (if deleted, fall back to the nearest surviving ancestor, else stop the thread); pending items ask `send · edit · discard`, and send on a post whose thread is lost then asks for a new thread (the default) or a link to a post to continue from, where backing out counts as edit; missing staged files are dropped with a warning; if the session's account differs, switch to its profile.
 
 **Housekeeping:** lock file `<id>.lock` with the PID (stale locks with dead PIDs are cleared); sessions with no posts and no composer text are deleted on exit; prune to `keep-sessions`, oldest first.
 
@@ -389,7 +390,7 @@ Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from co
 | | `/switch [profile]`, `/history` | Change account; list session posts |
 | Engage | `/like <ref>`, `/unlike <ref>`, `/repost <ref>`, `/unrepost <ref>` | Using extracted `like.ts` / `repost.ts` functions; un-actions use `viewer.like` / `viewer.repost` |
 | | `/open <ref>`, `/view <ref>`, `/copy <ref>` | Browser (`open`/`xdg-open`/`rundll32 url.dll,FileProtocolHandler`); print thread via `printPost`; clipboard (`pbcopy`/`wl-copy`/`xclip`/`clip`) |
-| Session | `/auto-thread [on\|off]`, `/settings [undo\|pace N]` | Toggle; settings menu with no args |
+| Session | `/auto-thread [on\|off]`, `/settings [name value]` | Toggle; settings menu with no args |
 | | `/help [cmd]`, `/exit` (`/quit`), `/run <cmd> [args]` | Help; exit (= Ctrl+D); explicit passthrough |
 
 **`/new` items:** Post → post-once; Thread → `/thread`; Image/Video post → `/attach` prompts then post-once; Quote post → ref prompt then composer; Scheduled post → composer, then an Ink date/time prompt built on `parseDate`/`parseTime`/`resolveAmPm`/`toUtcIso`, saved to the existing schedule store; Draft → composer then `saveDraft()`.
@@ -398,7 +399,7 @@ Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from co
 
 **Dispatcher**
 
-1. Input is a command only if it matches `^/[a-z]` (markers never match; a leading `\/` posts a literal `/`).
+1. Input is a command only if it matches `^/[a-zA-Z]`, so a mistyped `/Exit` is caught rather than posted (a marker can't start with `/` and a letter, except in a session saved before capitals counted, where it now reads as a command; a leading `\/` posts a literal `/`).
 2. Shell-style tokenizer (quotes, backslash escapes).
 3. Native command → Commander subcommand (passthrough) → `Unknown /hlp. Did you mean /help?` (edit distance over both sets). `/run` skips native lookup.
 4. `/help` and Tab completion come from one registry; `/help` lists passthrough entries on one `↗ From the CLI:` line.
@@ -434,7 +435,7 @@ Lexicons are the API contract — read them.
 - `refs`: every ref form, both numbering modes, `#n`, handle → DID, errors.
 - `session`: transitions, cursor after delete, root delete, once-modes return, `/switch`.
 - `pipeline` (fake timers): `max(undo, pace)`, cancel, send now, batch pacing, send-time parent resolution, network → draft, `/retry`, 429 retry.
-- `dispatch` / tokenizer: precedence, `/run`, `^/[a-z]`, `\/`, suggestions, `#n` expansion.
+- `dispatch` / tokenizer: precedence, `/run`, `^/[a-zA-Z]`, `\/`, suggestions, `#n` expansion.
 - `passthrough`: exit guard, stdout redirect, two consecutive parses do not leak `--json`.
 - `persist`: round trip, `version`, atomic write, lock + stale lock, prune, `last` / prefix resolution.
 - `printPost`: snapshot unchanged without a labeller; label with one.

@@ -58,6 +58,7 @@ describe("resolveMarkers", () => {
     [{ sendMarker: "a b" }, 'Invalid [repl] send-marker = "a b": markers can\'t contain spaces'],
     [{ cutMarker: 5 }, "Invalid [repl] cut-marker = 5: markers must be text"],
     [{ cutMarker: "///" }, 'Invalid [repl] cut-marker = "///": markers must differ from each other'],
+    [{ sendMarker: "/Send" }, 'Invalid [repl] send-marker = "/Send": markers can\'t start with / and a letter, which begins a command'],
     [{ sendMarker: "/send" }, 'Invalid [repl] send-marker = "/send": markers can\'t start with / and a letter, which begins a command'],
   ])("rejects %o", (opts, message) => {
     expect(() => resolveMarkers(opts)).toThrow(message);
