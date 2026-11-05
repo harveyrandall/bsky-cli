@@ -61,6 +61,12 @@ export interface ReplAsk {
 
 export interface ReplAgent extends RefAgent {
   post(text: string, reply?: SendTarget, media?: readonly StagedMedia[], quote?: StrongRef): Promise<StrongRef>;
+  like(post: StrongRef): Promise<void>;
+  /** False if there was no like to remove. */
+  unlike(post: StrongRef): Promise<boolean>;
+  repost(post: StrongRef): Promise<void>;
+  /** False if there was no repost to remove. */
+  unrepost(post: StrongRef): Promise<boolean>;
 }
 
 export interface ReplDeps {
@@ -685,6 +691,26 @@ export class Repl {
     if (text !== undefined) return this.write({ kind: "quote", target: resolved.ref }, text);
     this.current = { kind: "quote-once", target: resolved, label: entry.label, returnTo: this.inThread() ? "thread" : "idle" };
     this.deps.onChange();
+    return "done";
+  }
+
+  /** `/like`, `/unlike`, `/repost` and `/unrepost`. */
+  async engage(action: "like" | "unlike" | "repost" | "unrepost", input: string): Promise<SubmitOutcome> {
+    const resolved = await this.resolve(input);
+    if (!resolved) return "keep";
+    const name = resolved.entry ? `(${resolved.entry.label})` : input;
+    const { agent } = this.deps;
+    if (action === "like") {
+      await agent.like(resolved.ref);
+      this.deps.print(`Liked ${name}`, "dim");
+    } else if (action === "repost") {
+      await agent.repost(resolved.ref);
+      this.deps.print(`Reposted ${name}`, "dim");
+    } else if (action === "unlike") {
+      this.deps.print((await agent.unlike(resolved.ref)) ? `Unliked ${name}` : `You hadn't liked ${name}`, "dim");
+    } else {
+      this.deps.print((await agent.unrepost(resolved.ref)) ? `Removed your repost of ${name}` : `You hadn't reposted ${name}`, "dim");
+    }
     return "done";
   }
 

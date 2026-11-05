@@ -3,7 +3,9 @@ import { InvalidArgumentError, type Command } from "commander";
 import type { AppBskyFeedDefs, AtpAgent } from "@atproto/api";
 import { bskyDir } from "@/config";
 import { getClient } from "@/index";
+import { likePost, unlikePost } from "@/commands/like";
 import { createPost } from "@/commands/post";
+import { repostPost, unrepostPost } from "@/commands/repost";
 import { activeConfigPath } from "@/toml-config";
 import { resolveMarkers, type Markers } from "@/repl/core/markers";
 import { mediaOptions } from "@/repl/core/media";
@@ -71,6 +73,10 @@ export function replAgent(agent: AtpAgent): ReplAgent {
       const target = reply ? { reply: reply.parent, replyRoot: reply.root } : {};
       return toStrongRef(await createPost(agent, text, { ...target, ...mediaOptions(media), quote }));
     },
+    like: async (post) => void (await likePost(agent, post)),
+    unlike: (post) => unlikePost(agent, post.uri),
+    repost: async (post) => void (await repostPost(agent, post)),
+    unrepost: (post) => unrepostPost(agent, post.uri),
   };
 }
 

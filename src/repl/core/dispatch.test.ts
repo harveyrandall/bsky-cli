@@ -18,6 +18,7 @@ function fakeRepl() {
     detach: vi.fn(),
     quote: vi.fn(async () => "done" as const),
     newMenu: vi.fn(async () => "done" as const),
+    engage: vi.fn(async () => "done" as const),
     settings: () => ({ verbose: false }),
     registry: { entries: () => [{ excerpt: "hello" }], format: () => "(1) 3lbx7kt5def2a" },
   };
@@ -36,6 +37,15 @@ describe("parseInput", () => {
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
     expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
+  });
+});
+
+describe("likes and reposts", () => {
+  it.each(["like", "unlike", "repost", "unrepost"])("/%s takes a ref", async (name) => {
+    const c = ctx();
+    await dispatch(`/${name} #2`, c);
+    expect(c.fake.engage).toHaveBeenLastCalledWith(name, "#2");
+    expect(await dispatch(`/${name}`, c)).toBe("keep");
   });
 });
 

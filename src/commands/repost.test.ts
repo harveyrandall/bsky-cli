@@ -4,7 +4,7 @@ import { createMockAgent } from "@/test-utils";
 import {
   registerRepost,
   registerRemoveRepost,
-  registerReposts,
+  registerReposts, unrepostPost
 } from "@/commands/repost";
 
 const mockAgent = createMockAgent();
@@ -160,5 +160,18 @@ describe("reposts command", () => {
 
     stdoutSpy.mockRestore();
     consoleSpy.mockRestore();
+  });
+});
+
+describe("unrepostPost", () => {
+  const client = (posts: object[]) => ({ getPosts: vi.fn(async () => ({ data: { posts } })), deleteRepost: vi.fn(async () => {}) });
+  it("deletes your repost of a post, from what the post says it is", async () => {
+    const agent = client([{ viewer: { repost: "at://me/repost/1" } }]);
+    await expect(unrepostPost(agent as never, "at://post")).resolves.toBe(true);
+    expect(agent.deleteRepost).toHaveBeenCalledWith("at://me/repost/1");
+  });
+  it("says so if you hadn't reposted it, or the post has gone", async () => {
+    await expect(unrepostPost(client([{ viewer: {} }]) as never, "at://post")).resolves.toBe(false);
+    await expect(unrepostPost(client([]) as never, "at://post")).resolves.toBe(false);
   });
 });

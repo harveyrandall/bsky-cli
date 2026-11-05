@@ -33,6 +33,10 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
       posted.push({ text, reply, media, quote });
       return ref(++n);
     }),
+    like: vi.fn(async (_: StrongRef) => {}),
+    unlike: vi.fn(async (_: StrongRef) => true),
+    repost: vi.fn(async (_: StrongRef) => {}),
+    unrepost: vi.fn(async (_: StrongRef) => true),
   };
   const ask: ReplAsk = {
     cooldown: vi.fn(async () => 0 as const),
@@ -1190,6 +1194,48 @@ describe("changes that aren't posts", () => {
     await flush();
     expect(repl.mode().kind).toBe("idle");
     expect(deps.onChange).toHaveBeenCalled();
+  });
+});
+
+describe("likes and reposts", () => {
+  const withPost = async () => {
+    const s = setup();
+    await s.repl.post("first");
+    await s.flush();
+    return s;
+  };
+  it.each([
+    ["like", "Liked (1)"],
+    ["unlike", "Unliked (1)"],
+    ["repost", "Reposted (1)"],
+    ["unrepost", "Removed your repost of (1)"],
+  ] as const)("%s a post by its label", async (action, message) => {
+    const { repl, agent, printed } = await withPost();
+    expect(await repl.engage(action, "1")).toBe("done");
+    expect(agent[action]).toHaveBeenCalledWith(ref(1));
+    expect(printed()).toContain(message);
+  });
+  it("work on a post you read", async () => {
+    const { repl, agent } = await withPost();
+    const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5def2x";
+    repl.labelPost({ uri, cid: "bafyabc" });
+    agent.getPosts.mockResolvedValueOnce([{ uri, cid: "bafyabc", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "" }] as never);
+    await repl.engage("like", "#1");
+    expect(agent.like).toHaveBeenCalledWith({ uri, cid: "bafyabc" });
+  });
+  it("say so if there's nothing to undo", async () => {
+    const { repl, agent, printed } = await withPost();
+    agent.unlike.mockResolvedValueOnce(false);
+    agent.unrepost.mockResolvedValueOnce(false);
+    await repl.engage("unlike", "1");
+    await repl.engage("unrepost", "1");
+    expect(printed()).toContain("You hadn't liked (1)");
+    expect(printed()).toContain("You hadn't reposted (1)");
+  });
+  it("keep the text when the ref is wrong", async () => {
+    const { repl, agent } = await withPost();
+    expect(await repl.engage("like", "9")).toBe("keep");
+    expect(agent.like).not.toHaveBeenCalled();
   });
 });
 

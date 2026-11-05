@@ -33,7 +33,7 @@ describe("completeCommand", () => {
     const re = completeCommand("/re", 3);
     expect(re).toMatchObject({ text: "/re", cursor: 3 });
     expect(re.candidates).toEqual(expect.arrayContaining(["reply", "reply-from", "retry"]));
-    expect(completeCommand("/rep", 4)).toMatchObject({ text: "/reply", cursor: 6 });
+    expect(completeCommand("/repl", 5)).toMatchObject({ text: "/reply", cursor: 6 });
     const reply = completeCommand("/reply", 6);
     expect(reply).toMatchObject({ text: "/reply", cursor: 6 });
     expect(reply.candidates).toEqual(expect.arrayContaining(["reply", "reply-from"]));

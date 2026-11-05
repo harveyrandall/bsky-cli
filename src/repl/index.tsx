@@ -157,7 +157,7 @@ const offline = async (): Promise<never> => {
 /** Props for a frame with no account behind it: the smoke run and tests. */
 export const offlineProps: Omit<AppProps, "markers" | "kittyHint"> = {
   settings: { autoThread: false, prefixThread: false, threadLabel: false, undo: 0, pace: 0, askToSave: false, verbose: false, forceAlt: false },
-  agent: { selfDid: "did:plc:offline", resolveHandle: offline, getPosts: offline, post: offline },
+  agent: { selfDid: "did:plc:offline", resolveHandle: offline, getPosts: offline, post: offline, like: offline, unlike: offline, repost: offline, unrepost: offline },
   drafts: { save: offline, delete: offline },
   saveConfig: offline,
   saveScheduled: offline,

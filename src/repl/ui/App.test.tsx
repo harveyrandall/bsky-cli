@@ -61,6 +61,10 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
     resolveHandle: vi.fn(),
     getPosts: vi.fn(o.hold ?? (async () => [])),
     post: vi.fn(async () => ref(++n)),
+    like: vi.fn(async () => {}),
+    unlike: vi.fn(async () => true),
+    repost: vi.fn(async () => {}),
+    unrepost: vi.fn(async () => true),
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
   const saveConfig = vi.fn(async () => {});
@@ -234,7 +238,7 @@ describe("App", () => {
   it("lists the candidates when Tab can't extend the name", async () => {
     const { type, lastFrame } = setup();
     await type("/re", "\t");
-    expect(lastFrame()).toContain("/reply  /reply-from  /retry");
+    expect(lastFrame()).toContain("/reply  /reply-from  /repost  /retry");
   });
 });
 

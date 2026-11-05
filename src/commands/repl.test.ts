@@ -22,6 +22,8 @@ vi.mock("@/index", () => ({
   getClient: vi.fn(async () => ({ session: { did: "did:plc:me", handle: "me.bsky.social" } })),
 }));
 vi.mock("@/commands/post", () => ({ createPost: vi.fn() }));
+vi.mock("@/commands/like", () => ({ likePost: vi.fn(), unlikePost: vi.fn() }));
+vi.mock("@/commands/repost", () => ({ repostPost: vi.fn(), unrepostPost: vi.fn() }));
 
 const original = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY };
 function setTTY(stdin: boolean | undefined, stdout: boolean | undefined) {
@@ -362,6 +364,22 @@ describe("replAgent", () => {
     const root = { uri: `${uri}r`, cid: "bafyr" } as never;
     await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
     expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
+  });
+  it("passes likes and reposts on to what the CLI uses", async () => {
+    const { likePost, unlikePost } = await import("@/commands/like");
+    const { repostPost, unrepostPost } = await import("@/commands/repost");
+    vi.mocked(unlikePost).mockResolvedValueOnce(true);
+    const agent = { session: { did: "did:plc:me" } } as never;
+    const post = { uri, cid: "bafyabc" } as never;
+    const client = replAgent(agent);
+    await client.like(post);
+    await client.repost(post);
+    await expect(client.unlike(post)).resolves.toBe(true);
+    await client.unrepost(post);
+    expect(likePost).toHaveBeenCalledWith(agent, post);
+    expect(repostPost).toHaveBeenCalledWith(agent, post);
+    expect(unlikePost).toHaveBeenCalledWith(agent, uri);
+    expect(unrepostPost).toHaveBeenCalledWith(agent, uri);
   });
   it("won't start without a session", () => {
     expect(() => replAgent({} as never)).toThrow("Not logged in");

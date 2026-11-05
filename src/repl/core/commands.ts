@@ -30,6 +30,17 @@ function cooldown(name: string, value: string | undefined): Cooldown {
   return n;
 }
 
+const engagement = (name: "like" | "unlike" | "repost" | "unrepost", summary: string): ReplCommand => ({
+  name,
+  aliases: [],
+  usage: `/${name} <ref>`,
+  summary,
+  run([ref], ctx) {
+    if (ref === undefined) throw new Error(`Usage: /${name} <ref>`);
+    return ctx.repl.engage(name, ref);
+  },
+});
+
 export const COMMANDS: readonly ReplCommand[] = [
   {
     name: "help",
@@ -155,6 +166,10 @@ export const COMMANDS: readonly ReplCommand[] = [
       ctx.repl.detach(which === "all" ? "all" : n);
     },
   },
+  engagement("like", "Like a post"),
+  engagement("unlike", "Remove your like of a post"),
+  engagement("repost", "Repost a post"),
+  engagement("unrepost", "Remove your repost of a post"),
   {
     name: "run",
     aliases: [],

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Command } from "commander";
 import { createMockAgent } from "@/test-utils";
-import { registerLike, registerUnlike, registerLikes } from "@/commands/like";
+import { registerLike, registerUnlike, registerLikes, unlikePost } from "@/commands/like";
 
 const mockAgent = createMockAgent();
 
@@ -160,5 +160,19 @@ describe("likes command", () => {
 
     stdoutSpy.mockRestore();
     consoleSpy.mockRestore();
+  });
+});
+
+describe("unlikePost", () => {
+  const client = (viewer: object) => ({ getPosts: vi.fn(async () => ({ data: { posts: [{ viewer }] } })), deleteLike: vi.fn(async () => {}) });
+  it("deletes your like of a post, from what the post says it is", async () => {
+    const agent = client({ like: "at://me/like/1" });
+    await expect(unlikePost(agent as never, "at://post")).resolves.toBe(true);
+    expect(agent.deleteLike).toHaveBeenCalledWith("at://me/like/1");
+  });
+  it("says so if you hadn't liked it", async () => {
+    const agent = client({});
+    await expect(unlikePost(agent as never, "at://post")).resolves.toBe(false);
+    expect(agent.deleteLike).not.toHaveBeenCalled();
   });
 });
