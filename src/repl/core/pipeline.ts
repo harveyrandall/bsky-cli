@@ -21,6 +21,8 @@ export interface QueueItem {
 /** What's left of a queued item, and where its next post is going. */
 export interface Unsent extends QueueItem {
   target?: SendTarget;
+  /** The draft a retry of this replaces, for as long as it isn't sent. */
+  draftId?: string;
 }
 
 /** counting = still inside the undo window; pacing = waiting on the pace only. */
@@ -117,20 +119,28 @@ export class Pipeline {
   private lastSentAt = -Infinity;
   private timer: unknown;
   private sending = false;
+  /** The post being sent, until it lands or fails. */
+  private flight?: Promise<void>;
   /** Set while paused, waiting for retry() or cancelAll(). */
   private failure?: Failure;
 
   constructor(private readonly deps: PipelineDeps) {}
 
-  enqueue(intent: Intent, posts: string[], media?: readonly StagedMedia[]): QueueItem {
+  /** `resumed` is where a saved item left off: the post before it, and the draft it replaces. */
+  enqueue(intent: Intent, posts: string[], media?: readonly StagedMedia[], resumed?: Pick<Unsent, "target" | "draftId">): QueueItem {
     const item = { id: this.nextId++, intent, posts, media, createdAt: this.deps.now() };
-    this.queue.push({ item, index: 0 });
+    this.queue.push({ item, index: 0, last: resumed?.target, draftId: resumed?.draftId });
     this.schedule();
     return item;
   }
 
   pending(): readonly Unsent[] {
     return this.queue.map((a) => this.remaining(a, a.index));
+  }
+
+  /** When a post already being sent has landed or failed. */
+  drained(): Promise<void> {
+    return this.flight ?? Promise.resolve();
   }
 
   /** What can still be stopped: everything but a post already being sent. */
@@ -140,7 +150,7 @@ export class Pipeline {
   }
 
   private remaining(a: Active, from: number): Unsent {
-    return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a) };
+    return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a), draftId: a.draftId };
   }
 
   isPaused(): boolean {
@@ -239,9 +249,16 @@ export class Pipeline {
     return undefined;
   }
 
-  private async sendHead(): Promise<void> {
+  private sendHead(): Promise<void> {
     const a = this.queue[0];
-    if (!a || this.sending) return;
+    if (!a || this.sending) return Promise.resolve();
+    this.flight = this.send(a).finally(() => {
+      this.flight = undefined;
+    });
+    return this.flight;
+  }
+
+  private async send(a: Active): Promise<void> {
     this.sending = true;
     this.deps.onChange();
     const target = this.target(a);

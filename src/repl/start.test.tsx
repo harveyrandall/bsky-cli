@@ -18,7 +18,7 @@ vi.mock("@/lib/scheduler", () => ({ getSchedulerStatus }));
 vi.mock("@/scheduled", () => ({ saveScheduledPost }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
-const { startRepl, offlineProps } = await import("@/repl");
+const { startRepl, offlineProps, pickSession } = await import("@/repl");
 const options = {
   markers: DEFAULT_MARKERS,
   settings: offlineProps.settings,
@@ -44,6 +44,34 @@ const added = (event: "uncaughtException" | "unhandledRejection", before: Functi
 beforeEach(() => {
   vi.clearAllMocks();
   detectKittyKeyboard.mockResolvedValue(true);
+});
+
+describe("pickSession", () => {
+  const listings = [{ id: "k3f7xq", updatedAt: "2026-11-04T10:00:00.000Z", summary: "", state: "ok" as const }];
+  const pick = async (id: string | undefined | null) => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const store = { delete: vi.fn(async () => {}) };
+    const picking = pickSession(store, listings);
+    render.mock.lastCall?.[0].props.onPick(id);
+    return { picked: await picking, store, props: render.mock.lastCall?.[0].props };
+  };
+  it("hands back what was picked", async () => {
+    await expect(pick("k3f7xq").then((r) => r.picked)).resolves.toBe("k3f7xq");
+    await expect(pick(undefined).then((r) => r.picked)).resolves.toBeUndefined();
+    await expect(pick(null).then((r) => r.picked)).resolves.toBeNull();
+  });
+  it("deletes through the store", async () => {
+    const { store, props } = await pick(undefined);
+    await props.onDelete("zzzzzz");
+    expect(store.delete).toHaveBeenCalledWith("zzzzzz");
+  });
+  it("hands stdin back: Ink lets go of it, and a question that follows would quit the process", async () => {
+    const ref = vi.spyOn(process.stdin, "ref").mockReturnValue(process.stdin);
+    await pick(undefined);
+    expect(ref).toHaveBeenCalled();
+    ref.mockRestore();
+  });
 });
 
 describe("startRepl", () => {
@@ -142,6 +170,84 @@ describe("startRepl", () => {
     expect(process.exitCode).toBeUndefined();
     write.mockRestore();
   });
+  describe("with a saved session", () => {
+    const store = () => ({
+      save: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+      lock: vi.fn(async () => true),
+      unlock: vi.fn(async () => {}),
+      prune: vi.fn(async () => {}),
+    });
+    const fileOf = (o: object = {}) => ({ posts: [{}], staged: [], pending: [], composer: { text: "", cursor: 0 }, ...o });
+    const fakeRepl = () => ({ registry: new Registry(false), failures: () => [], close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => fileOf()) });
+    const start = async (session: object, settings = options.settings) => {
+      const app = fakeInstance();
+      render.mockReturnValue(app);
+      const running = startRepl({ ...options, settings, profile: "work", session: { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", did: "did:plc:me", keep: 7, ...session } as never });
+      await vi.waitFor(() => expect(render).toHaveBeenCalled());
+      const { props } = render.mock.calls[0][0];
+      const repl = fakeRepl();
+      props.onReady(repl);
+      return { app, running, props, repl };
+    };
+    it("gives the session's details to what saves it", async () => {
+      const s = store();
+      const { app, running, props, repl } = await start({ store: s });
+      await props.keeper.save(repl);
+      expect(repl.snapshot).toHaveBeenCalledWith(
+        { id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: "did:plc:me", profile: "work" },
+        { text: "", cursor: 0 },
+        [],
+      );
+      app.exit(LEFT);
+      await running;
+      expect(s.prune).toHaveBeenCalledWith(7);
+    });
+    it("says how to resume, once it's safely saved", async () => {
+      const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const { app, running } = await start({ store: store() });
+      app.exit(LEFT);
+      await running;
+      expect(write).toHaveBeenCalledWith(expect.stringContaining("resume: bsky -r k3f7xq"));
+      write.mockRestore();
+    });
+    it("says why it couldn't save, and offers no hint", async () => {
+      const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const s = store();
+      s.save.mockRejectedValue(new Error("ENOSPC"));
+      const { app, running } = await start({ store: s });
+      app.exit(LEFT);
+      await running;
+      expect(err).toHaveBeenCalledWith("Couldn't save this session (ENOSPC)\n");
+      expect(out).not.toHaveBeenCalledWith(expect.stringContaining("resume:"));
+      out.mockRestore();
+    });
+    it("ends the session on a crash, and keeps listening for errors until it has", async () => {
+      const s = store();
+      let finish = () => {};
+      s.save.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+      const before = process.listeners("uncaughtException");
+      const { running } = await start({ store: s });
+      added("uncaughtException", before)[0](new Error("boom"));
+      await vi.waitFor(() => expect(s.save).toHaveBeenCalled());
+      expect(added("uncaughtException", before)).toHaveLength(1);
+      finish();
+      await expect(running).rejects.toThrow("boom");
+      expect(s.unlock).toHaveBeenCalled();
+      expect(added("uncaughtException", before)).toHaveLength(0);
+    });
+    it("counts a resumed session's time from when it began", async () => {
+      const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+      const resume = { composer: { text: "", cursor: 0 }, history: [] };
+      const { app, running } = await start({ store: store(), resume }, { ...options.settings, verbose: true });
+      app.exit(LEFT);
+      await running;
+      expect(out).toHaveBeenCalledWith(expect.stringContaining("Session 2026-11-04T09:00:00.000Z"));
+      out.mockRestore();
+    });
+  });
+
   it("prints the exit summary once Ink has exited", async () => {
     const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const app = fakeInstance();
@@ -149,7 +255,7 @@ describe("startRepl", () => {
     const running = startRepl(options);
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     const [element] = render.mock.calls[0];
-    element.props.onReady({ registry: new Registry(false), failures: () => [], close: () => [] });
+    element.props.onReady({ registry: new Registry(false), failures: () => [], close: () => [], settled: async () => {} });
     app.exit(LEFT);
     await running;
     expect(write).toHaveBeenCalledWith("No posts this session\n");

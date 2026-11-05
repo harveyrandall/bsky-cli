@@ -343,6 +343,15 @@ describe("Pipeline errors", () => {
     expect(sent.map((s) => s.text)).toEqual(["a"]);
     expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
   });
+  it("shows which draft a queued retry came from", async () => {
+    const { pipeline, deps } = setup({ pace: 5 });
+    deps.send.mockRejectedValueOnce(fetchFailed());
+    pipeline.enqueue({ kind: "standalone" }, ["a", "b"]);
+    await vi.advanceTimersByTimeAsync(0);
+    await pipeline.retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pipeline.pending()[0]).toMatchObject({ posts: ["b"], draftId: "d1" });
+  });
   it("deletes the old draft when the server rejects a retry: the text goes back to the composer", async () => {
     const { pipeline, deps } = setup();
     deps.send.mockRejectedValueOnce(fetchFailed());

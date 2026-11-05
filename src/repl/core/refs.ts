@@ -143,6 +143,23 @@ export class Registry {
     });
   }
 
+  snapshot(): { posts: RegistryEntry[]; nextLabel: number; nextLetter: number } {
+    return { posts: [...this.list], nextLabel: this.count + 1, nextLetter: this.letters };
+  }
+
+  /** Picks up where a saved session stopped; labels are never reused. */
+  restore(posts: readonly RegistryEntry[], counters: { nextLabel: number; nextLetter: number }): void {
+    this.list.push(...posts);
+    this.count = counters.nextLabel - 1;
+    this.letters = counters.nextLetter;
+    for (const e of posts) {
+      if (!e.letter) continue;
+      this.lastLetter = e.letter;
+      const n = Number(e.label.slice(e.letter.length));
+      this.perLetter.set(e.letter, Math.max(n, this.perLetter.get(e.letter) ?? 0));
+    }
+  }
+
   byLabel(label: string): RegistryEntry | undefined {
     return this.list.find((e) => e.label === label);
   }

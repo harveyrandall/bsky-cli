@@ -132,6 +132,31 @@ describe("Registry.format", () => {
   });
 });
 
+describe("a saved registry", () => {
+  it("carries on numbering where it stopped", () => {
+    const reg = new Registry(false);
+    reg.addOwn(r1, { root: r1, text: "a" });
+    reg.addOwn(r2, { root: r1, text: "b" });
+    const { posts, nextLabel, nextLetter } = reg.snapshot();
+    const back = new Registry(false);
+    back.restore(posts, { nextLabel, nextLetter });
+    expect(back.byLabel("2")?.uri).toBe(r2.uri);
+    expect(back.addOwn(r3, { root: r1, text: "c" }).label).toBe("3");
+  });
+  it("carries on each thread's letter", () => {
+    const reg = new Registry(true);
+    const a = reg.newLetter();
+    reg.addOwn(r1, { root: r1, text: "a", letter: a });
+    reg.addOwn(r2, { root: r1, text: "b", letter: a });
+    const { posts, nextLabel, nextLetter } = reg.snapshot();
+    const back = new Registry(true);
+    back.restore(posts, { nextLabel, nextLetter });
+    expect(back.currentLetter()).toBe("A");
+    expect(back.addOwn(r3, { root: r1, text: "c", letter: "A" }).label).toBe("A3");
+    expect(back.newLetter()).toBe("B");
+  });
+});
+
 describe("Registry.format notes", () => {
   it("shows what a post carried", () => {
     const reg = new Registry(false);

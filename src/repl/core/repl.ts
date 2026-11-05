@@ -6,8 +6,9 @@ import type { LineStyle } from "./commands";
 import { escapeMarkers, parseSubmit, type Markers, type SubmitPlan } from "./markers";
 import { canStage, chips, expandHome, inspectMedia, mediaOptions, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
 import { Pipeline, draftOf, quoteOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
+import type { ReplSessionFile, SavedMode } from "./persist";
 import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
-import type { Cooldown, StrongRef, ThreadLetter } from "./types";
+import type { AtUri, Cooldown, IsoUtc, OwnLabel, StrongRef, ThreadLetter } from "./types";
 
 export const IDLE_HINT =
   "Plain text needs a thread: /thread to start one, /post for a single post, or -t to do this automatically.";
@@ -22,12 +23,12 @@ const NEW_QUESTIONS: Partial<Record<(typeof NEW_ITEMS)[number], string>> = {
   "Quote post": "Post to quote (number, link or at:// URI):",
 };
 
-type ReturnTo = "idle" | "thread";
+export type ReturnTo = "idle" | "thread";
 
 export type ReplMode =
   | { kind: "idle" }
   | { kind: "thread" }
-  | { kind: "reply-once" | "quote-once"; target: ResolvedRef; label: string; returnTo: ReturnTo }
+  | { kind: "reply-once" | "quote-once"; target: ResolvedRef; label: OwnLabel; returnTo: ReturnTo }
   | { kind: "post-once" | "schedule-once" | "draft-once"; returnTo: ReturnTo };
 
 export interface ReplSettings {
@@ -52,8 +53,8 @@ export interface ReplAsk {
   confirm(plan: SubmitPlan, labelled: boolean, media: readonly StagedMedia[]): Promise<boolean>;
   /** Alt text for a file: undefined when skipped, null on Esc. */
   alt(file: string, required: boolean): Promise<string | undefined | null>;
-  /** undefined when dismissed. */
-  choose(label: string, options: readonly string[]): Promise<number | undefined>;
+  /** undefined when dismissed. `start` is the option selected to begin with. */
+  choose(label: string, options: readonly string[], start?: number): Promise<number | undefined>;
   /** A line of text; undefined when dismissed. */
   text(label: string): Promise<string | undefined>;
 }
@@ -117,6 +118,11 @@ export class Repl {
   private closed = false;
   private readonly failed: Failure[] = [];
   private media: StagedMedia[] = [];
+  /** Saved posts waiting for Send, Edit or Discard. */
+  private unanswered: Unsent[] = [];
+  /** A resumed thread's posts couldn't be found. */
+  private threadLost = false;
+  private readonly timers: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   private readonly letters = new Map<number, ThreadLetter | undefined>();
 
   constructor(
@@ -126,13 +132,13 @@ export class Repl {
   ) {
     this.s = { ...settings };
     this.registry = new Registry(settings.prefixThread, deps.agent.selfDid);
-    const timers = deps.timers ?? {
+    this.timers = deps.timers ?? {
       now: () => Date.now(),
       setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms),
       clearTimer: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
     };
     this.pipeline = new Pipeline({
-      ...timers,
+      ...this.timers,
       send: (text, reply, media, quote) => deps.agent.post(text, reply, media, quote),
       threadTarget: () => this.threadState && { parent: this.threadState.cursor, root: this.threadState.root },
       saveDraft: deps.saveDraft,
@@ -217,6 +223,140 @@ export class Repl {
     this.pipeline.sendNow();
   }
 
+  /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
+  async resume(file: ReplSessionFile): Promise<void> {
+    // All of it first, so a save at any moment from here has the whole session.
+    this.registry.restore(file.posts, file.counters);
+    this.threadState = file.thread;
+    this.lastThreadLetter = file.lastThreadLetter;
+    this.media = [...file.staged];
+    this.unanswered = [...file.pending];
+    this.current = this.resumeMode(file.mode);
+    this.deps.print(`── resumed ${file.id} ──`, "dim");
+    for (const entry of this.registry.entries()) this.deps.print(this.registry.format(entry, this.s.verbose), "dim");
+    this.deps.onChange();
+    await this.checkStaged();
+    if (file.thread) await this.checkThread(file.thread);
+    this.deps.onChange();
+    for (const item of file.pending) await this.resumeItem(item);
+  }
+
+  private async checkStaged(): Promise<void> {
+    for (const m of [...this.media]) {
+      const found = await inspectMedia(m.path, this.deps.fs ?? nodeMediaFs);
+      if (found.kind !== undefined && found.error === undefined) continue;
+      this.media = this.media.filter((staged) => staged !== m);
+      this.deps.print(`Dropped ${m.path}: ${found.error}`, "error");
+    }
+  }
+
+  /** `work`, for as long as a person should be kept waiting. */
+  private within<T>(work: Promise<T>, ms: number): Promise<T> {
+    let timer: unknown;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = this.timers.setTimer(() => reject(new Error("timed out")), ms);
+    });
+    return Promise.race([work, timeout]).finally(() => this.timers.clearTimer(timer));
+  }
+
+  /** When a post already going has landed, or five seconds, whichever's first. */
+  settled(): Promise<void> {
+    return this.within(this.pipeline.drained(), 5000).catch(() => {});
+  }
+
+  /** The cursor, or the nearest of its ancestors that's still there. */
+  private async checkThread(saved: ThreadState): Promise<void> {
+    const chain: string[] = [];
+    // getPosts takes at most 25.
+    for (let uri: string | undefined = saved.cursor.uri; uri && chain.length < 25; uri = this.registry.byUri(uri)?.parent) chain.push(uri);
+    let found: Set<string>;
+    try {
+      found = new Set((await this.within(this.deps.agent.getPosts(chain as AtUri[]), 10_000)).map((p) => p.uri));
+    } catch (err) {
+      this.deps.print(`Couldn't check the thread (${err instanceof Error ? err.message : String(err)}); carrying on from where it was`, "error");
+      return;
+    }
+    if (found.has(saved.cursor.uri)) return;
+    const survivor = this.registry.byUri(chain.find((uri) => found.has(uri)) ?? "");
+    if (!survivor) {
+      this.deps.print("Couldn't find the thread's posts; thread stopped", "dim");
+      this.threadState = undefined;
+      this.threadLost = true;
+      const m = this.current;
+      if (m.kind === "thread") this.current = { kind: "idle" };
+      else if (m.kind !== "idle") this.current = { ...m, returnTo: "idle" };
+      return;
+    }
+    this.threadState = { ...saved, cursor: { uri: survivor.uri, cid: survivor.cid } };
+    this.deps.print(`Couldn't find the post you were replying to; continuing from (${survivor.label})`, "dim");
+  }
+
+  private resumeMode(saved: SavedMode): ReplMode {
+    if (!("target" in saved)) return saved;
+    const entry = this.registry.byLabel(saved.target);
+    if (!entry) return { kind: saved.returnTo };
+    const target = { ref: { uri: entry.uri, cid: entry.cid }, root: entry.root, entry };
+    return { kind: saved.kind, target, label: entry.label, returnTo: saved.returnTo };
+  }
+
+  private async resumeItem(saved: Unsent): Promise<void> {
+    const threadPost = saved.intent.kind === "thread";
+    const orphan = threadPost && this.threadLost;
+    // A thread post goes after the cursor, whatever it was when saved.
+    const item = threadPost ? { ...saved, target: undefined } : saved;
+    const line = stripLabel(item.posts[0]).split("\n")[0];
+    const note = orphan ? " (its thread couldn't be found, so Send starts a new one)" : "";
+    // Edit first: a post in flight at a kill may already have gone.
+    const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"${note}`, ["Send", "Edit", "Discard"], 1);
+    if (answer === 0) {
+      const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item);
+      this.letters.set(sent.id, this.letterFor(item.intent));
+      if (threadPost && this.current.kind === "idle") this.current = { kind: "thread" };
+    } else if (answer !== 2 && (this.deps.composerBusy() || !this.fits(item.media ?? []))) {
+      await this.saveToDrafts([item], (id) => `Saved as draft ${id}`);
+    } else if (answer !== 2) {
+      this.restage(item.media);
+      this.deps.restore(this.asResend(item));
+    }
+    // Sending deletes it on success; otherwise it's dealt with now, and sync mustn't send it too.
+    if (answer !== 0 && item.draftId) {
+      await this.deps.deleteDraft(item.draftId).catch((err: unknown) => {
+        this.deps.print(`Couldn't delete draft ${item.draftId}, so it may send again on your next run: ${err instanceof Error ? err.message : String(err)}`, "error");
+      });
+    }
+    // Only now: until it's somewhere else, a kill must leave it to ask about again.
+    this.unanswered = this.unanswered.filter((i) => i !== saved);
+    this.deps.onChange();
+  }
+
+  /** The session as a file. Tokens aren't part of it: the profile's own session file has those. */
+  snapshot(
+    meta: Pick<ReplSessionFile, "id" | "createdAt" | "handle" | "did" | "profile">,
+    composer: ReplSessionFile["composer"],
+    history: string[],
+  ): ReplSessionFile {
+    const { posts, nextLabel, nextLetter } = this.registry.snapshot();
+    const m = this.current;
+    const mode: SavedMode = "target" in m ? { kind: m.kind, target: m.label, returnTo: m.returnTo } : m;
+    return {
+      version: 1,
+      ...meta,
+      updatedAt: new Date().toISOString() as IsoUtc,
+      settings: { ...this.s, markers: this.markers },
+      posts,
+      viewed: [],
+      thread: this.threadState,
+      lastThreadLetter: this.lastThreadLetter,
+      mode,
+      composer,
+      staged: this.media,
+      // Everything queued, a post in flight included: a kill leaves no telling if it went.
+      pending: [...this.pipeline.pending(), ...this.unanswered],
+      history,
+      counters: { nextLabel, nextViewed: 0, nextLetter },
+    };
+  }
+
   /** Media waiting for the next post. */
   staged(): readonly StagedMedia[] {
     return this.media;
@@ -295,7 +435,10 @@ export class Repl {
   /** A once mode ends when what was typed has gone somewhere. */
   private async once(mode: { returnTo: ReturnTo }, submitted: Promise<SubmitOutcome>): Promise<SubmitOutcome> {
     const out = await submitted;
-    if (out !== "keep") this.current = { kind: mode.returnTo };
+    if (out !== "keep") {
+      this.current = { kind: mode.returnTo };
+      this.deps.onChange();
+    }
     return out;
   }
 
@@ -634,11 +777,13 @@ export class Repl {
   setAutoThread(on = !this.s.autoThread): void {
     this.s.autoThread = on;
     this.deps.print(`Auto-thread ${on ? "on" : "off"}`, "dim");
+    this.deps.onChange();
   }
 
   setCooldown(kind: "undo" | "pace", value: Cooldown): void {
     this.s[kind] = value;
     this.cooldownsSettled ||= this.s.undo !== undefined && this.s.pace !== undefined;
+    this.deps.onChange();
   }
 
   /** `/settings` with no arguments: ask for each; dismissing keeps the current value. */
@@ -702,7 +847,7 @@ export class Repl {
   }
 
   wouldLose(composerText: string): boolean {
-    return composerText.trim() !== "" || this.media.length > 0 || this.pipeline.pending().length > 0;
+    return composerText.trim() !== "" || this.media.length > 0 || this.pipeline.pending().length > 0 || this.unanswered.length > 0;
   }
 
   private cancelPending(composerText: string): EscapeResult {

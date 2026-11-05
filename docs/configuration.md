@@ -185,6 +185,8 @@ Credentials and session tokens are stored separately from the config file, in th
 
 The session directory is created automatically on first `bsky login`.
 
+Saved [REPL](repl.md#resuming) sessions are in `repl/sessions/` in the same directory, with no tokens in them.
+
 ## Environment variables
 
 All configuration can be set via environment variables. This is useful for CI pipelines, scripts, and Docker containers.

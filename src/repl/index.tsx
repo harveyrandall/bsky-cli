@@ -1,13 +1,17 @@
 import { basename } from "node:path";
 import { render, renderToString } from "ink";
+import { LaunchList } from "@/repl/ui/LaunchList";
 import { deleteDraft, saveDraft } from "@/drafts";
 import { getSchedulerStatus } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
 import { setConfigValues } from "@/toml-config";
 import { App, LEFT, type AppProps } from "@/repl/ui/App";
 import { DEFAULT_MARKERS, type Markers } from "@/repl/core/markers";
+import type { ReplSessionFile, SessionListing, SessionStore } from "@/repl/core/persist";
+import { SessionKeeper } from "@/repl/core/session";
 import type { Repl, ReplAgent, ReplSettings } from "@/repl/core/repl";
 import { exitSummary } from "@/repl/core/summary";
+import type { Did, Handle, IsoUtc, SessionId } from "@/repl/core/types";
 import { detectKittyKeyboard } from "@/repl/ui/terminal";
 
 export interface ReplOptions {
@@ -18,6 +22,35 @@ export interface ReplOptions {
   /** The config file the save offer writes to. */
   configPath: string;
   profile?: string;
+  session?: {
+    store: Pick<SessionStore, "save" | "delete" | "lock" | "unlock" | "prune">;
+    id: SessionId;
+    createdAt: IsoUtc;
+    did: Did;
+    /** Sessions to keep when pruning. */
+    keep: number;
+    resume?: ReplSessionFile;
+  };
+}
+
+/** The launch list: an id to open, undefined for a new session, null to quit. */
+export async function pickSession(store: Pick<SessionStore, "delete">, listings: readonly SessionListing[]): Promise<SessionId | undefined | null> {
+  let picked: string | undefined | null;
+  const app = render(
+    <LaunchList
+      listings={listings}
+      onDelete={(id) => store.delete(id)}
+      onPick={(id) => {
+        picked = id;
+        app.unmount();
+      }}
+    />,
+    { exitOnCtrlC: false },
+  );
+  await app.waitUntilExit();
+  // Ink lets go of stdin, and a readline question after it (offline drafts) would otherwise end the process.
+  process.stdin.ref();
+  return picked as SessionId | undefined | null;
 }
 
 function schedulerRunning(): boolean {
@@ -33,8 +66,17 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // 200 ms and doesn't report the answer, which the hint needs. Ink enables the
   // protocol, and restores it on every exit path, when told it's supported.
   const kitty = await detectKittyKeyboard(process.stdin, process.stdout);
-  const startedAt = new Date();
+  const session = opts.session;
+  const startedAt = session?.resume ? new Date(session.createdAt) : new Date();
   let repl: Repl | undefined;
+  const keeper =
+    session &&
+    new SessionKeeper(
+      session.store,
+      { id: session.id, createdAt: session.createdAt, handle: opts.handle as Handle, did: session.did, profile: opts.profile },
+      session.keep,
+      session.resume,
+    );
   const app = render(
     <App
       markers={opts.markers}
@@ -45,6 +87,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
       saveScheduled={(p) => saveScheduledPost(p, opts.profile)}
       schedulerRunning={schedulerRunning}
+      keeper={keeper}
+      resume={session?.resume}
       configName={basename(opts.configPath)}
       onReady={(r) => (repl = r)}
     />,
@@ -61,19 +105,29 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   };
   process.on("uncaughtException", crash);
   process.on("unhandledRejection", crash);
+  let left = false;
+  let resumable = false;
   try {
     // Ink also stops by itself when stdin closes; say so rather than exit as if asked to.
     const result = await app.waitUntilExit();
+    left = result === LEFT;
     if (crashed) throw crashed;
-    if (result !== LEFT) {
+    if (!left) {
       process.stderr.write("bsky repl stopped because its input closed.\n");
       process.exitCode = 1;
     }
   } finally {
+    // However Ink stopped, nothing may be posted after the REPL has gone.
+    if (repl && keeper) {
+      const end = await keeper.end(repl, left);
+      resumable = end.resumable;
+      if (end.error) process.stderr.write(`Couldn't save this session (${end.error})\n`);
+    } else if (repl) {
+      repl.close();
+      if (left) await repl.settled();
+    }
     process.off("uncaughtException", crash);
     process.off("unhandledRejection", crash);
-    // However Ink stopped, nothing may be posted after the REPL has gone.
-    repl?.close();
   }
   if (repl) {
     const lines = exitSummary({
@@ -83,6 +137,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       startedAt,
       endedAt: new Date(),
       handle: opts.handle,
+      resumeId: resumable ? session?.id : undefined,
     });
     for (const line of lines) process.stdout.write(`${line}\n`);
   }

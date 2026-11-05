@@ -33,6 +33,10 @@ describe("exitSummary", () => {
     });
     expect(lines).toEqual(["3 posts in 1 thread, 1 standalone", "Failed: 2 posts saved as draft d1"]);
   });
+  it("says how to resume", () => {
+    const lines = exitSummary({ registry: sample(), failures: [], verbose: false, handle: "me.bsky.social", resumeId: "k3f7xq", ...times });
+    expect(lines).toEqual(["3 posts in 1 thread, 1 standalone · resume: bsky -r k3f7xq"]);
+  });
   it("says when nothing was posted", () => {
     expect(exitSummary({ registry: new Registry(false), failures: [], verbose: false, handle: "me.bsky.social", ...times })).toEqual([
       "No posts this session",

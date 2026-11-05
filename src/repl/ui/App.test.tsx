@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "ink-testing-library";
-import { App } from "./App";
+import { App, type AppProps } from "./App";
 import { offlineProps } from "@/repl";
 import { IDLE_HINT, type Repl, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
@@ -53,13 +53,13 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings> } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]> } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
     selfDid: "did:plc:me" as const,
     resolveHandle: vi.fn(),
-    getPosts: vi.fn(async () => []),
+    getPosts: vi.fn(o.hold ?? (async () => [])),
     post: vi.fn(async () => ref(++n)),
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
@@ -75,6 +75,8 @@ function setup(o: { settings?: Partial<ReplSettings> } = {}) {
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
+      keeper={o.keeper}
+      resume={o.resume}
       configName="config.toml"
       onReady={(r) => (session = r)}
     />,
@@ -384,12 +386,12 @@ describe("App threads", () => {
       const s = setup();
       const post = await inFlight(s);
       await s.type("\x04", "s", `/attach ${image}`, "\r");
-      await tick();
+      await s.shows("Alt text for chart.png");
       post.finish(ref(1));
       await tick();
       await tick();
       expect(exit).not.toHaveBeenCalled();
-      expect(s.lastFrame()).toContain("Alt text for chart.png");
+      await s.shows("Alt text for chart.png");
     });
     it("moves staged media into the draft on send now, so it isn't in both places", async () => {
       const s = setup();
@@ -519,12 +521,11 @@ describe("App media", () => {
     expect(lastFrame()).toContain("Attach chart.png and 1 more? [Y/n]");
   });
   it("pastes the path as text if you say no", async () => {
-    const { type, lastFrame, repl } = setup();
+    const { type, shows, repl } = setup();
     await type(paste(image));
-    await tick();
+    await shows("Attach chart.png? [Y/n]");
     await type("n");
-    await tick();
-    expect(lastFrame()).toContain(`bsky › ${image}`.slice(0, 40));
+    await shows(`bsky › ${image}`.slice(0, 40));
     expect(repl().staged()).toEqual([]);
   });
   it("says why a dropped file is too big, rather than pasting its path", async () => {
@@ -700,5 +701,126 @@ describe("App media", () => {
     await type("3:30", "\r");
     await tick();
     expect(lastFrame()).toContain("› AM");
+  });
+});
+
+describe("App session saving", () => {
+  const keeper = () => ({ track: vi.fn(), save: vi.fn(async () => {}) });
+  it("saves whenever the session changes", async () => {
+    const k = keeper();
+    const { type } = setup({ keeper: k });
+    await type("/post hello", "\r");
+    await tick();
+    expect(k.save).toHaveBeenCalled();
+    k.save.mockClear();
+    await type("/thread", "\r");
+    await tick();
+    expect(k.save).toHaveBeenCalled();
+    await type(`/attach ${image}`, "\r");
+    await tick();
+    k.save.mockClear();
+    await type("\r");
+    await tick();
+    expect(k.save).toHaveBeenCalled();
+  });
+  it("tracks the composer at once, but saves typing only when it pauses", async () => {
+    const k = keeper();
+    const { type, repl } = setup({ keeper: k });
+    await type("/thread", "\r");
+    await tick();
+    k.save.mockClear();
+    await type("h", "i");
+    expect(k.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "hi", cursor: 2, history: ["/thread"] }));
+    expect(k.save).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(k.save).toHaveBeenCalledOnce(), { timeout: 2000 });
+    expect(k.save).toHaveBeenCalledWith(repl());
+  });
+  it("saves at once when a submit clears the composer, so a post is never long in the file twice", async () => {
+    const k = keeper();
+    const { type } = setup({ keeper: k });
+    await type("/post hello");
+    k.save.mockClear();
+    await type("\r");
+    await tick();
+    expect(k.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "" }));
+    expect(k.save).toHaveBeenCalled();
+  });
+  it("saves at once on a paste", async () => {
+    const k = keeper();
+    const { type } = setup({ keeper: k });
+    await type("x", paste("a longer paste"));
+    expect(k.save).toHaveBeenCalled();
+  });
+  it("says if saving fails, once, and says when it's back", async () => {
+    const k = keeper();
+    k.save.mockRejectedValueOnce(new Error("ENOSPC")).mockRejectedValueOnce(new Error("ENOSPC"));
+    const { type, lastFrame } = setup({ keeper: k });
+    await type("/post one", "\r");
+    await tick();
+    await type("/post two", "\r");
+    await tick();
+    expect(lastFrame().split("Couldn't save this session (ENOSPC)")).toHaveLength(2);
+    expect(lastFrame()).toContain("Saving this session again");
+  });
+});
+
+describe("App resuming", () => {
+  const file = (o: object = {}) =>
+    ({ id: "k3f7xq", posts: [], staged: [], pending: [], mode: { kind: "idle" }, composer: { text: "half a thought", cursor: 4 }, history: ["/thread"], counters: { nextLabel: 1, nextViewed: 0, nextLetter: 0 }, ...o }) as never;
+  it("puts the composer back as it was, cursor and history included", async () => {
+    const { lastFrame, type, shows } = setup({ resume: file() });
+    await shows("── resumed k3f7xq ──");
+    await tick();
+    expect(lastFrame()).toContain("bsky › half a thought");
+    await type("X");
+    expect(lastFrame()).toContain("bsky › halfX a thought");
+    await type("\x15\x0b");
+  });
+  it("doesn't trust a saved cursor: one past the end or inside a character is moved", async () => {
+    const past = setup({ resume: file({ composer: { text: "hi", cursor: 99 } }) });
+    await past.shows("── resumed k3f7xq ──");
+    await tick();
+    await past.type("!");
+    expect(past.lastFrame()).toContain("bsky › hi!");
+    const inside = setup({ resume: file({ composer: { text: "a👍b", cursor: 2 } }) });
+    await inside.shows("── resumed k3f7xq ──");
+    await tick();
+    await inside.type("!");
+    expect(inside.lastFrame()).toContain("bsky › a👍!b");
+  });
+  it("takes only the text and cursor from a saved composer", async () => {
+    const { shows, type, lastFrame } = setup({ resume: file({ composer: { text: "hi", cursor: 2, history: 5 } }) });
+    await shows("── resumed k3f7xq ──");
+    await tick();
+    await type("\x1b[A");
+    expect(lastFrame()).toContain("bsky › /thread");
+  });
+  it("brings back what you'd submitted for ↑", async () => {
+    const { type, lastFrame, shows } = setup({ resume: file({ composer: { text: "", cursor: 0 } }) });
+    await shows("── resumed k3f7xq ──");
+    await tick();
+    await type("\x1b[A");
+    expect(lastFrame()).toContain("bsky › /thread");
+  });
+  it("holds the keyboard until the session is back", async () => {
+    let finish = (_: never[]) => {};
+    const thread = { root: ref(1), cursor: ref(1), count: 1 };
+    const posts = [{ label: "1", ...ref(1), rkey: "3lbx7kt5defba", authorDid: "did:plc:me", root: ref(1), excerpt: "one" }];
+    const app = setup({ resume: file({ thread, posts, mode: { kind: "thread" }, composer: { text: "", cursor: 0 } }), hold: () => new Promise((resolve) => (finish = resolve)) });
+    await app.shows("── resumed k3f7xq ──");
+    await app.type("typed too soon");
+    expect(app.lastFrame()).not.toContain("typed too soon");
+    finish([]);
+    await tick();
+    await app.type("later");
+    await app.shows("later");
+  });
+  it("asks about unsent posts through the keyboard", async () => {
+    const pending = [{ id: 1, intent: { kind: "standalone" }, posts: ["left over"], createdAt: 0 }];
+    const { type, shows, agent } = setup({ resume: file({ composer: { text: "", cursor: 0 }, pending }) });
+    await shows('Unsent from last time: "left over"');
+    await shows("› Edit");
+    await type("\x1b[D", "\r");
+    await vi.waitFor(() => expect(agent.post).toHaveBeenCalledWith("left over", undefined, undefined, undefined));
   });
 });

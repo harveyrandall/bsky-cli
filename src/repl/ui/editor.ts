@@ -85,7 +85,7 @@ function wordRight(text: string, i: number): number {
 }
 
 /** `i`, or the end of the grapheme it falls inside (an insert can merge with what follows). */
-function snap(text: string, i: number): number {
+export function snap(text: string, i: number): number {
   const g = segmenter.segment(text).containing(i);
   return !g || g.index === i ? i : g.index + g.segment.length;
 }

@@ -21,7 +21,7 @@ function setup(overrides: Partial<ComposerProps> = {}) {
     onEdit: vi.fn(async (text: string) => text),
     onPaste: vi.fn(() => false),
     onSendNow: vi.fn(),
-    onText: vi.fn(),
+    onEditor: vi.fn(),
     onHint: vi.fn(),
     onError: vi.fn(),
     ...overrides,
@@ -116,7 +116,7 @@ describe("Composer", () => {
   it("reports its text as it changes", async () => {
     const { type, props } = setup();
     await type("hi");
-    expect(props.onText).toHaveBeenLastCalledWith("hi");
+    expect(props.onEditor).toHaveBeenLastCalledWith(expect.objectContaining({ text: "hi", cursor: 2 }));
   });
   it("puts back what Esc returns", async () => {
     const { type, lastFrame } = setup({ onEscape: () => ({ restore: "cancelled post" }) });
