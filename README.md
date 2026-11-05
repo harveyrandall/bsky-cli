@@ -173,7 +173,7 @@ bsky repl [-t | --no-auto-thread] [-l] [--undo <seconds>] [--pace <seconds>] [-f
           [--thread-label] [--prepend-thread-label] [-r [id]] [--resumable | -R]
 ```
 
-An interactive composer for writing threads: start one with `/thread`, branch with `/reply` and `/reply-from`, split with `///`, attach images and video, and take back a post during its undo window. `/new` also writes quotes, scheduled posts and drafts, and `bsky -r last` picks up where you left off. In a terminal, plain `bsky` opens it too. See [REPL](https://harveyrandall.github.io/bsky-cli/repl/).
+An interactive composer for writing threads: start one with `/thread`, branch with `/reply` and `/reply-from`, split with `///`, attach images and video, and take back a post during its undo window. `/new` also writes quotes, scheduled posts and drafts, and `bsky -r last` picks up where you left off. Run any CLI command from the prompt, then `/like #2` or `/reply #2 …` on what it printed. In a terminal, plain `bsky` opens it too. See [REPL](https://harveyrandall.github.io/bsky-cli/repl/).
 
 ### Drafts
 

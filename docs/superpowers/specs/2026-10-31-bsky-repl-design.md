@@ -1,6 +1,6 @@
 # Design: `bsky repl` — interactive REPL with slash commands
 
-- **Status:** Approved design, awaiting implementation plan
+- **Status:** Implemented (PRs 1 to 5; see the plans in `docs/superpowers/plans/`)
 - **Date:** 2026-10-31
 - **Branch:** `bsky-repl-slash-commands-8aa192`
 - **Related:** `docs/plans/2026-03-09-create-thread-design.md` (thread splitting, drafts), deferred "remove Bun" spec (see Future work), update-checker spec (separate, next)
