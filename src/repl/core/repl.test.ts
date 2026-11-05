@@ -1443,6 +1443,43 @@ describe("changes that aren't posts", () => {
   });
 });
 
+describe("text that looks like a command", () => {
+  const resent = async (...posts: string[]) => {
+    const s = setup({ undo: 5, pace: 0 });
+    await s.repl.startThread();
+    for (const text of posts) await s.repl.submitText(text);
+    return { ...s, back: s.repl.escape("") };
+  };
+  it("comes back from Esc still escaped, so Enter sends it", async () => {
+    const { back } = await resent("/Users/me is my home");
+    expect(back).toEqual({ restore: "\\/Users/me is my home" });
+  });
+  it("comes back the same way when several go together", async () => {
+    const { back } = await resent("/Users/me", "second");
+    expect(back).toEqual({ restore: "\\/Users/me /// second" });
+  });
+  it("comes back escaped from a rejection", async () => {
+    const s = setup({ undo: 0, pace: 0 });
+    await s.repl.startThread();
+    s.agent.post.mockRejectedValueOnce(rejected());
+    await s.repl.submitText("/delete 1 is a good command");
+    await s.flush();
+    expect(s.deps.restore).toHaveBeenCalledWith("\\/delete 1 is a good command");
+  });
+  it("leaves ordinary text alone", async () => {
+    const { back } = await resent("hello");
+    expect(back).toEqual({ restore: "hello" });
+  });
+  it("isn't saved as a draft with its backslash", () => {
+    const { repl } = setup();
+    expect(repl.composerDrafts("\\/Users/me hello")).toMatchObject([{ text: "/Users/me hello" }]);
+  });
+  it("isn't taken for a command that looks like one, once escaped", () => {
+    const { repl } = setup();
+    expect(repl.composerDrafts("\\/reply 3 hello")).toMatchObject([{ text: "/reply 3 hello", type: "post" }]);
+  });
+});
+
 describe("settings that a session can change", () => {
   it("are all shown", () => {
     const { repl } = setup({ undo: 5, pace: 0 });

@@ -113,6 +113,8 @@ export interface ThreadState {
 type WriteKind = Intent["kind"];
 
 const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
+/** Text as the composer must hold it for Enter to send it, rather than read it as a command. */
+const typed = (text: string) => text.replace(/^(\s*)\/(?=[a-zA-Z])/, "$1\\/");
 /** Whether a draft still holds exactly these posts, so they needn't be saved again. */
 const held = (item: Unsent) => item.draftId !== undefined && !item.stale;
 const manualDraft = (item: Unsent) =>
@@ -226,7 +228,9 @@ export class Repl {
 
   /** Where composer text would go: a command that came back says, or else the mode does. */
   private destination(text: string): { words: string; target?: { parent: { uri: string } }; quote?: { uri: string } } {
-    const command = /^\/(post|thread|reply|quote)\s+([\s\S]*)$/.exec(text.trim());
+    const escaped = text.trimStart().startsWith("\\/");
+    const plain = escaped ? text.replace("\\/", "/") : text;
+    const command = escaped ? null : /^\/(post|thread|reply|quote)\s+([\s\S]*)$/.exec(text.trim());
     if (command?.[1] === "post" || command?.[1] === "thread") return { words: command[2] };
     if (command) {
       const [, label = "", words = ""] = /^(\S+)\s*([\s\S]*)$/.exec(command[2]) ?? [];
@@ -234,10 +238,10 @@ export class Repl {
       if (uri) return command[1] === "quote" ? { words, quote: { uri } } : { words, target: { parent: { uri } } };
     }
     const m = this.current;
-    if (m.kind === "reply-once") return { words: text, target: { parent: m.target.ref } };
-    if (m.kind === "quote-once") return { words: text, quote: m.target.ref };
+    if (m.kind === "reply-once") return { words: plain, target: { parent: m.target.ref } };
+    if (m.kind === "quote-once") return { words: plain, quote: m.target.ref };
     const t = this.threadState;
-    return { words: text, ...(m.kind === "thread" && t && { target: { parent: t.cursor } }) };
+    return { words: plain, ...(m.kind === "thread" && t && { target: { parent: t.cursor } }) };
   }
 
   private isLoaded(text: string): boolean {
@@ -1143,7 +1147,7 @@ export class Repl {
       return "handled";
     }
     this.restage(media);
-    return { restore: items.length === 1 ? this.asResend(items[0]) : this.join(items.flatMap((i) => i.posts)) };
+    return { restore: items.length === 1 ? this.asResend(items[0]) : typed(this.join(items.flatMap((i) => i.posts))) };
   }
 
   private async saveToDrafts(items: readonly Unsent[], saved: (id: string) => string): Promise<void> {
@@ -1277,7 +1281,7 @@ export class Repl {
     const text = this.join(item.posts);
     if (held(item)) this.loaded = { id: item.draftId!, text, media: (item.media ?? []).map((m) => m.path) };
     const { kind } = item.intent;
-    if (kind === "thread" && this.current.kind === "thread") return text;
+    if (kind === "thread" && this.current.kind === "thread") return typed(text);
     if (kind === "quote") return `/quote ${this.registry.byUri(item.intent.target.uri)?.label ?? item.intent.target.uri} ${text}`;
     const parent = item.target && this.registry.byUri(item.target.parent.uri);
     if (parent) return `/reply ${parent.label} ${text}`;
