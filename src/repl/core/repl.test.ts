@@ -1098,8 +1098,8 @@ describe("resume", () => {
         const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5defbb";
         const link = "https://bsky.app/profile/did:plc:alice/post/3lbx7kt5defbb";
         const post = { uri, cid: "bafyb", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "still here" };
-        const sending = (where: number | undefined, text: ReplAsk["text"] = vi.fn(async () => link)) => {
-          const s = setup({ undo: 0 }, { choose: vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(where), text });
+        const sending = (where: number | undefined, text: ReplAsk["text"] = vi.fn(async () => link), settings: Partial<ReplSettings> = {}) => {
+          const s = setup({ undo: 0, ...settings }, { choose: vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(where), text });
           s.agent.getPosts.mockResolvedValueOnce([]);
           s.agent.getPosts.mockResolvedValue([post] as never);
           return s;
@@ -1174,6 +1174,81 @@ describe("resume", () => {
           await flush();
           expect(posted).toEqual([]);
           expect(deps.restore).toHaveBeenCalledWith("/thread waiting");
+        });
+        describe.each([["a new thread", 0], ["a link", 1]])("for %s", (_, where) => {
+          it("goes back to the thread after a once mode", async () => {
+            const file = { ...(await queued()), mode: { kind: "post-once", returnTo: "thread" } } as ReplSessionFile;
+            const { repl, flush } = sending(where);
+            await repl.resume(file);
+            await flush();
+            expect(repl.mode()).toEqual({ kind: "post-once", returnTo: "thread" });
+          });
+          it("asks once for what's left of the thread", async () => {
+            const file = await saved({
+              settings: { undo: 0 },
+              then: async (s) => {
+                s.repl.setCooldown("undo", 5);
+                await s.repl.submitText("first");
+                await s.repl.submitText("second");
+              },
+            });
+            const s = sending(where);
+            vi.mocked(s.ask.choose).mockReset().mockResolvedValueOnce(0).mockResolvedValueOnce(where).mockResolvedValueOnce(0);
+            await s.repl.resume(file);
+            await s.flush();
+            expect(s.ask.choose).toHaveBeenCalledTimes(3);
+            expect(s.posted.map((p) => p.text)).toEqual(["first", "second"]);
+            expect(s.posted[1].reply?.parent).toEqual(ref(1));
+          });
+        });
+        it("gives a labelled session's new thread one letter", async () => {
+          const file = await saved({
+            settings: { undo: 0, prefixThread: true },
+            then: async (s) => {
+              s.repl.setCooldown("undo", 5);
+              await s.repl.submitText("first /// second");
+            },
+          });
+          const s = sending(0, undefined, { prefixThread: true });
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.repl.registry.entries().slice(-2).map((e) => e.label)).toEqual(["B1", "B2"]);
+        });
+        it("gives a linked post a letter in a labelled session, and none otherwise", async () => {
+          const file = await saved({
+            settings: { undo: 0, prefixThread: true },
+            then: async (s) => {
+              s.repl.setCooldown("undo", 5);
+              await s.repl.submitText("first");
+            },
+          });
+          const labelled = sending(1, undefined, { prefixThread: true });
+          await labelled.repl.resume(file);
+          await labelled.flush();
+          expect(labelled.printed()).toContain("Continuing the thread from (B0)");
+          expect(labelled.repl.thread()?.letter).toBe("B");
+          const plain = sending(1);
+          await plain.repl.resume(await queued());
+          await plain.flush();
+          expect(plain.repl.thread()?.letter).toBeUndefined();
+        });
+        it("takes a blank link as backing out", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("   ").mockResolvedValueOnce(undefined);
+          const { repl, deps, printed } = sending(1, text);
+          await repl.resume(file);
+          expect(text).toHaveBeenCalledOnce();
+          expect(printed()).not.toContain("Can't resolve");
+          expect(deps.restore).toHaveBeenCalledWith("/thread waiting");
+        });
+        it("still deals with a stale draft when you back out, or its posts could go twice", async () => {
+          const file = await queued();
+          const stale = { ...file, pending: file.pending.map((p) => ({ ...p, stale: true, draftId: "d9" })) };
+          const { repl, deps, flush } = sending(undefined);
+          await repl.resume(stale);
+          await flush();
+          expect(deps.saveDraft).toHaveBeenCalled();
+          expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
         });
         it("asks once for everything left of that thread", async () => {
           const file = await saved({
@@ -1469,6 +1544,22 @@ describe("/delete and /undo", () => {
     const { repl, printed } = await written({}, ["one", "two", "three"]);
     await repl.deletePost("1");
     expect(printed()).toContain("To carry on from its last post: /thread 3");
+  });
+  it("offers where the thread had got to, not a side reply", async () => {
+    const { repl, flush, printed } = await written({}, ["one", "two", "three"]);
+    await repl.reply("2", "side reply");
+    await flush();
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 3");
+  });
+  it("offers one of your own if the thread had no further to go", async () => {
+    const { repl, flush, printed } = await written({}, ["one"]);
+    await repl.reply("1", "a reply");
+    await flush();
+    await repl.post("not in the thread");
+    await flush();
+    await repl.deletePost("1");
+    expect(printed()).toContain("To carry on from its last post: /thread 2");
   });
   it("offers nothing to carry on from if nothing's left", async () => {
     const { repl, printed } = await written({}, ["one"]);

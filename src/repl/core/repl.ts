@@ -373,17 +373,15 @@ export class Repl {
   private async findThread(): Promise<boolean> {
     const where = await this.deps.ask.choose("Its thread couldn't be found", ["Start a new thread", "Paste a link to a post"], 0);
     if (where === undefined) return false;
-    while (where === 1) {
+    let resolved: ResolvedRef | undefined;
+    while (where === 1 && !resolved) {
       const link = await this.deps.ask.text("Link to the post to continue from:");
       if (!link?.trim()) return false;
-      const resolved = await this.lookUp(link);
-      if (!resolved) continue;
-      const mode = this.current;
-      this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
-      this.continueThread(resolved);
-      this.current = "returnTo" in mode ? { ...mode, returnTo: "thread" } : { kind: "thread" };
-      break;
+      resolved = await this.lookUp(link);
     }
+    this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
+    if (resolved) this.continueThread(resolved);
+    if ("returnTo" in this.current) this.current = { ...this.current, returnTo: "thread" };
     // Whatever's left of it follows this one.
     this.threadLost = false;
     return true;
@@ -800,8 +798,9 @@ export class Repl {
     const mode = this.current;
     if ("target" in mode && mode.target.ref.uri === ref.uri) this.current = { kind: mode.returnTo };
     if (stops) {
+      const cursor = this.registry.byUri(this.threadState!.cursor.uri);
       this.stopThread();
-      const last = this.registry.entries().filter((e) => e.root.uri === ref.uri && !e.deleted).at(-1);
+      const last = cursor && !cursor.deleted ? cursor : this.registry.entries().filter((e) => e.root.uri === ref.uri && !e.deleted && !e.external).at(-1);
       if (last) this.deps.print(`To carry on from its last post: /thread ${last.label}`, "dim");
     } else {
       this.stepBackFrom(ref.uri);
