@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { printPost, printActor, formatTime, outputJson } from "./format";
+import { printPost, printActor, formatTime, outputJson, setPostLabeler } from "./format";
 
 describe("outputJson", () => {
   it("outputs JSON string to console", () => {
@@ -58,5 +58,37 @@ describe("printActor", () => {
     expect(allOutput).toContain("did:plc:test");
     writeSpy.mockRestore();
     logSpy.mockRestore();
+  });
+});
+
+describe("setPostLabeler", () => {
+  const post = {
+    uri: "at://did:plc:a/app.bsky.feed.post/3lbx7kt5def2a",
+    cid: "bafya",
+    author: { handle: "alice.bsky.social", displayName: "Alice" },
+    record: { text: "hello", createdAt: "2026-10-31T09:12:44.000Z" },
+  } as never;
+  const printed = () => {
+    const out: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation((text) => {
+      out.push(String(text));
+      return true;
+    });
+    const log = vi.spyOn(console, "log").mockImplementation((...args) => void out.push(args.join(" ")));
+    printPost(post);
+    write.mockRestore();
+    log.mockRestore();
+    return out;
+  };
+  afterEach(() => setPostLabeler(undefined));
+  it("puts a label before the author", () => {
+    setPostLabeler(() => "#1");
+    expect(printed()[0]).toBe("#1 ");
+  });
+  it("leaves the output exactly as it was with no labeller, or no label", () => {
+    const plain = printed();
+    setPostLabeler(() => undefined);
+    expect(printed()).toEqual(plain);
+    expect(plain[0]).not.toContain("#");
   });
 });

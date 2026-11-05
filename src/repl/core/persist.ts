@@ -5,7 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { canStage, type StagedMedia } from "./media";
 import { brokenRule, type Markers } from "./markers";
 import type { Unsent } from "./pipeline";
-import type { RegistryEntry } from "./refs";
+import type { RegistryEntry, ViewedEntry } from "./refs";
 import type { ReplSettings, ReturnTo, ThreadState } from "./repl";
 import {
   isAtUri,
@@ -18,6 +18,7 @@ import {
   isRkey,
   isSessionId,
   isThreadLetter,
+  isViewedLabel,
   type Did,
   type Handle,
   type IsoUtc,
@@ -43,8 +44,7 @@ export interface ReplSessionFile {
   profile?: string;
   settings: ReplSettings & { markers: Markers };
   posts: RegistryEntry[];
-  /** `#n` labels, which arrive with viewing posts. */
-  viewed: never[];
+  viewed: ViewedEntry[];
   thread?: ThreadState;
   /** What a bare number means once the thread has stopped. */
   lastThreadLetter?: ThreadLetter;
@@ -164,6 +164,12 @@ function checkTogether(f: ReplSessionFile): void {
     entries.set(e.uri, e);
   });
   need(f.counters.nextLabel > 0, "counters.nextLabel");
+  const viewed = new Set<string>();
+  f.viewed.forEach((v, i) => {
+    need(!viewed.has(v.label), `viewed[${i}].label`);
+    need(Number(v.label.slice(1)) < f.counters.nextViewed, "counters.nextViewed");
+    viewed.add(v.label);
+  });
   const cursor = f.thread && entries.get(f.thread.cursor.uri);
   if (cursor) need(cursor.cid === f.thread!.cursor.cid && cursor.root.uri === f.thread!.root.uri, "thread.cursor");
 }
@@ -181,7 +187,13 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   checkSettings(raw.settings);
   need(Array.isArray(raw.posts), "posts");
   raw.posts.forEach((e, i) => checkEntry(e, `posts[${i}]`));
-  need(Array.isArray(raw.viewed) && raw.viewed.length === 0, "viewed");
+  need(Array.isArray(raw.viewed), "viewed");
+  raw.viewed.forEach((v: unknown, i) => {
+    need(isObject(v), `viewed[${i}]`);
+    need(isViewedLabel(v.label), `viewed[${i}].label`);
+    need(isAtUri(v.uri), `viewed[${i}].uri`);
+    need(isCid(v.cid), `viewed[${i}].cid`);
+  });
   if (raw.thread !== undefined) {
     const t = raw.thread;
     need(isObject(t), "thread");

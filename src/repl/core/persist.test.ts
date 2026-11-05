@@ -42,7 +42,7 @@ const good = () =>
       { label: "A1", ...ref(a), rkey: a, authorDid: did, root: ref(a), excerpt: "Launch day", letter: "A", notes: "📷 1" },
       { label: "A2", ...ref(b), rkey: b, authorDid: did, root: ref(a), parent: uri(a), excerpt: "second", letter: "A" },
     ],
-    viewed: [],
+    viewed: [{ label: "#1", uri: uri(a), cid: `bafy${a}` }],
     thread: { root: ref(a), cursor: ref(b), letter: "A", count: 2 },
     mode: { kind: "reply-once", target: "A1", returnTo: "thread" },
     composer: { text: "half a thought", cursor: 6 },
@@ -53,7 +53,7 @@ const good = () =>
       { id: 5, intent: { kind: "reply", target: ref(a), root: ref(a) }, posts: ["hi"], createdAt: 1002, media: [{ path: "/x/b.png", kind: "image" }] },
     ],
     history: ["/thread", "first"],
-    counters: { nextLabel: 3, nextViewed: 0, nextLetter: 1 },
+    counters: { nextLabel: 3, nextViewed: 2, nextLetter: 1 },
   }) as unknown as ReplSessionFile;
 
 type Mutable = Record<string, any>;
@@ -106,7 +106,10 @@ const breaks: [string, (f: Mutable) => void][] = [
   ["pending[0].draftId", (f) => (f.pending[0].draftId = 7)],
   ["lastThreadLetter", (f) => (f.lastThreadLetter = "a")],
   ["pending[2].intent", (f) => delete f.pending[2].intent.root],
-  ["viewed", (f) => (f.viewed = [{ anything: 1 }])],
+  ["viewed", (f) => (f.viewed = "none")],
+  ["viewed[0].label", (f) => (f.viewed[0].label = "1")],
+  ["viewed[0].uri", (f) => (f.viewed[0].uri = "x")],
+  ["viewed[0].cid", (f) => (f.viewed[0].cid = "Qm1")],
 ];
 
 /** Fields that are each fine alone, wrong together. */
@@ -129,6 +132,8 @@ const clashes: [string, string, (f: Mutable) => void][] = [
   ["a cursor with the wrong cid", "thread.cursor", (f) => (f.thread.cursor = { ...f.thread.cursor, cid: "bafywrong" })],
   ["two markers the same", "settings.markers.send", (f) => (f.settings.markers.send = "///")],
   ["a marker that starts a command", "settings.markers.split", (f) => (f.settings.markers.split = "/x")],
+  ["a viewed label used twice", "viewed[1].label", (f) => f.viewed.push({ ...f.viewed[0], uri: uri(b) })],
+  ["a viewed count behind the labels", "counters.nextViewed", (f) => (f.counters.nextViewed = 1)],
   ["a queued quote that's also a reply", "pending[1]", (f) => (f.pending[1].target = { parent: ref(a), root: ref(a) })],
   ["a queued reply to another thread", "pending[2].target", (f) => (f.pending[2].target = { parent: ref(b), root: ref(b) })],
 ];

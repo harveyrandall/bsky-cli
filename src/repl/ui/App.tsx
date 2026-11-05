@@ -349,7 +349,7 @@ export function App(props: AppProps) {
   })();
 
   const cli = props.passthrough;
-  const passthrough = cli && { names: () => cli.names(), run: (argv: string[]) => cli.run(argv, print) };
+  const passthrough = cli && { names: () => cli.names(), run: (argv: string[]) => cli.run(repl.expandLabels(argv), print) };
   const countdown = repl.countdown();
   const failure = repl.pausedBy();
 

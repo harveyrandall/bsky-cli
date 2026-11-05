@@ -1153,7 +1153,7 @@ describe("snapshot", () => {
       composer,
       staged: [{ path: "/x/b.png", kind: "image" }],
       history: ["/thread"],
-      counters: { nextLabel: 2, nextLetter: 0 },
+      counters: { nextLabel: 2, nextViewed: 1, nextLetter: 0 },
     });
     expect(file.posts.map((p) => p.label)).toEqual(["1"]);
     expect(file.pending).toMatchObject([{ posts: ["waiting"], intent: { kind: "standalone" }, media: [{ path: "/x/a.png" }] }]);
@@ -1190,6 +1190,59 @@ describe("changes that aren't posts", () => {
     await flush();
     expect(repl.mode().kind).toBe("idle");
     expect(deps.onChange).toHaveBeenCalled();
+  });
+});
+
+describe("posts you read", () => {
+  const seen = (n: number) => ({ uri: `at://did:plc:alice/app.bsky.feed.post/3lbx7kt5def${letter(n)}b`, cid: `bafy${letter(n)}` });
+  it("get #n, and keep it", () => {
+    const { repl } = setup();
+    expect(repl.labelPost(seen(1))).toBe("#1");
+    expect(repl.labelPost(seen(2))).toBe("#2");
+    expect(repl.labelPost(seen(1))).toBe("#1");
+  });
+  it("show their own label if you wrote them", async () => {
+    const { repl, flush } = setup();
+    await repl.post("mine");
+    await flush();
+    expect(repl.labelPost({ uri: ref(1).uri, cid: ref(1).cid })).toBe("(1)");
+  });
+  it("go without a label if the API sends something odd", () => {
+    const { repl } = setup();
+    expect(repl.labelPost({ uri: "nonsense", cid: "x" })).toBeUndefined();
+  });
+  it("are saved as they're labelled", () => {
+    const { repl, deps } = setup();
+    deps.onChange.mockClear();
+    repl.labelPost(seen(1));
+    repl.labelPost(seen(1));
+    expect(deps.onChange).toHaveBeenCalledOnce();
+  });
+  it("can be replied to", async () => {
+    const { repl, agent, posted, flush } = setup();
+    const post = { ...seen(1), cid: "bafyabc", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "hi" };
+    repl.labelPost(post);
+    agent.getPosts.mockResolvedValueOnce([post] as never);
+    await repl.reply("#1", "hello");
+    await flush();
+    expect(posted[0].reply?.parent.uri).toBe(post.uri);
+  });
+  it("expand in CLI arguments, but only as a whole argument", () => {
+    const { repl } = setup();
+    repl.labelPost(seen(1));
+    expect(repl.expandLabels(["thread", "#1", "-n", "5", "#12", "see #1"])).toEqual(["thread", seen(1).uri, "-n", "5", "#12", "see #1"]);
+  });
+  it("keep #n across a resume, and new ones carry on", async () => {
+    const first = setup();
+    first.repl.labelPost(seen(1));
+    await first.repl.post("mine");
+    await first.flush();
+    const file = parseSessionFile(JSON.parse(JSON.stringify(first.repl.snapshot({ id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: me } as never, { text: "", cursor: 0 }, []))));
+    expect(file.viewed).toHaveLength(1);
+    const { repl } = setup();
+    await repl.resume(file);
+    expect(repl.labelPost(seen(1))).toBe("#1");
+    expect(repl.labelPost(seen(2))).toBe("#2");
   });
 });
 

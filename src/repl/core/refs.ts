@@ -13,6 +13,7 @@ import {
   type Rkey,
   type StrongRef,
   type ThreadLetter,
+  type ViewedLabel,
 } from "./types";
 
 /** A post you made, or an external post you targeted, in this session. */
@@ -30,6 +31,11 @@ export interface RegistryEntry {
   /** The author's handle, for a post not made in this session: someone else's, or an older one of yours. */
   external?: Handle;
   letter?: ThreadLetter;
+}
+
+/** A post you read: printed with a `#n`, so that you can act on it. */
+export interface ViewedEntry extends StrongRef {
+  label: ViewedLabel;
 }
 
 /** What the REPL needs to know about a post fetched from the network. */
@@ -78,6 +84,8 @@ function letterOf(n: number): ThreadLetter {
  */
 export class Registry {
   private readonly list: RegistryEntry[] = [];
+  private readonly seen: ViewedEntry[] = [];
+  private nextViewed = 1;
   private count = 0;
   private letters = 0;
   private readonly perLetter = new Map<ThreadLetter, number>();
@@ -143,14 +151,29 @@ export class Registry {
     });
   }
 
-  snapshot(): { posts: RegistryEntry[]; nextLabel: number; nextLetter: number } {
-    return { posts: [...this.list], nextLabel: this.count + 1, nextLetter: this.letters };
+  /** The post's `#n`, a new one if it hasn't had one. */
+  addViewed(ref: StrongRef): ViewedEntry {
+    const known = this.seen.find((v) => v.uri === ref.uri);
+    if (known) return known;
+    const entry: ViewedEntry = { label: `#${this.nextViewed++}`, ...ref };
+    this.seen.push(entry);
+    return entry;
+  }
+
+  viewed(label: string): ViewedEntry | undefined {
+    return this.seen.find((v) => v.label === label);
+  }
+
+  snapshot(): { posts: RegistryEntry[]; viewed: ViewedEntry[]; nextLabel: number; nextViewed: number; nextLetter: number } {
+    return { posts: [...this.list], viewed: [...this.seen], nextLabel: this.count + 1, nextViewed: this.nextViewed, nextLetter: this.letters };
   }
 
   /** Picks up where a saved session stopped; labels are never reused. */
-  restore(posts: readonly RegistryEntry[], counters: { nextLabel: number; nextLetter: number }): void {
+  restore(posts: readonly RegistryEntry[], counters: { nextLabel: number; nextViewed: number; nextLetter: number }, viewed: readonly ViewedEntry[] = []): void {
     this.list.push(...posts);
+    this.seen.push(...viewed);
     this.count = counters.nextLabel - 1;
+    this.nextViewed = counters.nextViewed;
     this.letters = counters.nextLetter;
     for (const e of posts) {
       if (!e.letter) continue;
@@ -227,12 +250,16 @@ export async function resolveRef(
     if (!entry) throw new Error(`No post (${s.toUpperCase()}) in this session`);
     return fromEntry(entry);
   }
-  if (/^#\d+$/.test(s)) throw new Error("#n labels are for viewed posts, which aren't available yet");
-
   let uri: string | undefined;
+  if (/^#\d+$/.test(s)) {
+    uri = r.registry.viewed(s)?.uri;
+    if (!uri) throw new Error(`No post ${s} in this session`);
+  }
   const atUri = /^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/?#]+)$/.exec(s);
   const link = /^https:\/\/bsky\.app\/profile\/([^/]+)\/post\/([^/?#]+)\/?$/.exec(s);
-  if (atUri || link) {
+  if (uri) {
+    // A viewed post: found above.
+  } else if (atUri || link) {
     const [, authority, rkey] = (atUri ?? link)!;
     const did = await lookingUp(input, () => authorityToDid(authority, r.agent));
     if (did) uri = `at://${did}/app.bsky.feed.post/${rkey}`;

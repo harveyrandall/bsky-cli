@@ -8,7 +8,7 @@ import { canStage, chips, expandHome, inspectMedia, mediaOptions, nodeMediaFs, p
 import { Pipeline, draftOf, quoteOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
 import type { ReplSessionFile, SavedMode } from "./persist";
 import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
-import type { AtUri, Cooldown, IsoUtc, OwnLabel, StrongRef, ThreadLetter } from "./types";
+import { isAtUri, isCid, type AtUri, type Cooldown, type IsoUtc, type OwnLabel, type StrongRef, type ThreadLetter } from "./types";
 
 export const IDLE_HINT =
   "Plain text needs a thread: /thread to start one, /post for a single post, or -t to do this automatically.";
@@ -226,7 +226,7 @@ export class Repl {
   /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
   async resume(file: ReplSessionFile): Promise<void> {
     // All of it first, so a save at any moment from here has the whole session.
-    this.registry.restore(file.posts, file.counters);
+    this.registry.restore(file.posts, file.counters, file.viewed);
     this.threadState = file.thread;
     this.lastThreadLetter = file.lastThreadLetter;
     this.media = [...file.staged];
@@ -335,7 +335,7 @@ export class Repl {
     composer: ReplSessionFile["composer"],
     history: string[],
   ): ReplSessionFile {
-    const { posts, nextLabel, nextLetter } = this.registry.snapshot();
+    const { posts, viewed, nextLabel, nextViewed, nextLetter } = this.registry.snapshot();
     const m = this.current;
     const mode: SavedMode = "target" in m ? { kind: m.kind, target: m.label, returnTo: m.returnTo } : m;
     return {
@@ -344,7 +344,7 @@ export class Repl {
       updatedAt: new Date().toISOString() as IsoUtc,
       settings: { ...this.s, markers: this.markers },
       posts,
-      viewed: [],
+      viewed,
       thread: this.threadState,
       lastThreadLetter: this.lastThreadLetter,
       mode,
@@ -353,8 +353,24 @@ export class Repl {
       // Everything queued, a post in flight included: a kill leaves no telling if it went.
       pending: [...this.pipeline.pending(), ...this.unanswered],
       history,
-      counters: { nextLabel, nextViewed: 0, nextLetter },
+      counters: { nextLabel, nextViewed, nextLetter },
     };
+  }
+
+  /** What to print before a post: `(n)` if it's in the session, or a `#n` to act on it by. */
+  labelPost(post: { uri: string; cid: string }): string | undefined {
+    if (!isAtUri(post.uri) || !isCid(post.cid)) return undefined;
+    const own = this.registry.byUri(post.uri);
+    if (own) return `(${own.label})`;
+    const next = this.registry.snapshot().nextViewed;
+    const { label } = this.registry.addViewed({ uri: post.uri, cid: post.cid });
+    if (this.registry.snapshot().nextViewed !== next) this.deps.onChange();
+    return label;
+  }
+
+  /** CLI arguments with each whole `#n` as its URI. A bare number is usually a count, so it's left alone. */
+  expandLabels(argv: readonly string[]): string[] {
+    return argv.map((arg) => this.registry.viewed(arg)?.uri ?? arg);
   }
 
   /** Media waiting for the next post. */

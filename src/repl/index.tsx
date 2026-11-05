@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import { render, renderToString } from "ink";
 import { LaunchList } from "@/repl/ui/LaunchList";
 import { deleteDraft, saveDraft } from "@/drafts";
+import { setPostLabeler } from "@/lib/format";
 import { getSchedulerStatus } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
 import { setConfigValues } from "@/toml-config";
@@ -92,7 +93,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       resume={session?.resume}
       passthrough={opts.passthrough}
       configName={basename(opts.configPath)}
-      onReady={(r) => (repl = r)}
+      onReady={(r) => {
+        repl = r;
+        setPostLabeler((post) => r.labelPost(post));
+      }}
     />,
     { exitOnCtrlC: false, kittyKeyboard: { mode: kitty ? "enabled" : "disabled" } },
   );
@@ -128,6 +132,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       repl.close();
       if (left) await repl.settled();
     }
+    setPostLabeler(undefined);
     process.off("uncaughtException", crash);
     process.off("unhandledRejection", crash);
   }

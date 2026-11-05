@@ -1,10 +1,19 @@
 import chalk from "chalk";
 import type { AppBskyFeedDefs, AppBskyFeedPost } from "@atproto/api";
 
+let labeler: ((post: AppBskyFeedDefs.PostView) => string | undefined) | undefined;
+
+/** Something to put before each post printed, for as long as it's set. */
+export function setPostLabeler(fn?: typeof labeler): void {
+  labeler = fn;
+}
+
 export function printPost(post: AppBskyFeedDefs.PostView): void {
   const rec = post.record as AppBskyFeedPost.Record;
 
   // Author line
+  const label = labeler?.(post);
+  if (label) process.stdout.write(`${label} `);
   process.stdout.write(chalk.redBright(post.author.handle));
   process.stdout.write(` [${post.author.displayName ?? ""}]`);
   console.log(` (${formatTime(rec.createdAt)})`);

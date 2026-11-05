@@ -97,7 +97,7 @@ describe("resolveRef", () => {
   it.each([
     ["nonsense", `Can't resolve "nonsense": use a number, #n, rkey, at:// URI or bsky.app link`],
     ["9", "No post (9) in this session"],
-    ["#2", "#n labels are for viewed posts, which aren't available yet"],
+    ["#2", "No post #2 in this session"],
   ])("rejects %s", async (input, message) => {
     await expect(resolveRef(input, { registry: new Registry(false), agent: agent() })).rejects.toThrow(message);
   });
@@ -132,6 +132,43 @@ describe("Registry.format", () => {
   });
 });
 
+describe("viewed posts", () => {
+  it("get a label each, once", () => {
+    const reg = new Registry(false);
+    expect(reg.addViewed(ext).label).toBe("#1");
+    expect(reg.addViewed(r1).label).toBe("#2");
+    expect(reg.addViewed(ext).label).toBe("#1");
+    expect(reg.viewed("#2")?.uri).toBe(r1.uri);
+    expect(reg.viewed("#9")).toBeUndefined();
+  });
+  it("resolve through the network, as they could be anyone's", async () => {
+    const reg = new Registry(false);
+    reg.addViewed(ext);
+    const a = agent([alicePost]);
+    const r = await resolveRef("#1", { registry: reg, agent: a });
+    expect(r.ref).toEqual(ext);
+    expect(a.getPosts).toHaveBeenCalledWith([ext.uri]);
+  });
+  it("resolve without the network if they're already known", async () => {
+    const reg = new Registry(false);
+    reg.addOwn(r1, { root: r1, text: "a" });
+    reg.addViewed(r1);
+    const a = agent();
+    await expect(resolveRef("#1", { registry: reg, agent: a })).resolves.toMatchObject({ ref: r1 });
+    expect(a.getPosts).not.toHaveBeenCalled();
+  });
+  it("come back from a snapshot, and numbering carries on", () => {
+    const reg = new Registry(false);
+    reg.addViewed(ext);
+    const { posts, viewed, nextLabel, nextLetter, nextViewed } = reg.snapshot();
+    const back = new Registry(false);
+    back.restore(posts, { nextLabel, nextLetter, nextViewed }, viewed);
+    expect(back.viewed("#1")?.uri).toBe(ext.uri);
+    expect(back.addViewed(r1).label).toBe("#2");
+    expect(back.addViewed(ext).label).toBe("#1");
+  });
+});
+
 describe("a saved registry", () => {
   it("carries on numbering where it stopped", () => {
     const reg = new Registry(false);
@@ -139,7 +176,7 @@ describe("a saved registry", () => {
     reg.addOwn(r2, { root: r1, text: "b" });
     const { posts, nextLabel, nextLetter } = reg.snapshot();
     const back = new Registry(false);
-    back.restore(posts, { nextLabel, nextLetter });
+    back.restore(posts, { nextLabel, nextLetter, nextViewed: 1 });
     expect(back.byLabel("2")?.uri).toBe(r2.uri);
     expect(back.addOwn(r3, { root: r1, text: "c" }).label).toBe("3");
   });
@@ -150,7 +187,7 @@ describe("a saved registry", () => {
     reg.addOwn(r2, { root: r1, text: "b", letter: a });
     const { posts, nextLabel, nextLetter } = reg.snapshot();
     const back = new Registry(true);
-    back.restore(posts, { nextLabel, nextLetter });
+    back.restore(posts, { nextLabel, nextLetter, nextViewed: 1 });
     expect(back.currentLetter()).toBe("A");
     expect(back.addOwn(r3, { root: r1, text: "c", letter: "A" }).label).toBe("A3");
     expect(back.newLetter()).toBe("B");
