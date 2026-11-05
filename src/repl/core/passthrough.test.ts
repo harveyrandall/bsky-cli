@@ -203,6 +203,32 @@ describe("a config file given at startup", () => {
   });
 });
 
+describe("putting everything back", () => {
+  it("restores every stream and console method, even after a throw", async () => {
+    const { stdout, stderr } = process;
+    const before = [stdout.write, stderr.write, console.log, console.info, console.warn, console.error, process.exit];
+    await runPassthrough(program(), ["boom"], { print() {} });
+    expect([stdout.write, stderr.write, console.log, console.info, console.warn, console.error, process.exit]).toEqual(before);
+  });
+  it("doesn't catch what printing a line draws", async () => {
+    const terminal = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const lines: string[] = [];
+    const print = (text: string) => {
+      lines.push(text);
+      process.stdout.write("A FRAME");
+    };
+    await runPassthrough(program(), ["who"], { print });
+    expect(terminal).toHaveBeenCalledWith("A FRAME");
+    terminal.mockRestore();
+    expect(lines).toEqual(["default"]);
+  });
+  it("reports a mistake once", async () => {
+    const lines: string[] = [];
+    await runPassthrough(program(), ["hello", "--nope"], { print: (text) => lines.push(text) });
+    expect(lines.filter((l) => l.includes("--nope"))).toHaveLength(1);
+  });
+});
+
 describe("what a run comes to", () => {
   it.each([
     [["hello"], "done"],

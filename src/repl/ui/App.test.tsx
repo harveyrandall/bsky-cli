@@ -10,11 +10,13 @@ import { IDLE_HINT, type Repl, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import type { AtUri, Cid, StrongRef } from "@/repl/core/types";
 
-const { exit, suspendTerminal, editInEditor, suspended } = vi.hoisted(() => {
+const { exit, suspendTerminal, editInEditor, suspended, openUrl, copyText } = vi.hoisted(() => {
   const suspended = { now: false, during: [] as boolean[] };
   return {
     suspended,
     exit: vi.fn(),
+    openUrl: vi.fn(async () => {}),
+    copyText: vi.fn(async () => {}),
     suspendTerminal: vi.fn(async (run: () => Promise<void>) => {
       suspended.now = true;
       await run();
@@ -31,6 +33,7 @@ vi.mock("ink", async (importOriginal) => {
   return { ...ink, useApp: () => ({ ...ink.useApp(), exit, suspendTerminal, waitUntilRenderFlush: async () => {} }) };
 });
 vi.mock("@/lib/editor", () => ({ editInEditor }));
+vi.mock("@/lib/desktop", () => ({ openUrl, copyText }));
 beforeEach(() => {
   exit.mockClear();
   suspendTerminal.mockClear();
@@ -55,7 +58,7 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]>; passthrough?: AppProps["passthrough"] } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]>; passthrough?: AppProps["passthrough"]; listDrafts?: AppProps["listDrafts"] } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
@@ -82,8 +85,8 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
-      listDrafts={async () => ({ drafts: [], skipped: 0 })}
-      switchAccount={async () => ({ agent, handle: "work.bsky.social" })}
+      listDrafts={o.listDrafts ?? (async () => ({ drafts: [], skipped: 0 }))}
+      switchAccount={async () => ({ agent: { ...agent, selfDid: "did:plc:work" as const }, handle: "work.bsky.social" })}
       keeper={o.keeper}
       resume={o.resume}
       configName="config.toml"
@@ -882,6 +885,48 @@ describe("App running CLI commands", drawn, () => {
     uriArguments: (argv: string[]) => new Set(argv[0] === "thread" ? [1] : []),
     run,
   });
+  const typing = (o: { run?: NonNullable<AppProps["passthrough"]>["run"] } = {}) => {
+    const passthrough = cli(o.run);
+    return { ...setup({ passthrough }), run: passthrough.run };
+  };
+  it("reaches one from the keyboard, showing what it prints", async () => {
+    const run = vi.fn(async (_: string[], print: (text: string) => void) => {
+      print("from the CLI");
+      return "done" as const;
+    });
+    const { type, shows } = typing({ run });
+    await type("/timeline -n 5", "\r");
+    await shows("from the CLI");
+    expect(run.mock.calls[0][0]).toEqual(["timeline", "-n", "5"]);
+  });
+  it("swaps #n only where the command takes a post", async () => {
+    const { type, repl, run } = typing();
+    const read = { uri: "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5defab", cid: "bafyab" };
+    expect(repl().labelPost(read)).toBe("#1");
+    await type("/run thread #1", "\r");
+    await tick();
+    await type("/run timeline #1", "\r");
+    await tick();
+    expect(vi.mocked(run).mock.calls.map(([argv]) => argv)).toEqual([["thread", read.uri], ["timeline", "#1"]]);
+  });
+  it("keeps the text of one that fails", async () => {
+    const { type, lastFrame } = typing({ run: vi.fn(async () => "keep" as const) });
+    await type("/timeline --nope", "\r");
+    await tick();
+    expect(lastFrame()).toContain("/timeline --nope");
+  });
+  it("completes a CLI command and its flags with Tab", async () => {
+    const { type, shows } = typing();
+    await type("/timel", "\t");
+    await shows("/timeline");
+    await type("--j", "\t");
+    await shows("/timeline --json");
+  });
+  it("completes a path with Tab", async () => {
+    const { type, shows } = typing();
+    await type("/attach src/repl/ui/App.te", "\t");
+    await shows("/attach src/repl/ui/App.test.tsx");
+  });
   it("keeps a blank line between what they print", async () => {
     const run = vi.fn(async (_: string[], print: (text: string) => void) => {
       print("one");
@@ -893,5 +938,46 @@ describe("App running CLI commands", drawn, () => {
     await type("/timeline", "\r");
     await shows("two");
     expect(lastFrame()).toMatch(/one\n\s*\n\s*two/);
+  });
+});
+
+describe("App reaching the desktop and your account", drawn, () => {
+  beforeEach(() => {
+    openUrl.mockClear();
+    copyText.mockClear();
+  });
+  const posted = async (o: Parameters<typeof setup>[0] = {}) => {
+    const s = setup(o);
+    await s.type("/post one", "\r");
+    await tick();
+    return s;
+  };
+  it("/open and /copy use the post's link", async () => {
+    const { type, shows } = await posted();
+    await type("/open 1", "\r");
+    await tick();
+    await type("/copy 1", "\r");
+    await shows("Copied (1)");
+    expect(openUrl).toHaveBeenCalledWith(expect.stringContaining("https://bsky.app/profile/"));
+    expect(copyText).toHaveBeenCalledWith(expect.stringContaining("https://bsky.app/profile/"));
+  });
+  it("carries on after a failed /open", async () => {
+    openUrl.mockRejectedValueOnce(new Error("no browser"));
+    const { type, shows } = await posted();
+    await type("/open 1", "\r");
+    await shows("no browser");
+    await type("still here");
+    await shows("still here");
+  });
+  it("/drafts fills the composer", async () => {
+    const draft = { id: "1741392000000-a7f3", createdAt: "2026-11-04T09:00:00.000Z", reason: "manual" as const, type: "post" as const, text: "from a draft" };
+    const { type, shows } = setup({ listDrafts: async () => ({ drafts: [draft], skipped: 0 }) });
+    await type("/drafts 17", "\r");
+    await shows("/post from a draft");
+  });
+  it("/switch says who you're posting as", async () => {
+    const { type, shows } = setup();
+    await type("/switch work", "\r");
+    await shows("Now posting as @work.bsky.social");
   });
 });

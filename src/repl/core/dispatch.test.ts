@@ -98,6 +98,15 @@ describe("/open, /copy and /view", () => {
   });
 });
 
+describe("/open failing", () => {
+  it("keeps the REPL and the text", async () => {
+    const c = ctx();
+    c.fake.openPost.mockRejectedValueOnce(new Error("no browser"));
+    expect(await dispatch("/open 1", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith("/open: no browser", "error");
+  });
+});
+
 describe("likes and reposts", () => {
   it.each(["like", "unlike", "repost", "unrepost"])("/%s takes a ref", async (name) => {
     const c = ctx();

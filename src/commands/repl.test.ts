@@ -356,6 +356,30 @@ describe("saved sessions", () => {
       const switchAccount = await open();
       await expect(switchAccount(name)).resolves.toMatchObject({ profile });
     });
+    it("CLI commands follow it, and -c stays", async () => {
+      const p = new Command().exitOverride().option("-p, --profile <name>").option("-c, --config <path>");
+      registerRepl(p);
+      p.command("who").action(() => console.log(`${p.opts().profile} ${p.opts().config}`));
+      await p.parseAsync(["-c", "custom.toml", "repl"], { from: "user" });
+      const { passthrough, switchAccount } = startRepl.mock.lastCall![0];
+      await switchAccount("work");
+      const print = vi.fn();
+      await passthrough.run(["who"], print);
+      expect(print).toHaveBeenCalledWith("work custom.toml", undefined);
+    });
+    it("keeps the old profile if the new agent can't be used", async () => {
+      const { getClient } = await import("@/index");
+      const p = makeProgram();
+      p.option("-p, --profile <name>");
+      p.command("who").action(() => console.log(p.opts().profile));
+      await p.parseAsync(["repl"], { from: "user" });
+      const { passthrough, switchAccount } = startRepl.mock.lastCall![0];
+      vi.mocked(getClient).mockResolvedValueOnce({ session: { handle: "work.bsky.social" } } as never);
+      await expect(switchAccount("work")).rejects.toThrow("Not logged in");
+      const print = vi.fn();
+      await passthrough.run(["who"], print);
+      expect(print).toHaveBeenCalledWith("undefined", undefined);
+    });
     it("prefers a profile that's really called default", async () => {
       session("session-default.json", "other.bsky.social");
       const switchAccount = await open();

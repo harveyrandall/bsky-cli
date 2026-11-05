@@ -1328,6 +1328,15 @@ describe("/delete and /undo", () => {
     await repl.undo();
     expect(agent.deletePost.mock.calls.map(([uri]) => uri)).toEqual([ref(2).uri, ref(1).uri]);
   });
+  it.each([
+    ["a delete", (r: Repl) => r.deletePost("1")],
+    ["a switch", (r: Repl) => r.switchProfile("work")],
+  ])("saves after %s", async (_, act) => {
+    const { repl, deps } = await written();
+    deps.onChange.mockClear();
+    await act(repl);
+    expect(deps.onChange).toHaveBeenCalled();
+  });
   it("/undo says when there's nothing to take back", async () => {
     const { repl, printed } = setup();
     expect(await repl.undo()).toBe("done");
@@ -1485,6 +1494,17 @@ describe("/switch", () => {
     await repl.switchProfile("work");
     expect(repl.staged()).toEqual([]);
     expect(printed()).toContain("Unstaged 📎 a.png");
+  });
+  it("likes and deletes as the new account", async () => {
+    const s = setup();
+    await s.repl.post("one");
+    await s.flush();
+    const next = { ...other(s), like: vi.fn(async () => {}), deletePost: vi.fn(async () => {}) };
+    s.deps.switchAccount.mockResolvedValueOnce({ agent: next, handle: "work.bsky.social" });
+    await s.repl.switchProfile("work");
+    await s.repl.engage("like", "1");
+    expect(next.like).toHaveBeenCalled();
+    expect(s.agent.like).not.toHaveBeenCalled();
   });
   it("leaves everything be if it turns out to be the same account", async () => {
     const s = setup();
@@ -1646,6 +1666,16 @@ describe("posts you read", () => {
     const { repl } = setup();
     repl.labelPost(seen(1));
     expect(repl.expandLabels(["thread", "#1", "-n", "5", "#12", "see #1"], new Set([1, 4, 5]))).toEqual(["thread", seen(1).uri, "-n", "5", "#12", "see #1"]);
+  });
+  it("can be quoted or reposted", async () => {
+    const { repl, agent, posted, flush } = setup();
+    repl.labelPost(seen(1));
+    agent.getPosts.mockResolvedValue([{ uri: seen(1).uri, cid: seen(1).cid, authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "" }] as never);
+    await repl.quote("#1", "look");
+    await flush();
+    await repl.engage("repost", "#1");
+    expect(posted[0].quote?.uri).toBe(seen(1).uri);
+    expect(agent.repost).toHaveBeenCalled();
   });
   it("keep #n across a resume, and new ones carry on", async () => {
     const first = setup();

@@ -3,7 +3,11 @@ import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import { LEFT } from "@/repl/ui/App";
 import { Registry } from "@/repl/core/refs";
 
-const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues, getSchedulerStatus, schedulerProfile, saveScheduledPost } = vi.hoisted(() => ({
+import { SessionKeeper } from "@/repl/core/session";
+
+const { render, detectKittyKeyboard, saveDraft, deleteDraft, readDrafts, setConfigValues, getSchedulerStatus, schedulerProfile, saveScheduledPost, setPostLabeler } = vi.hoisted(() => ({
+  readDrafts: vi.fn(),
+  setPostLabeler: vi.fn(),
   saveScheduledPost: vi.fn(),
   getSchedulerStatus: vi.fn(),
   schedulerProfile: vi.fn(),
@@ -13,7 +17,8 @@ const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues, ge
   deleteDraft: vi.fn(),
   setConfigValues: vi.fn(),
 }));
-vi.mock("@/drafts", () => ({ saveDraft, deleteDraft }));
+vi.mock("@/drafts", () => ({ saveDraft, deleteDraft, readDrafts }));
+vi.mock("@/lib/format", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/format")>()), setPostLabeler }));
 vi.mock("@/toml-config", () => ({ setConfigValues }));
 vi.mock("@/lib/scheduler", () => ({ getSchedulerStatus, schedulerProfile }));
 vi.mock("@/scheduled", () => ({ saveScheduledPost }));
@@ -112,6 +117,65 @@ describe("startRepl", () => {
     expect(configName).toBe("config.toml");
     app.unmount();
     await running;
+  });
+
+  it("labels what the CLI prints while it's open, and stops when it closes", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl(options);
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const repl = { registry: new Registry(false), failures: () => [], close: vi.fn(() => []), labelPost: vi.fn(() => "#7") };
+    render.mock.calls[0][0].props.onReady(repl);
+    const [labeler] = setPostLabeler.mock.lastCall!;
+    expect(labeler({ uri: "at://x", cid: "bafy" })).toBe("#7");
+    app.unmount();
+    await running;
+    expect(setPostLabeler.mock.lastCall).toEqual([undefined]);
+  });
+
+  describe("after /switch", () => {
+    const opened = async (settings = options.settings) => {
+      const app = fakeInstance();
+      render.mockReturnValue(app);
+      const switchAccount = vi.fn(async () => ({ agent: { ...offlineProps.agent, selfDid: "did:plc:work" as const }, handle: "work.bsky.social" as never, profile: "work" }));
+      const store = { save: vi.fn(async () => {}), lock: vi.fn(async () => true), unlock: vi.fn(async () => {}), delete: vi.fn(async () => {}), prune: vi.fn(async () => {}) };
+      const session = { store, id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", did: "did:plc:me", keep: 7 } as never;
+      const running = startRepl({ ...options, settings, profile: "me", switchAccount, session });
+      await vi.waitFor(() => expect(render).toHaveBeenCalled());
+      const { props } = render.mock.calls[0][0];
+      await props.switchAccount("work");
+      return { app, running, props };
+    };
+    it("drafts and scheduled posts follow the account", async () => {
+      const { app, running, props } = await opened();
+      const draft = { reason: "manual", type: "post", text: "hi" };
+      await props.drafts.save(draft);
+      await props.listDrafts();
+      await props.saveScheduled({ scheduledAt: "2099-01-01T00:00:00.000Z", text: "later" });
+      expect(saveDraft).toHaveBeenCalledWith(draft, "work");
+      expect(readDrafts).toHaveBeenCalledWith("work");
+      expect(saveScheduledPost).toHaveBeenCalledWith(expect.anything(), "work");
+      app.unmount();
+      await running;
+    });
+    it("the session is saved as the new account", async () => {
+      const setAccount = vi.spyOn(SessionKeeper.prototype, "setAccount");
+      const { app, running } = await opened();
+      expect(setAccount).toHaveBeenCalledWith({ handle: "work.bsky.social", did: "did:plc:work", profile: "work" });
+      setAccount.mockRestore();
+      app.unmount();
+      await running;
+    });
+    it("the verbose summary names both accounts", async () => {
+      const { app, running, props } = await opened({ ...options.settings, verbose: true });
+      const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+      props.onReady({ registry: new Registry(false), failures: () => [], close: vi.fn(() => []), settled: vi.fn(async () => {}), snapshot: vi.fn(() => ({ posts: [], staged: [], pending: [], composer: { text: "", cursor: 0 } })) });
+      app.unmount();
+      await running;
+      const printed = write.mock.calls.map(([chunk]) => String(chunk)).join("");
+      write.mockRestore();
+      expect(printed).toContain("as @me.bsky.social, @work.bsky.social");
+    });
   });
 
   it("doesn't count a scheduler that sends another profile's posts", async () => {
