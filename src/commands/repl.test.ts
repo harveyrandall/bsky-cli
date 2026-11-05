@@ -233,10 +233,15 @@ describe("saved sessions", () => {
   const session = () => startRepl.mock.lastCall?.[0].session;
   beforeEach(() => {
     sessionsHome.dir = mkdtempSync(join(tmpdir(), "bsky-repl-"));
+    // The bskyDir mock above doesn't reach sessionPath, which calls its own.
+    vi.stubEnv("XDG_CONFIG_HOME", sessionsHome.dir);
     setTTY(true, true);
     pickSession.mockResolvedValue(undefined);
   });
-  afterEach(() => rmSync(sessionsHome.dir, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(sessionsHome.dir, { recursive: true, force: true });
+  });
 
   it("starts a new session without asking when none are saved", async () => {
     await makeProgram().parseAsync(["repl"], { from: "user" });
