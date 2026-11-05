@@ -41,6 +41,8 @@ export interface AppProps {
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
   /** CLI commands that can run here. */
+  /** Flags that a resumed session's own settings overrule, with what to run instead. */
+  ignoredFlags?: readonly string[];
   passthrough?: {
     names(): string[];
     knows(name: string): boolean;
@@ -150,7 +152,7 @@ export function App(props: AppProps) {
     props.onReady?.(repl);
     if (!props.resume) return;
     repl
-      .resume(props.resume)
+      .resume(props.resume, props.ignoredFlags)
       .catch((err: unknown) => print(err instanceof Error ? err.message : String(err), "error"))
       .finally(() => setResuming(false));
   }, [repl]);

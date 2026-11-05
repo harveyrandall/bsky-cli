@@ -13,6 +13,7 @@ function fakeRepl() {
     setCooldown: vi.fn(),
     askSettings: vi.fn(async () => {}),
     settingsLine: vi.fn(() => "undo 5s · pace off · auto-thread off"),
+    setSetting: vi.fn(),
     retry: vi.fn(async () => {}),
     attach: vi.fn(async () => {}),
     detach: vi.fn(),
@@ -44,6 +45,28 @@ describe("parseInput", () => {
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
     expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
+  });
+});
+
+describe("/settings", () => {
+  it.each([
+    ["/settings force-alt on", { forceAlt: true }],
+    ["/settings force-alt off", { forceAlt: false }],
+    ["/settings verbose on", { verbose: true }],
+    ["/settings thread-label prepend", { threadLabel: "prepend" }],
+    ["/settings thread-label append", { threadLabel: "append" }],
+    ["/settings thread-label off", { threadLabel: false }],
+  ])("%s", async (input, changes) => {
+    const c = ctx();
+    await dispatch(input, c);
+    expect(c.fake.setSetting).toHaveBeenCalledWith(changes);
+    expect(c.print).toHaveBeenCalledWith(c.fake.settingsLine());
+  });
+  it.each(["/settings force-alt maybe", "/settings verbose", "/settings thread-label sideways", "/settings nonsense"])("refuses %s", async (input) => {
+    const c = ctx();
+    expect(await dispatch(input, c)).toBe("keep");
+    expect(c.fake.setSetting).not.toHaveBeenCalled();
+    expect(c.print).toHaveBeenCalledWith(expect.stringContaining("Usage: /settings"), "error");
   });
 });
 

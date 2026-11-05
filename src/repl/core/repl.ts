@@ -254,7 +254,8 @@ export class Repl {
   }
 
   /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
-  async resume(file: ReplSessionFile): Promise<void> {
+  /** `ignored` is flags given now that the saved settings overrule, with what to run instead. */
+  async resume(file: ReplSessionFile, ignored: readonly string[] = []): Promise<void> {
     // All of it first, so a save at any moment from here has the whole session.
     this.registry.restore(file.posts, file.counters, file.viewed);
     this.threadState = file.thread;
@@ -265,6 +266,9 @@ export class Repl {
     this.current = this.resumeMode(file.mode);
     this.deps.print(`── resumed ${file.id} ──`, "dim");
     for (const entry of this.registry.entries()) this.deps.print(this.registry.format(entry, this.s.verbose), "dim");
+    this.deps.print(`Settings: ${this.settingsLine()}`, "dim");
+    if (ignored.length > 0) this.deps.print("A resumed session keeps its own settings, so these flags changed nothing. To use them now:", "dim");
+    for (const line of ignored) this.deps.print(`  ${line}`, "dim");
     this.deps.onChange();
     await this.checkStaged();
     if (file.thread) await this.checkThread(file.thread);
@@ -1012,6 +1016,15 @@ export class Repl {
     this.deps.onChange();
   }
 
+  setSetting(changes: Pick<Partial<ReplSettings>, "forceAlt" | "threadLabel" | "verbose">): void {
+    Object.assign(this.s, changes);
+    this.deps.onChange();
+  }
+
+  isVerbose(): boolean {
+    return this.s.verbose;
+  }
+
   /** `/settings` with no arguments: ask for each; dismissing keeps the current value. */
   async askSettings(): Promise<void> {
     for (const kind of ["undo", "pace"] as const) {
@@ -1022,7 +1035,9 @@ export class Repl {
 
   settingsLine(): string {
     const show = (v?: Cooldown) => (v === undefined ? "ask" : v === 0 ? "off" : `${v}s`);
-    return `undo ${show(this.s.undo)} · pace ${show(this.s.pace)} · auto-thread ${this.s.autoThread ? "on" : "off"}`;
+    const onOff = (on: boolean) => (on ? "on" : "off");
+    const { autoThread, threadLabel, forceAlt, verbose } = this.s;
+    return `undo ${show(this.s.undo)} · pace ${show(this.s.pace)} · auto-thread ${onOff(autoThread)} · thread-label ${threadLabel || "off"} · force-alt ${onOff(forceAlt)} · verbose ${onOff(verbose)}`;
   }
 
   async retry(): Promise<void> {

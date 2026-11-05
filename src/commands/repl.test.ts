@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
-import { registerRepl, replAgent } from "@/commands/repl";
+import { ignoredFlags, registerRepl, replAgent } from "@/commands/repl";
 import { applyConfigToProgram } from "@/toml-config";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 
@@ -201,6 +201,33 @@ describe("bsky repl", () => {
   });
 });
 
+describe("ignoredFlags", () => {
+  const saved = { autoThread: false, prefixThread: false, threadLabel: false, undo: 5, pace: 0, askToSave: true, verbose: false, forceAlt: false } as const;
+  const notes = (flags: Record<string, unknown>, settings: object = saved) =>
+    ignoredFlags((name) => name in flags, flags, { ...saved, ...settings });
+  it.each([
+    [{ undo: 10 }, "--undo 10: /settings undo 10"],
+    [{ pace: 15 }, "--pace 15: /settings pace 15"],
+    [{ autoThread: true }, "-t: /auto-thread on"],
+    [{ forceAlt: true }, "-f: /settings force-alt on"],
+    [{ threadLabel: true }, "--thread-label: /settings thread-label append"],
+    [{ prependThreadLabel: true }, "--prepend-thread-label: /settings thread-label prepend"],
+    [{ verbose: true }, "-v: /settings verbose on"],
+    [{ prefixThread: true }, "-l: a session's labels can't change, so start a new session to use it"],
+  ])("gives what to run for %j", (flags, note) => {
+    expect(notes(flags)).toEqual([note]);
+  });
+  it("handles turning something off", () => {
+    expect(notes({ autoThread: false }, { autoThread: true })).toEqual(["--no-auto-thread: /auto-thread off"]);
+  });
+  it("says nothing about a flag that matches the session", () => {
+    expect(notes({ undo: 5, pace: 0, autoThread: false })).toEqual([]);
+  });
+  it("only counts flags you typed, not config or defaults", () => {
+    expect(ignoredFlags(() => false, { undo: 10, forceAlt: true }, saved)).toEqual([]);
+  });
+});
+
 describe("saved sessions", () => {
   const uri = "at://did:plc:me/app.bsky.feed.post/3lbx7kt5def2a";
   const file = (o: object = {}) => ({
@@ -314,6 +341,15 @@ describe("saved sessions", () => {
     vi.mocked(getClient).mockRejectedValueOnce(new Error("Not logged in"));
     await expect(switchAccount("nope")).rejects.toThrow("Not logged in");
     expect(p.opts().profile).toBe("work");
+  });
+  it("passes on the flags a resume ignores", async () => {
+    write();
+    await makeProgram().parseAsync(["repl", "-r", "k3f7xq", "--undo", "10"], { from: "user" });
+    expect(session().ignoredFlags).toEqual(["--undo 10: /settings undo 10"]);
+  });
+  it("has none to pass on for a new session", async () => {
+    await makeProgram().parseAsync(["repl", "--undo", "10"], { from: "user" });
+    expect(session().ignoredFlags).toEqual([]);
   });
   describe("/switch", () => {
     let home: string;

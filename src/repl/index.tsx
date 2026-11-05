@@ -35,6 +35,8 @@ export interface ReplOptions {
     /** Sessions to keep when pruning. */
     keep: number;
     resume?: ReplSessionFile;
+    /** Flags that a resumed session's own settings overrule, with what to run instead. */
+    ignoredFlags?: readonly string[];
   };
 }
 
@@ -107,6 +109,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       }}
       keeper={keeper}
       resume={session?.resume}
+      ignoredFlags={session?.ignoredFlags}
       passthrough={opts.passthrough}
       configName={basename(opts.configPath)}
       onReady={(r) => {
@@ -156,7 +159,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     const lines = exitSummary({
       registry: repl.registry,
       failures: repl.failures(),
-      verbose: opts.settings.verbose,
+      verbose: repl.isVerbose(),
       startedAt,
       endedAt: new Date(),
       handle: [...handles].join(", @"),

@@ -106,6 +106,23 @@ async function chooseSession(opts: { resume?: string | boolean; resumable?: bool
   }
 }
 
+/** Flags typed for a session that keeps its own settings, each with what to run instead. */
+export function ignoredFlags(given: (option: string) => boolean, flags: Record<string, unknown>, saved: ReplSettings): string[] {
+  const notes: string[] = [];
+  for (const kind of ["undo", "pace"] as const) {
+    if (given(kind) && flags[kind] !== saved[kind]) notes.push(`--${kind} ${flags[kind]}: /settings ${kind} ${flags[kind]}`);
+  }
+  if (given("autoThread") && flags.autoThread !== saved.autoThread) {
+    notes.push(flags.autoThread ? "-t: /auto-thread on" : "--no-auto-thread: /auto-thread off");
+  }
+  if (given("prefixThread") && !saved.prefixThread) notes.push("-l: a session's labels can't change, so start a new session to use it");
+  if (given("forceAlt") && !saved.forceAlt) notes.push("-f: /settings force-alt on");
+  if (given("prependThreadLabel") && saved.threadLabel !== "prepend") notes.push("--prepend-thread-label: /settings thread-label prepend");
+  else if (given("threadLabel") && !given("prependThreadLabel") && saved.threadLabel !== "append") notes.push("--thread-label: /settings thread-label append");
+  if (given("verbose") && !saved.verbose) notes.push("-v: /settings verbose on");
+  return notes;
+}
+
 export function registerRepl(program: Command): void {
   program
     .command("repl", { isDefault: true })
@@ -151,7 +168,7 @@ export function registerRepl(program: Command): void {
       if (resume === null) return;
       if (resume) program.setOptionValue("profile", resume.profile);
       try {
-        await openRepl(program, opts, store, keep, markers, resume);
+        await openRepl(program, cmd, opts, store, keep, markers, resume);
       } catch (err) {
         if (resume) await store.unlock(resume.id);
         throw err;
@@ -161,6 +178,7 @@ export function registerRepl(program: Command): void {
 
 async function openRepl(
   program: Command,
+  cmd: Command,
   opts: Record<string, unknown>,
   store: SessionStore,
   keep: number,
@@ -232,6 +250,13 @@ async function openRepl(
             did: client.selfDid,
             keep,
             resume,
+            ignoredFlags: resume
+              ? ignoredFlags(
+                  (name) => (name === "verbose" ? program : cmd).getOptionValueSource(name) === "cli",
+                  { ...opts, verbose: program.opts().verbose },
+                  resume.settings,
+                )
+              : [],
           }
         : undefined,
   });

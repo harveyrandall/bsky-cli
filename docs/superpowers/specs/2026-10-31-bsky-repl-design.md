@@ -389,7 +389,7 @@ Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from co
 | | `/switch [profile]`, `/history` | Change account; list session posts |
 | Engage | `/like <ref>`, `/unlike <ref>`, `/repost <ref>`, `/unrepost <ref>` | Using extracted `like.ts` / `repost.ts` functions; un-actions use `viewer.like` / `viewer.repost` |
 | | `/open <ref>`, `/view <ref>`, `/copy <ref>` | Browser (`open`/`xdg-open`/`rundll32 url.dll,FileProtocolHandler`); print thread via `printPost`; clipboard (`pbcopy`/`wl-copy`/`xclip`/`clip`) |
-| Session | `/auto-thread [on\|off]`, `/settings [undo\|pace N]` | Toggle; settings menu with no args |
+| Session | `/auto-thread [on\|off]`, `/settings [name value]` | Toggle; settings menu with no args |
 | | `/help [cmd]`, `/exit` (`/quit`), `/run <cmd> [args]` | Help; exit (= Ctrl+D); explicit passthrough |
 
 **`/new` items:** Post → post-once; Thread → `/thread`; Image/Video post → `/attach` prompts then post-once; Quote post → ref prompt then composer; Scheduled post → composer, then an Ink date/time prompt built on `parseDate`/`parseTime`/`resolveAmPm`/`toUtcIso`, saved to the existing schedule store; Draft → composer then `saveDraft()`.

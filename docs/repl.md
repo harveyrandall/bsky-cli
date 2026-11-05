@@ -45,7 +45,7 @@ The prompt shows what Enter will do with plain text:
 | `/view <ref>` | Print a post and its replies |
 | `/run <command> [args]` | Run a CLI command, even one whose name a REPL command has taken |
 | `/auto-thread [on\|off]` | Toggle starting a thread from plain text |
-| `/settings [undo\|pace N]` | Change the undo window or pace, then show the settings; with no arguments it asks for each |
+| `/settings [name value]` | Change a setting for this session, then show them all: `undo` or `pace` with 0, 5, 10 or 15, `force-alt` or `verbose` with `on` or `off`, or `thread-label` with `off`, `append` or `prepend`. With no arguments it asks for the undo window and pace |
 | `/history` | List this session's posts, marking any you've deleted |
 | `/retry` | Resend what couldn't be sent (network error, rate limit or expired session) |
 | `/help [command]` | List commands, or show help for one |
@@ -205,7 +205,7 @@ Enter on `+ new` starts afresh, as does Esc; Ctrl+C quits. A session open in ano
 | The thread | From its last post, or the nearest one that can still be found. If none can, the thread stops |
 | The mode, the composer and ↑ history | As you left them, along with which draft the composer came from |
 | Staged files | Those still usable; the rest are dropped, with a message saying which and why |
-| Settings and markers | The session's own, whatever flags you start with |
+| Settings and markers | The session's own, whatever flags you start with. They're printed as it opens, along with any flags that changed nothing and what to run to use them |
 | Unsent posts | Each asks `Send · Edit · Discard`, and nothing goes out until you choose. They stay saved until you've answered |
 
 `Edit` is selected first, because an unsent post can be one that was sending when the terminal closed, which may already have gone: check before choosing `Send`. `Send` starts its undo window again. `Edit` or Esc puts it back in the composer, or saves it as a draft if there's text there already or its media won't fit. If its thread couldn't be found, the question says that `Send` starts a new one.

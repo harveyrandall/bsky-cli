@@ -1025,6 +1025,20 @@ describe("resume", () => {
         s.agent.getPosts.mockResolvedValueOnce([]);
         return s;
       };
+      it("shows its settings, as they're not what the flags say", async () => {
+        const file = await queued();
+        const { repl, printed } = lost(1);
+        await repl.resume(file);
+        expect(printed()).toContain(`Settings: ${repl.settingsLine()}`);
+        expect(printed()).not.toContain("changed nothing");
+      });
+      it("says which flags changed nothing, and what to run instead", async () => {
+        const file = await queued();
+        const { repl, printed } = lost(1);
+        await repl.resume(file, ["--undo 10: /settings undo 10"]);
+        expect(printed()).toContain("A resumed session keeps its own settings, so these flags changed nothing. To use them now:");
+        expect(printed()).toContain("--undo 10: /settings undo 10");
+      });
       it("says Send will start a new thread", async () => {
         const file = await queued();
         const { repl, ask } = lost(0);
@@ -1203,6 +1217,26 @@ describe("changes that aren't posts", () => {
     await flush();
     expect(repl.mode().kind).toBe("idle");
     expect(deps.onChange).toHaveBeenCalled();
+  });
+});
+
+describe("settings that a session can change", () => {
+  it("are all shown", () => {
+    const { repl } = setup({ undo: 5, pace: 0 });
+    expect(repl.settingsLine()).toBe("undo 5s · pace off · auto-thread off · thread-label off · force-alt off · verbose off");
+  });
+  it("change, and are saved", () => {
+    const { repl, deps } = setup();
+    deps.onChange.mockClear();
+    repl.setSetting({ forceAlt: true, threadLabel: "prepend", verbose: true });
+    expect(repl.settingsLine()).toContain("thread-label prepend · force-alt on · verbose on");
+    expect(deps.onChange).toHaveBeenCalled();
+  });
+  it("say whether the summary should be full", () => {
+    const { repl } = setup();
+    expect(repl.isVerbose()).toBe(false);
+    repl.setSetting({ verbose: true });
+    expect(repl.isVerbose()).toBe(true);
   });
 });
 
