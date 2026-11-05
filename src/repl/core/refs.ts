@@ -185,7 +185,7 @@ export class Registry {
     this.list.push(...posts);
     this.seen.push(...viewed);
     this.count = counters.nextLabel - 1;
-    this.nextViewed = counters.nextViewed;
+    this.nextViewed = Math.max(counters.nextViewed, 1); // a file from before #n labels has 0
     this.letters = counters.nextLetter;
     for (const e of posts) {
       if (!e.letter) continue;
@@ -219,7 +219,7 @@ export class Registry {
     const branch = e.parent && e.parent !== previous?.uri ? ` ↳ ${this.byUri(e.parent)?.label ?? "?"}` : "";
     const uri = verbose ? ` (${e.uri})` : "";
     const ext = e.external && e.authorDid !== this.self ? ` ext @${e.external}` : "";
-    return `(${e.label}) ${e.rkey}${uri}${branch}${ext}${e.notes ? ` ${e.notes}` : ""}`;
+    return `(${e.label}) ${e.rkey}${e.deleted ? " deleted" : ""}${uri}${branch}${ext}${e.notes ? ` ${e.notes}` : ""}`;
   }
 }
 

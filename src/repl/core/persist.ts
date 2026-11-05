@@ -249,7 +249,7 @@ export function newSessionId(): SessionId {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function summaryOf(f: ReplSessionFile): string {
-  const own = f.posts.filter((p) => !p.external);
+  const own = f.posts.filter((p) => !p.external && !p.deleted);
   const threads = new Set(own.filter((p) => p.root.uri !== p.uri).map((p) => p.root.uri));
   const parts = [`@${f.handle}`, `${plural(threads.size, "thread")}, ${plural(own.length, "post")}`];
   return [...parts, ...(own[0] ? [`"${own[0].excerpt}"`] : [])].join(" · ");

@@ -232,3 +232,21 @@ describe("recentLabels", () => {
     expect(reg.recentLabels()).toEqual([]);
   });
 });
+
+describe("a deleted post", () => {
+  it("says so wherever it's listed", () => {
+    const reg = new Registry(false, self);
+    const a = ref(self, "3lbx7kt5aaa2a");
+    const entry = reg.addOwn(a, { root: a, text: "one" });
+    reg.markDeleted(a.uri);
+    expect(reg.format(entry, false)).toBe("(1) 3lbx7kt5aaa2a deleted");
+  });
+});
+
+describe("a session saved before #n labels existed", () => {
+  it("starts them at #1, not #0", () => {
+    const reg = new Registry(false, self);
+    reg.restore([], { nextLabel: 1, nextViewed: 0, nextLetter: 0 });
+    expect(reg.addViewed(ref(alice, "3lbx7kt5aaa2c")).label).toBe("#1");
+  });
+});
