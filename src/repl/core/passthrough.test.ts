@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Command } from "commander";
-import { BLOCKED, passthroughFlags, passthroughNames, runPassthrough } from "./passthrough";
+import { BLOCKED, outsideCommands, passthroughFlags, passthroughNames, runPassthrough } from "./passthrough";
 
 function program() {
   const p = new Command().option("-p, --profile <name>").option("--json");
@@ -137,6 +137,23 @@ describe("runPassthrough", () => {
     const { lines, io, p } = setup();
     await runPassthrough(p, ["hello", "--stdin"], io);
     expect(lines).toEqual(["bsky hello can't read from stdin inside the REPL"]);
+  });
+});
+
+describe("outsideCommands", () => {
+  it("keeps a frame out of a command's output, whoever scheduled it", async () => {
+    const p = program();
+    p.command("draws").action(async () => {
+      setImmediate(() => outsideCommands(process.stdout).write("FRAME"));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      console.log("done");
+    });
+    const terminal = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const printed: string[] = [];
+    await runPassthrough(p, ["draws"], { print: (text) => printed.push(text) });
+    expect(terminal).toHaveBeenCalledWith("FRAME");
+    terminal.mockRestore();
+    expect(printed).toEqual(["done"]);
   });
 });
 

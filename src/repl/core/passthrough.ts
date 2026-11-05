@@ -61,6 +61,21 @@ function redirect(): () => void {
   };
 }
 
+/**
+ * What Ink draws through. A frame is never a command's output, even when something
+ * running as part of the command caused it: React's work keeps the context that
+ * scheduled it, so it would be caught, printed and drawn again.
+ */
+export function outsideCommands(stream: NodeJS.WriteStream): NodeJS.WriteStream {
+  return new Proxy(stream, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target) as unknown;
+      if (key === "write") return (...args: Parameters<Writer>) => output.exit(() => target.write(...args));
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 const allCommands = (c: Command): Command[] => [c, ...c.commands.flatMap(allCommands)];
 
 const named = (commands: readonly Command[], token: string) =>

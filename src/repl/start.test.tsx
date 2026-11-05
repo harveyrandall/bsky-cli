@@ -87,6 +87,7 @@ describe("startRepl", () => {
     const [element, renderOptions] = render.mock.calls[0];
     expect(element.props).toMatchObject({ markers: DEFAULT_MARKERS, kittyHint: hint });
     expect(renderOptions).toMatchObject({ exitOnCtrlC: false, kittyKeyboard: { mode } });
+    expect(renderOptions.stdout).not.toBe(process.stdout); // a frame can't be a command's output
     app.unmount();
     await running;
   });

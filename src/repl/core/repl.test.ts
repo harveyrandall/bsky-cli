@@ -1539,12 +1539,11 @@ describe("posts you read", () => {
     const { repl } = setup();
     expect(repl.labelPost({ uri: "nonsense", cid: "x" })).toBeUndefined();
   });
-  it("are saved as they're labelled", () => {
+  it("don't redraw from inside the command printing them", () => {
     const { repl, deps } = setup();
     deps.onChange.mockClear();
     repl.labelPost(seen(1));
-    repl.labelPost(seen(1));
-    expect(deps.onChange).toHaveBeenCalledOnce();
+    expect(deps.onChange).not.toHaveBeenCalled();
   });
   it("can be replied to", async () => {
     const { repl, agent, posted, flush } = setup();

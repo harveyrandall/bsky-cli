@@ -13,6 +13,7 @@ import { SessionKeeper } from "@/repl/core/session";
 import type { Repl, ReplAgent, ReplSettings } from "@/repl/core/repl";
 import { exitSummary } from "@/repl/core/summary";
 import type { Did, Handle, IsoUtc, SessionId } from "@/repl/core/types";
+import { outsideCommands } from "@/repl/core/passthrough";
 import { detectKittyKeyboard } from "@/repl/ui/terminal";
 
 export interface ReplOptions {
@@ -111,7 +112,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         setPostLabeler((post) => r.labelPost(post));
       }}
     />,
-    { exitOnCtrlC: false, kittyKeyboard: { mode: kitty ? "enabled" : "disabled" } },
+    { exitOnCtrlC: false, kittyKeyboard: { mode: kitty ? "enabled" : "disabled" }, stdout: outsideCommands(process.stdout) },
   );
   // Ink restores the terminal on an uncaught error under Node but not under
   // Bun, which left the shell in kitty and bracketed-paste mode. Unmounting

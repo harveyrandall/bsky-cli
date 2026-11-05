@@ -375,15 +375,14 @@ export class Repl {
     };
   }
 
-  /** What to print before a post: `(n)` if it's in the session, or a `#n` to act on it by. */
+  /**
+   * What to print before a post: `(n)` if it's in the session, or a `#n` to act on it by.
+   * Saved when the command ends, as the composer clears: this runs inside the command.
+   */
   labelPost(post: { uri: string; cid: string }): string | undefined {
     if (!isAtUri(post.uri) || !isCid(post.cid)) return undefined;
     const own = this.registry.byUri(post.uri);
-    if (own) return `(${own.label})`;
-    const next = this.registry.snapshot().nextViewed;
-    const { label } = this.registry.addViewed({ uri: post.uri, cid: post.cid });
-    if (this.registry.snapshot().nextViewed !== next) this.deps.onChange();
-    return label;
+    return own ? `(${own.label})` : this.registry.addViewed({ uri: post.uri, cid: post.cid }).label;
   }
 
   /** CLI arguments with each whole `#n` as its URI. A bare number is usually a count, so it's left alone. */
