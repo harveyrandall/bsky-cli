@@ -1,6 +1,6 @@
 import { AtpAgent } from "@atproto/api";
 import chalk from "chalk";
-import { findProfile, saveSessionConfig, sessionDid } from "@/config";
+import { findProfile, saveSessionConfig, sessionDid, sessionPath } from "@/config";
 import { isNetworkError } from "@/lib/errors";
 import type { SessionConfig } from "@/lib/types";
 
@@ -30,7 +30,8 @@ function saveRefreshed(session: SessionConfig, profile?: string): void {
   try {
     saveSessionConfig(session, profile);
   } catch (err) {
-    console.error(chalk.yellow(`Couldn't save your session, so you may need to log in again: ${err instanceof Error ? err.message : String(err)}`));
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(chalk.yellow(`Couldn't save your session to ${sessionPath(profile)}: ${reason}. Fix that, or you'll have to log in again.`));
   }
 }
 

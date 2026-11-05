@@ -146,7 +146,13 @@ async function migrateIfNeeded(profile?: string): Promise<SessionConfig | null> 
     };
 
     // Save to new location
-    saveSessionConfig(session, profile);
+    try {
+      saveSessionConfig(session, profile);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(chalk.yellow(`Couldn't move your session to ${sessionPath(profile)}: ${reason}`));
+      return null;
+    }
 
     // Rename old config (don't delete — keep as backup)
     await rename(legacyConfigFp, legacyConfigFp + ".bak").catch(() => {});

@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { AtpAgent } from "@atproto/api";
 import chalk from "chalk";
-import { saveSessionConfig } from "@/config";
+import { saveSessionConfig, sessionPath } from "@/config";
 import { promptPassword, prompt2FA } from "@/auth";
 import { keychainStore, sessionKey } from "@/lib/credential-store";
 import type { SessionConfig } from "@/lib/types";
@@ -64,7 +64,12 @@ export function registerLogin(program: Command): void {
           refreshJwt: loginResponse.data.refreshJwt,
         };
 
-        saveSessionConfig(session, profile);
+        try {
+          saveSessionConfig(session, profile);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          throw new Error(`Logged in, but couldn't save the session to ${sessionPath(profile)}: ${reason}`, { cause: err });
+        }
 
         // Try storing in OS keychain as well (best-effort)
         const key = sessionKey(loginResponse.data.handle, profile);

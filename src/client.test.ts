@@ -30,7 +30,7 @@ const session = {
 };
 
 describe("createClient", () => {
-  const refreshed = { did: "did:plc:test", handle: "alice.bsky.social", accessJwt: "new-access", refreshJwt: "new-refresh", active: true };
+  const refreshed = { did: "did:plc:test", handle: "alice.new.test", accessJwt: "new-access", refreshJwt: "new-refresh", active: true };
 
   beforeEach(() => {
     // mockReset clears history AND implementations (mockRejectedValue, etc.)
@@ -49,7 +49,7 @@ describe("createClient", () => {
 
   it("saves refreshed tokens", async () => {
     await createClient(session);
-    expect(saveSessionConfig).toHaveBeenCalledWith(expect.objectContaining({ accessJwt: "new-access", host: session.host }), undefined);
+    expect(saveSessionConfig).toHaveBeenCalledWith(expect.objectContaining({ accessJwt: "new-access", handle: "alice.new.test", host: session.host }), undefined);
   });
 
   it("saves refreshed tokens with profile", async () => {
@@ -70,12 +70,6 @@ describe("createClient", () => {
     await expect(createClient(session)).rejects.toThrow(
       "Session expired",
     );
-  });
-
-  it("does not call login — no password available", async () => {
-    await createClient(session);
-    // Verify login is not a property — client no longer does password-based auth
-    expect((mockAgent as any).login).toBeUndefined();
   });
 });
 

@@ -14,6 +14,7 @@ vi.mock("@atproto/api", () => ({
 
 vi.mock("@/config", () => ({
   saveSessionConfig: vi.fn(),
+  sessionPath: () => "/config/session.json",
 }));
 
 vi.mock("@/auth", () => ({
@@ -68,6 +69,15 @@ describe("login", () => {
     } else {
       delete process.env.BSKY_PASSWORD;
     }
+  });
+
+  it("says the login worked if only the save failed, or you'd retry the password", async () => {
+    vi.mocked(saveSessionConfig).mockImplementationOnce(() => {
+      throw new Error("EACCES: permission denied");
+    });
+    await expect(makeProgram().parseAsync(["login", "alice.bsky.social", "mypassword"], { from: "user" })).rejects.toThrow(
+      "Logged in, but couldn't save the session to /config/session.json: EACCES: permission denied",
+    );
   });
 
   it("authenticates and saves session (no password stored)", async () => {

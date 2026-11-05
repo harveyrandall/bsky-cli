@@ -65,6 +65,7 @@ describe("a session's tokens", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -87,9 +88,8 @@ describe("a session's tokens", () => {
   });
   it.each([["work"], [undefined]])("go back to the file a handle found them in: %s", async (profile) => {
     loggedIn(profile);
-    const dim = vi.spyOn(console, "error").mockImplementation(() => {}); // "Using session for…"
+    vi.spyOn(console, "error").mockImplementation(() => {}); // "Using session for…"
     await createClient(await loadSessionConfig("me.test"), "me.test");
-    dim.mockRestore();
     expect(onDisk(profile).refreshJwt).toBe("refresh-2");
     expect(existsSync(sessionPath("me.test"))).toBe(false);
   });
@@ -155,10 +155,18 @@ describe("a session's tokens", () => {
     mkdirSync(sessionPath()); // a folder in the way, which nothing can write over
     const warn = vi.spyOn(console, "error").mockImplementation(() => {});
     const agent = await createClient(session);
-    expect(warn.mock.calls.flat().join()).toContain("Couldn't save your session");
-    warn.mockRestore();
+    expect(warn.mock.calls.flat().join()).toContain(`Couldn't save your session to ${sessionPath()}`);
     await expect(agent.getTimeline()).resolves.toBeDefined();
-    expect(agent.session?.refreshJwt).toBe("refresh-2"); // not put back to the one it spent
+    expect(agent.session?.refreshJwt).toBe("refresh-2"); // the new one, even though it never reached the file
+  });
+  it("still work if a later one can't be saved, and the request that needed it goes through", async () => {
+    const agent = await createClient(loggedIn());
+    rmSync(sessionPath());
+    mkdirSync(sessionPath());
+    server.at(150);
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(agent.getTimeline()).resolves.toBeDefined();
+    expect(warn.mock.calls.flat().join()).toContain("Couldn't save your session");
   });
   it("stay as they were if the server refuses them", async () => {
     const session = { ...loggedIn(), refreshJwt: "nonsense" };
