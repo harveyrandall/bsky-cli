@@ -1,0 +1,131 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { format } from "node:util";
+import { CommanderError, type Command } from "commander";
+import type { LineStyle } from "./commands";
+
+// Commands that need the terminal, from an audit of createInterface, setRawMode,
+// promptDateTime and stdin under src/commands. `drafts send` and the like are safe:
+// getClient's own question has already been answered by the time the REPL is open.
+export const BLOCKED = new Map<string, string>([
+  ["repl", "you're already in it"],
+  ["login", "run it in another terminal"],
+  ["stream", "it runs until stopped: run it in another terminal"],
+  ["create-thread", "use /thread instead"],
+  ["config edit", "use /run config path, then edit it in another terminal"],
+  ["schedule post", "use /new, then Scheduled post"],
+  ["schedule edit", "it asks questions: run it in another terminal"],
+  ["schedule delete", "it asks to confirm: run it in another terminal"],
+  ["schedule watch", "it runs until stopped: run it in another terminal"],
+]);
+
+class Exited extends Error {}
+
+/** Where the running command's output goes, for code running as part of it. */
+const output = new AsyncLocalStorage<(text: string) => void>();
+
+type Writer = typeof process.stdout.write;
+
+/**
+ * Sends what a command prints to its `sink`, and leaves everything else alone:
+ * Ink draws through these same streams while the command runs. Only code running
+ * as part of the command, by async context, is caught. Returns how to undo it.
+ */
+function redirect(): () => void {
+  const { stdout, stderr } = process;
+  const writers = [stdout.write, stderr.write] as const;
+  const { log, info, warn, error } = console;
+  const { exit } = process;
+  const writer = (real: Writer, stream: NodeJS.WriteStream) =>
+    function (this: unknown, chunk: Uint8Array | string, ...rest: never[]) {
+      const sink = output.getStore();
+      if (!sink) return real.call(stream, chunk, ...rest);
+      sink(String(chunk));
+      return true;
+    } as Writer;
+  const logger = (real: typeof console.log) => (...args: unknown[]) => {
+    const sink = output.getStore();
+    if (sink) sink(`${format(...args)}\n`);
+    else real(...args);
+  };
+  stdout.write = writer(writers[0], stdout);
+  stderr.write = writer(writers[1], stderr);
+  Object.assign(console, { log: logger(log), info: logger(info), warn: logger(warn), error: logger(error) });
+  process.exit = ((code?: number) => {
+    if (output.getStore()) throw new Exited();
+    return exit(code);
+  }) as typeof process.exit;
+  return () => {
+    [stdout.write, stderr.write] = writers;
+    Object.assign(console, { log, info, warn, error });
+    process.exit = exit;
+  };
+}
+
+const allCommands = (c: Command): Command[] => [c, ...c.commands.flatMap(allCommands)];
+
+const named = (commands: readonly Command[], token: string) =>
+  commands.find((c) => c.name() === token || c.aliases().includes(token));
+
+/** The command and subcommand argv names, as Commander would find them. */
+function commandPath(program: Command, argv: readonly string[]): string[] {
+  const at = argv.findIndex((a) => named(program.commands, a));
+  if (at === -1) return [];
+  const command = named(program.commands, argv[at])!;
+  const sub = argv.slice(at + 1).map((a) => named(command.commands, a)).find(Boolean);
+  return sub ? [command.name(), sub.name()] : [command.name()];
+}
+
+function refusal(program: Command, argv: readonly string[]): string | undefined {
+  const path = commandPath(program, argv);
+  // Anything else would fall through to the default command: this REPL.
+  if (path.length === 0) return `No such command: ${argv[0]}`;
+  for (const key of [path.join(" "), path[0]]) {
+    const why = BLOCKED.get(key);
+    if (why) return `bsky ${key} can't run inside the REPL: ${why}`;
+  }
+  if (argv.includes("--stdin")) return `bsky ${path[0]} can't read from stdin inside the REPL`;
+  return undefined;
+}
+
+/** The CLI commands that can run here, for `/help`, Tab and "did you mean". */
+export function passthroughNames(program: Command): string[] {
+  const visible = program.createHelp().visibleCommands(program);
+  return visible.map((c) => c.name()).filter((name) => name !== "help" && !BLOCKED.has(name));
+}
+
+/** Runs a CLI command in this process, its output going to `print`. */
+export async function runPassthrough(
+  program: Command,
+  argv: readonly string[],
+  io: { print(text: string, style?: LineStyle): void; profile?: string },
+): Promise<void> {
+  const refused = refusal(program, argv);
+  if (refused) {
+    io.print(refused);
+    return;
+  }
+  // Outside the command's context, so that drawing the line isn't caught as more output.
+  const print = (text: string, style?: LineStyle) => output.exit(() => io.print(text, style));
+  let line = "";
+  const sink = (text: string) => {
+    const parts = (line + text).split("\n");
+    line = parts.pop()!;
+    for (const part of parts) print(part);
+  };
+  const { exitCode } = process;
+  for (const c of allCommands(program)) c.exitOverride();
+  const restore = redirect();
+  try {
+    const args = io.profile ? ["-p", io.profile, ...argv] : [...argv];
+    await output.run(sink, () => program.parseAsync(args, { from: "user" }));
+  } catch (err) {
+    // Commander has already written its own errors, and a command that exits has said why.
+    if (!(err instanceof Exited) && !(err instanceof CommanderError)) {
+      sink(`${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  } finally {
+    restore();
+    process.exitCode = exitCode;
+  }
+  if (line) print(line);
+}

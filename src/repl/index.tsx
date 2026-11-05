@@ -22,6 +22,7 @@ export interface ReplOptions {
   /** The config file the save offer writes to. */
   configPath: string;
   profile?: string;
+  passthrough?: AppProps["passthrough"];
   session?: {
     store: Pick<SessionStore, "save" | "delete" | "lock" | "unlock" | "prune">;
     id: SessionId;
@@ -89,6 +90,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       schedulerRunning={schedulerRunning}
       keeper={keeper}
       resume={session?.resume}
+      passthrough={opts.passthrough}
       configName={basename(opts.configPath)}
       onReady={(r) => (repl = r)}
     />,

@@ -37,6 +37,8 @@ export interface AppProps {
   keeper?: Pick<SessionKeeper, "track" | "save">;
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
+  /** CLI commands that can run here. */
+  passthrough?: { names(): string[]; run(argv: string[], print: (text: string, style?: LineStyle) => void): Promise<void> };
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -346,6 +348,8 @@ export function App(props: AppProps) {
     }
   })();
 
+  const cli = props.passthrough;
+  const passthrough = cli && { names: () => cli.names(), run: (argv: string[]) => cli.run(argv, print) };
   const countdown = repl.countdown();
   const failure = repl.pausedBy();
 
@@ -369,7 +373,7 @@ export function App(props: AppProps) {
         restore={restore}
         onEditor={onEditor}
         initial={startingDraft}
-        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
+        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl, passthrough })}
         onEscape={(text) => {
           setExitWhenSent(false);
           return repl.escape(text);
@@ -378,6 +382,7 @@ export function App(props: AppProps) {
         onEof={requestExit}
         onSendNow={() => repl.sendNow()}
         onEdit={edit}
+        commandNames={passthrough?.names()}
         onPaste={takePaste}
         onHint={(text) => print(text, "dim")}
         onError={(text) => print(text, "error")}

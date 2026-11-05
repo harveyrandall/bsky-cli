@@ -38,6 +38,9 @@ describe("completeCommand", () => {
     expect(reply).toMatchObject({ text: "/reply", cursor: 6 });
     expect(reply.candidates).toEqual(expect.arrayContaining(["reply", "reply-from"]));
   });
+  it("completes CLI commands too", () => {
+    expect(completeCommand("/timel", 6, ["timeline"])).toMatchObject({ text: "/timeline " });
+  });
   it("leaves other text alone", () => {
     expect(completeCommand("/x", 2)).toEqual({ text: "/x", cursor: 2, candidates: [] });
     expect(completeCommand("hello", 5)).toEqual({ text: "hello", cursor: 5, candidates: [] });

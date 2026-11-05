@@ -7,6 +7,7 @@ import { createPost } from "@/commands/post";
 import { activeConfigPath } from "@/toml-config";
 import { resolveMarkers, type Markers } from "@/repl/core/markers";
 import { mediaOptions } from "@/repl/core/media";
+import { passthroughNames, runPassthrough } from "@/repl/core/passthrough";
 import { SessionStore, newSessionId, resolveId, type ReplSessionFile } from "@/repl/core/persist";
 import type { PostLookup } from "@/repl/core/refs";
 import type { ReplAgent, ReplSettings } from "@/repl/core/repl";
@@ -173,6 +174,7 @@ async function openRepl(
     forceAlt: opts.forceAlt === true,
   };
   const client = replAgent(agent);
+  const profile: string | undefined = program.opts().profile;
   const { startRepl } = await import("@/repl");
   await startRepl({
     markers: resume?.settings.markers ?? flagMarkers,
@@ -180,7 +182,11 @@ async function openRepl(
     agent: client,
     handle: agent.session?.handle ?? "",
     configPath: activeConfigPath(),
-    profile: program.opts().profile,
+    profile,
+    passthrough: {
+      names: () => passthroughNames(program),
+      run: (argv, print) => runPassthrough(program, argv, { print, profile }),
+    },
     // A resumed session keeps saving even with -R, or what you answer would be asked again.
     session:
       resume || opts.resumable !== false

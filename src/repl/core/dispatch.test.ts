@@ -39,6 +39,55 @@ describe("parseInput", () => {
   });
 });
 
+describe("CLI commands", () => {
+  const withCli = () => {
+    const c = ctx();
+    const run = vi.fn(async () => {});
+    return { c: { ...c, passthrough: { names: () => ["timeline", "search", "post"], run } }, run };
+  };
+  it("run when no REPL command has the name, with shell-style arguments", async () => {
+    const { c, run } = withCli();
+    expect(await dispatch(`/search "two words" -n 5`, c)).toBe("done");
+    expect(run).toHaveBeenCalledWith(["search", "two words", "-n", "5"]);
+  });
+  it("lose to a REPL command of the same name", async () => {
+    const { c, run } = withCli();
+    await dispatch("/post hi", c);
+    expect(run).not.toHaveBeenCalled();
+    expect(c.fake.post).toHaveBeenCalledWith("hi");
+  });
+  it("can be asked for by name with /run", async () => {
+    const { c, run } = withCli();
+    await dispatch("/run post hi", c);
+    expect(run).toHaveBeenCalledWith(["post", "hi"]);
+  });
+  it("say so if /run has nothing to run", async () => {
+    const { c } = withCli();
+    expect(await dispatch("/run", c)).toBe("keep");
+    expect(printed(c)).toContain("Usage: /run");
+    const none = ctx();
+    expect(await dispatch("/run timeline", none)).toBe("keep");
+    expect(printed(none)).toContain("aren't available");
+  });
+  it("are suggested for a typo", async () => {
+    const { c } = withCli();
+    expect(await dispatch("/timelin", c)).toBe("keep");
+    expect(printed(c)).toContain("Did you mean /timeline?");
+  });
+  it("show up in /help, marked, and show their own help", async () => {
+    const { c, run } = withCli();
+    await dispatch("/help", c);
+    expect(printed(c)).toContain("↗ From the CLI: /timeline /search");
+    await dispatch("/help timeline", c);
+    expect(run).toHaveBeenCalledWith(["timeline", "--help"]);
+  });
+  it("keep the text if the arguments don't parse", async () => {
+    const { c, run } = withCli();
+    expect(await dispatch(`/search "open`, c)).toBe("keep");
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
 describe("media commands", () => {
   it("/attach takes shell-style paths and --alt anywhere", async () => {
     const c = ctx();

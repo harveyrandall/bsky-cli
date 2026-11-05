@@ -80,6 +80,8 @@ export interface ComposerProps {
   onEditor(state: EditorState): void;
   /** Where to start: a resumed session's draft. */
   initial?: EditorState;
+  /** Names Tab completes as well as the REPL's own. */
+  commandNames?: readonly string[];
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -169,7 +171,7 @@ export function Composer(props: ComposerProps) {
         props.onEdit(text).then((edited) => apply({ type: "set", text: edited }), report);
         return;
       case "complete": {
-        const completed = completeCommand(text, cursor);
+        const completed = completeCommand(text, cursor, props.commandNames);
         if (completed.text !== text) apply({ type: "set", text: completed.text });
         else if (completed.candidates.length > 1) props.onHint(completed.candidates.map((c) => `/${c}`).join("  "));
         return;

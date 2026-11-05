@@ -7,6 +7,8 @@ export type LineStyle = "normal" | "dim" | "error";
 export interface CommandContext {
   print(text: string, style?: LineStyle): void;
   exit(): void;
+  /** CLI commands that can run in the REPL. */
+  passthrough?: { names(): string[]; run(argv: string[]): Promise<void> };
   repl: Repl;
   /** Open text in $EDITOR, handing it the terminal. */
   edit(text: string): Promise<string>;
@@ -34,15 +36,22 @@ export const COMMANDS: readonly ReplCommand[] = [
     aliases: [],
     usage: "/help [command]",
     summary: "List commands, or show help for one",
-    run([name], ctx) {
+    async run([name], ctx) {
       if (name === undefined) {
         const width = Math.max(...COMMANDS.map((c) => c.usage.length)) + 2;
         for (const c of COMMANDS) ctx.print(c.usage.padEnd(width) + c.summary);
+        const cli = ctx.passthrough?.names().filter((n) => !findCommand(n));
+        if (cli?.length) ctx.print(`↗ From the CLI: ${cli.map((n) => `/${n}`).join(" ")}`);
         return;
       }
-      const cmd = findCommand(name.replace(/^\//, ""));
+      const bare = name.replace(/^\//, "");
+      const cmd = findCommand(bare);
+      if (!cmd && ctx.passthrough?.names().includes(bare)) {
+        await ctx.passthrough.run([bare, "--help"]);
+        return;
+      }
       if (!cmd) {
-        ctx.print(unknownMessage(name), "error");
+        ctx.print(unknownMessage(name, ctx.passthrough?.names()), "error");
         return;
       }
       ctx.print(cmd.usage);
@@ -144,6 +153,17 @@ export const COMMANDS: readonly ReplCommand[] = [
       const n = Number(which);
       if (which !== "all" && !(Number.isInteger(n) && n > 0)) throw new Error("Usage: /detach [n|all]");
       ctx.repl.detach(which === "all" ? "all" : n);
+    },
+  },
+  {
+    name: "run",
+    aliases: [],
+    usage: "/run <command> [args]",
+    summary: "Run a CLI command, even one with the same name as a REPL command",
+    async run(args, ctx) {
+      if (args.length === 0) throw new Error("Usage: /run <command> [args]");
+      if (!ctx.passthrough) throw new Error("CLI commands aren't available here");
+      await ctx.passthrough.run(args);
     },
   },
   {
@@ -280,8 +300,8 @@ export function suggest(name: string, candidates: readonly string[]): string | u
   return best;
 }
 
-export function unknownMessage(name: string): string {
-  const close = suggest(name, allNames());
+export function unknownMessage(name: string, others: readonly string[] = []): string {
+  const close = suggest(name, [...allNames(), ...others]);
   return close ? `Unknown /${name}. Did you mean /${close}?` : `Unknown /${name}. /help lists commands.`;
 }
 
@@ -289,11 +309,12 @@ export function unknownMessage(name: string): string {
 export function completeCommand(
   text: string,
   cursor: number,
+  others: readonly string[] = [],
 ): { text: string; cursor: number; candidates: string[] } {
   const unchanged = { text, cursor, candidates: [] };
   if (cursor !== text.length || !/^\/[a-z-]*$/.test(text)) return unchanged;
   const prefix = text.slice(1);
-  const matches = allNames().filter((n) => n.startsWith(prefix)).sort();
+  const matches = [...new Set([...allNames(), ...others])].filter((n) => n.startsWith(prefix)).sort();
   if (matches.length === 0) return unchanged;
   if (matches.length === 1) return { text: `/${matches[0]} `, cursor: matches[0].length + 2, candidates: [] };
   let common = matches[0];
