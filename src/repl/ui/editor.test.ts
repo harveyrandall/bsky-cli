@@ -69,6 +69,13 @@ describe("editorReducer", () => {
       history: ["/help"],
     });
   });
+  it("submitted leaves only what was typed after it, not stuck to the command", () => {
+    expect(r(at("/timeline -n 5great", 19), { type: "submitted", text: "/timeline -n 5" })).toMatchObject({
+      text: "great",
+      cursor: 5,
+      history: ["/timeline -n 5"],
+    });
+  });
   it("drops a lone control byte that isn't part of an escape sequence", () => {
     expect(r(at(""), { type: "insert", text: "a\x07b" })).toMatchObject({ text: "ab" });
   });

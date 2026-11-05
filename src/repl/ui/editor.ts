@@ -170,10 +170,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...s, text: "", cursor: 0 };
     case "submitted": {
       // Record what was sent, unless blank or a repeat of the last entry.
-      // Text typed while it was being handled stays in the composer.
+      // Text typed while it was being handled stays, without what was sent: stuck to
+      // `/run post a`, it would change the command Enter runs next.
       const keep = action.text.trim() !== "" && s.history[s.history.length - 1] !== action.text;
       const history = keep ? [...s.history, action.text] : s.history;
-      return text === action.text ? emptyEditor(history) : { ...s, history, historyIndex: null, scratch: [] };
+      if (text === action.text) return emptyEditor(history);
+      const sent = text.startsWith(action.text) ? action.text.length : 0;
+      return { ...s, text: text.slice(sent), cursor: Math.max(0, s.cursor - sent), history, historyIndex: null, scratch: [] };
     }
   }
 }
