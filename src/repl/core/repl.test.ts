@@ -1265,9 +1265,39 @@ describe("/delete and /undo", () => {
     expect(repl.mode().kind).toBe("idle");
   });
   it("leaves the thread where it is when another post goes", async () => {
-    const { repl } = await written();
-    await repl.deletePost("1");
-    expect(repl.thread()?.cursor).toEqual(ref(2));
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("2");
+    expect(repl.thread()?.cursor).toEqual(ref(3));
+  });
+  it("skips every deleted post on the way back", async () => {
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("2");
+    await repl.deletePost("3");
+    expect(repl.thread()?.cursor).toEqual(ref(1));
+  });
+  it("waits for what's queued, which may be replying to it", async () => {
+    const { repl, agent, printed } = await written();
+    repl.setCooldown("undo", 5);
+    await repl.submitText("waiting");
+    expect(await repl.deletePost("1")).toBe("keep");
+    expect(agent.deletePost).not.toHaveBeenCalled();
+    expect(printed()).toContain("Wait for pending posts");
+  });
+  it("leaves a prompt aimed at something else", async () => {
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.reply("3");
+    await repl.deletePost("2");
+    expect(repl.mode().kind).toBe("reply-once");
+  });
+  it("/undo leaves a post you only replied to", async () => {
+    const { repl, agent, flush } = await written({}, ["one"]);
+    const older = "at://did:plc:me/app.bsky.feed.post/3lbx7kt5aaa2a";
+    agent.getPosts.mockResolvedValueOnce([{ uri: older, cid: "bafyabc", authorDid: me, authorHandle: "me.bsky.social", text: "old" }] as never);
+    await repl.reply(older, "hi");
+    await flush();
+    await repl.undo();
+    await repl.undo();
+    expect(agent.deletePost.mock.calls.flat()).not.toContain(older);
   });
   it("/undo takes the last post you made", async () => {
     const { repl, agent } = await written();

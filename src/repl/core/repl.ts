@@ -708,6 +708,8 @@ export class Repl {
 
   /** `/delete <ref>`: your own post, after asking. */
   async deletePost(input: string): Promise<SubmitOutcome> {
+    // A queued post may be replying to it.
+    if (this.blockedByPending()) return "keep";
     const resolved = await this.resolve(input);
     return resolved ? this.remove(resolved.ref, resolved.post?.text ?? "") : "keep";
   }
