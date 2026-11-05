@@ -1,4 +1,4 @@
-import { readFile, rename, stat, utimes, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
+import { open, readFile, rename, stat, utimes, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { bskyDir } from "@/config";
@@ -13,7 +13,7 @@ function scheduledPath(id: string, profile?: string): string {
   return join(scheduledDir(profile), `${id}.json`);
 }
 
-function claimPath(id: string, profile?: string): string {
+export function claimPath(id: string, profile?: string): string {
   return join(scheduledDir(profile), `${id}.sending`);
 }
 
@@ -93,21 +93,27 @@ export async function deleteScheduledPost(
 }
 
 /**
- * Takes a post out of the queue before it's sent, so nothing can send it twice: not a
- * run that couldn't remove it afterwards, a kill mid-send, or another run at the same
- * moment. False if another run got there first. If this throws, don't send it.
+ * Takes a post out of the queue before it's sent, so that overlapping runs, a run that
+ * can't remove it afterwards and a kill mid-send can't send it again by themselves.
+ * Gives back what's in the file, or nothing if there's nothing to send: another run got
+ * there first, or a recurring post has moved on to its next run, which comes back under
+ * the same id. If this throws, don't send it.
  */
-export async function claimScheduledPost(id: string, profile?: string): Promise<boolean> {
+export async function claimScheduledPost(listed: ScheduledPost, profile?: string): Promise<ScheduledPost | undefined> {
+  const path = claimPath(listed.id, profile);
   try {
-    await rename(scheduledPath(id, profile), claimPath(id, profile));
+    await rename(scheduledPath(listed.id, profile), path);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw err;
   }
-  // Renaming keeps the file's age, and unfinishedPosts goes by when it was taken.
+  // Renaming keeps the file's age, and claimedPosts goes by when it was taken.
   const now = new Date();
-  await utimes(claimPath(id, profile), now, now).catch(() => {});
-  return true;
+  await utimes(path, now, now).catch(() => {});
+  const claimed = JSON.parse(await readFile(path, "utf-8")) as ScheduledPost;
+  if (claimed.scheduledAt === listed.scheduledAt) return claimed;
+  await releaseScheduledPost(listed.id, profile);
+  return undefined;
 }
 
 /** It couldn't be sent, so back it goes. */
@@ -119,31 +125,70 @@ export async function finishScheduledPost(id: string, profile?: string): Promise
   await unlink(claimPath(id, profile));
 }
 
-/** Posts a run took and never finished with, which may or may not have gone out. */
-export async function unfinishedPosts(profile?: string): Promise<(ScheduledPost & { path: string })[]> {
+/**
+ * Puts a recurring post back as its next run. It's written over the claim first, so its
+ * two files never exist at once, which would let another run's claim replace this one.
+ */
+export async function rescheduleScheduledPost(post: ScheduledPost, profile?: string): Promise<void> {
+  const next = join(scheduledDir(profile), `${post.id}.next`);
+  try {
+    await writeFile(next, JSON.stringify(post, null, "  ") + "\n", { mode: 0o644 });
+    await rename(next, claimPath(post.id, profile));
+  } catch (err) {
+    await unlink(next).catch(() => {});
+    throw err;
+  }
+  await rename(claimPath(post.id, profile), scheduledPath(post.id, profile));
+}
+
+export interface ClaimedPost {
+  id: string;
+  path: string;
+  /** Old enough that the run sending it has probably stopped, so it may or may not have gone. */
+  stale: boolean;
+  /** Undefined if the file can't be read. */
+  text?: string;
+  rrule?: string;
+}
+
+/** Posts taken from the queue and not finished with. */
+export async function claimedPosts(profile?: string): Promise<ClaimedPost[]> {
   const dir = scheduledDir(profile);
-  const files = await readdir(dir).catch(() => [] as string[]);
-  const posts: (ScheduledPost & { path: string })[] = [];
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  const posts: ClaimedPost[] = [];
   for (const file of files) {
     if (!file.endsWith(".sending")) continue;
     const path = join(dir, file);
-    try {
-      if (Date.now() - (await stat(path)).mtimeMs < STILL_SENDING_MS) continue;
-      posts.push({ ...(JSON.parse(await readFile(path, "utf-8")) as ScheduledPost), path });
-    } catch {
-      // Gone since, or corrupted: there's nothing useful to say about it
-    }
+    const age = await stat(path).then((s) => Math.abs(Date.now() - s.mtimeMs)).catch(() => undefined);
+    if (age === undefined) continue; // finished with since
+    const post = await readFile(path, "utf-8").then((data) => JSON.parse(data) as Partial<ScheduledPost> | null).catch(() => null);
+    posts.push({
+      id: file.slice(0, -".sending".length),
+      path,
+      stale: age >= STILL_SENDING_MS,
+      text: typeof post?.text === "string" ? post.text : undefined,
+      rrule: post?.rrule,
+    });
   }
   return posts;
 }
 
+/** Only over a post that's still queued: this mustn't bring back one being sent. */
 export async function updateScheduledPost(
   post: ScheduledPost,
   profile?: string,
 ): Promise<void> {
-  const dir = scheduledDir(profile);
-  await mkdir(dir, { recursive: true });
-  await writeFile(scheduledPath(post.id, profile), JSON.stringify(post, null, "  ") + "\n", {
-    mode: 0o644,
-  });
+  const file = await open(scheduledPath(post.id, profile), "r+");
+  try {
+    await file.truncate();
+    await file.writeFile(JSON.stringify(post, null, "  ") + "\n");
+  } finally {
+    await file.close();
+  }
 }
