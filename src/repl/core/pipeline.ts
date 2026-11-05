@@ -75,7 +75,7 @@ export interface PipelineDeps {
 export function draftOf(
   reason: Draft["reason"],
   posts: readonly string[],
-  { target, media, quote }: { target?: SendTarget; media?: readonly StagedMedia[]; quote?: StrongRef } = {},
+  { target, media, quote }: { target?: { parent: { uri: string } }; media?: readonly StagedMedia[]; quote?: { uri: string } } = {},
 ): Omit<Draft, "id" | "createdAt"> {
   const thread = posts.length > 1;
   return {

@@ -207,6 +207,11 @@ export class Repl {
     const media = this.media;
     if (text.trim() === "") return media.length > 0 ? [draftOf("manual", [""], { media })] : [];
     const { words, target, quote } = this.destination(text);
+    if (this.isLoaded(words)) {
+      // Its draft is still there; only what's been staged since isn't.
+      const added = media.filter((m) => !this.loaded!.media.includes(m.path));
+      return added.length > 0 ? [draftOf("manual", [""], { media: added })] : [];
+    }
     if (quote) {
       // A quote can't carry media, or be a thread.
       return [draftOf("manual", [words], { quote }), ...(media.length > 0 ? [draftOf("manual", [""], { media })] : [])];
@@ -217,22 +222,19 @@ export class Repl {
   }
 
   /** Where composer text would go: a command that came back says, or else the mode does. */
-  private destination(text: string): { words: string; target?: SendTarget; quote?: StrongRef } {
+  private destination(text: string): { words: string; target?: { parent: { uri: string } }; quote?: { uri: string } } {
     const command = /^\/(post|thread|reply|quote)\s+([\s\S]*)$/.exec(text.trim());
     if (command?.[1] === "post" || command?.[1] === "thread") return { words: command[2] };
     if (command) {
       const [, label = "", words = ""] = /^(\S+)\s*([\s\S]*)$/.exec(command[2]) ?? [];
-      const entry = this.registry.byLabel(label);
-      if (entry) {
-        const ref = { uri: entry.uri, cid: entry.cid };
-        return command[1] === "quote" ? { words, quote: ref } : { words, target: { parent: ref, root: entry.root } };
-      }
+      const uri = this.registry.byLabel(label)?.uri ?? this.registry.viewed(label)?.uri ?? (isAtUri(label) ? label : undefined);
+      if (uri) return command[1] === "quote" ? { words, quote: { uri } } : { words, target: { parent: { uri } } };
     }
     const m = this.current;
-    if (m.kind === "reply-once") return { words: text, target: { parent: m.target.ref, root: m.target.root } };
+    if (m.kind === "reply-once") return { words: text, target: { parent: m.target.ref } };
     if (m.kind === "quote-once") return { words: text, quote: m.target.ref };
     const t = this.threadState;
-    return { words: text, ...(m.kind === "thread" && t && { target: { parent: t.cursor, root: t.root } }) };
+    return { words: text, ...(m.kind === "thread" && t && { target: { parent: t.cursor } }) };
   }
 
   private isLoaded(text: string): boolean {
