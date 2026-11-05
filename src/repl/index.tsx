@@ -3,7 +3,7 @@ import { render, renderToString } from "ink";
 import { LaunchList } from "@/repl/ui/LaunchList";
 import { deleteDraft, listDrafts, saveDraft } from "@/drafts";
 import { setPostLabeler } from "@/lib/format";
-import { getSchedulerStatus } from "@/lib/scheduler";
+import { getSchedulerStatus, schedulerProfile } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
 import { setConfigValues } from "@/toml-config";
 import { App, LEFT, type AppProps } from "@/repl/ui/App";
@@ -58,9 +58,10 @@ export async function pickSession(store: Pick<SessionStore, "delete">, listings:
   return picked as SessionId | undefined | null;
 }
 
-function schedulerRunning(): boolean {
+/** There's one job per machine, and it only sends one profile's posts. */
+function schedulerRunning(profile?: string): boolean {
   try {
-    return getSchedulerStatus() === "enabled";
+    return getSchedulerStatus() === "enabled" && (schedulerProfile() ?? "") === (profile ?? "");
   } catch {
     return false; // an unsupported platform: nothing runs by itself
   }
@@ -93,7 +94,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       drafts={{ save: (d) => saveDraft(d, profile), delete: (id) => deleteDraft(id, profile) }}
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
       saveScheduled={(p) => saveScheduledPost(p, profile)}
-      schedulerRunning={schedulerRunning}
+      schedulerRunning={() => schedulerRunning(profile)}
       listDrafts={() => listDrafts(profile)}
       switchAccount={async (name) => {
         if (!opts.switchAccount) throw new Error("Can't switch accounts here");

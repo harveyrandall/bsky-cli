@@ -959,7 +959,7 @@ export class Repl {
     this.unstage(media);
     this.deps.print(`Scheduled for ${formatLocalDateTime(scheduledAt)} (${saved.id})`, "dim");
     if (!this.deps.schedulerRunning()) {
-      this.deps.print("Nothing sends it until the scheduler runs: `bsky schedule enable`, or `bsky schedule watch` in another terminal", "dim");
+      this.deps.print("Nothing sends it until a scheduler runs for this account: `bsky schedule enable`, or `bsky schedule watch` in another terminal", "dim");
     }
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";

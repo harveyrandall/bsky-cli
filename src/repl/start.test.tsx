@@ -3,9 +3,10 @@ import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import { LEFT } from "@/repl/ui/App";
 import { Registry } from "@/repl/core/refs";
 
-const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues, getSchedulerStatus, saveScheduledPost } = vi.hoisted(() => ({
+const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues, getSchedulerStatus, schedulerProfile, saveScheduledPost } = vi.hoisted(() => ({
   saveScheduledPost: vi.fn(),
   getSchedulerStatus: vi.fn(),
+  schedulerProfile: vi.fn(),
   render: vi.fn(),
   detectKittyKeyboard: vi.fn(),
   saveDraft: vi.fn(),
@@ -14,7 +15,7 @@ const { render, detectKittyKeyboard, saveDraft, deleteDraft, setConfigValues, ge
 }));
 vi.mock("@/drafts", () => ({ saveDraft, deleteDraft }));
 vi.mock("@/toml-config", () => ({ setConfigValues }));
-vi.mock("@/lib/scheduler", () => ({ getSchedulerStatus }));
+vi.mock("@/lib/scheduler", () => ({ getSchedulerStatus, schedulerProfile }));
 vi.mock("@/scheduled", () => ({ saveScheduledPost }));
 vi.mock("ink", async (importOriginal) => ({ ...(await importOriginal<typeof import("ink")>()), render }));
 vi.mock("@/repl/ui/terminal", () => ({ detectKittyKeyboard }));
@@ -109,6 +110,22 @@ describe("startRepl", () => {
     expect(deleteDraft).toHaveBeenCalledWith("d1", "work");
     expect(setConfigValues).toHaveBeenCalledWith("/tmp/config.toml", "repl", { undo: 5 });
     expect(configName).toBe("config.toml");
+    app.unmount();
+    await running;
+  });
+
+  it("doesn't count a scheduler that sends another profile's posts", async () => {
+    const app = fakeInstance();
+    render.mockReturnValue(app);
+    const running = startRepl({ ...options, profile: "work" });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    const { schedulerRunning } = render.mock.calls[0][0].props;
+    getSchedulerStatus.mockReturnValue("enabled");
+    schedulerProfile.mockReturnValueOnce(undefined);
+    expect(schedulerRunning()).toBe(false);
+    schedulerProfile.mockReturnValueOnce("work");
+    expect(schedulerRunning()).toBe(true);
+    getSchedulerStatus.mockReset();
     app.unmount();
     await running;
   });

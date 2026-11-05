@@ -1860,7 +1860,7 @@ describe("scheduled posts", () => {
     deps.schedulerRunning.mockReturnValue(false);
     await repl.newMenu();
     await repl.submitText("later");
-    expect(printed()).toContain("Nothing sends it until the scheduler runs: `bsky schedule enable`, or `bsky schedule watch` in another terminal");
+    expect(printed()).toContain("Nothing sends it until a scheduler runs for this account: `bsky schedule enable`, or `bsky schedule watch` in another terminal");
   });
   it("don't mention the scheduler when it's running", async () => {
     const { repl, printed } = setup({}, answers("05-11-2026", "15:30"));
