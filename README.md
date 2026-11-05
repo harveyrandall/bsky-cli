@@ -125,9 +125,11 @@ Files stored:
 - `drafts/` — locally saved drafts
 - `scheduled/` — scheduled posts (one JSON file per post)
 
-Where available, session tokens are also stored in the OS keychain
-(macOS Keychain, GNOME Keyring/libsecret, Windows Credential Manager)
-with filesystem as fallback.
+`bsky login` also copies the session to the OS keychain where available
+(macOS Keychain, GNOME Keyring/libsecret, Windows Credential Manager).
+bsky-cli doesn't read that copy yet and doesn't update it when tokens refresh,
+so the session file is the one in use. Its folder needs to be writable, because
+tokens are saved by replacing the file.
 
 Passwords are **never** saved to disk. They are used only during `bsky login`
 to obtain session tokens, then discarded from memory.

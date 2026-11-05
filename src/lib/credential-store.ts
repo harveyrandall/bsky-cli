@@ -6,8 +6,8 @@
  * - Linux: GNOME Keyring / libsecret via `secret-tool` CLI
  * - Windows: Windows Credential Manager via PowerShell
  *
- * Falls back to filesystem with 0o600 permissions when native
- * tools are unavailable (headless servers, containers, etc.).
+ * Nothing reads these entries yet: the session file is always written,
+ * and is what bsky-cli uses.
  */
 
 import { execFile, spawn } from "node:child_process";

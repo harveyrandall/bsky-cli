@@ -7,9 +7,10 @@ import type { SessionConfig } from "@/lib/types";
 const clients = new Map<string, AtpAgent>();
 
 /**
- * One sign-in per profile, however often a process asks: the REPL runs CLI commands
- * all session, and each new sign-in would spend the refresh token its own agent holds.
- * Everyone gets a clone, which shares the session but can set its own proxy.
+ * One sign-in per profile while its session lasts, however often a process asks: the
+ * REPL runs CLI commands all session, and each new sign-in from the session file would
+ * spend the refresh token the REPL's agent holds. Everyone gets a clone, which shares
+ * the session but can set its own proxy.
  */
 export async function sharedClient(profile: string | undefined, signIn: () => Promise<AtpAgent>): Promise<AtpAgent> {
   const known = clients.get(profile ?? "");
@@ -19,7 +20,7 @@ export async function sharedClient(profile: string | undefined, signIn: () => Pr
   return agent.clone();
 }
 
-/** A failure can't be thrown from here: the library would put the spent token back. */
+/** Must not throw: the refresh has worked by now, but a throw would fail the sign-in, or the request that set it off. */
 function saveRefreshed(session: SessionConfig, profile?: string): void {
   // A session can outlive its place in the file: `bsky login` in another terminal, say.
   const owner = sessionDid(profile);
