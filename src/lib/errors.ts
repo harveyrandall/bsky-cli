@@ -1,16 +1,32 @@
-/** True for transport failures (offline, DNS, refused, timed out); the request may or may not have arrived. */
-export function isNetworkError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : "";
-  const cause = err instanceof Error ? err.cause : undefined;
-  const causeMsg = cause instanceof Error ? cause.message : "";
+/** `status` on an API client error when the request threw, with no response from the server. */
+const NO_RESPONSE = 1;
 
-  return (
-    msg.includes("fetch failed") ||
-    msg.includes("ECONNREFUSED") ||
-    msg.includes("ENOTFOUND") ||
-    msg.includes("ETIMEDOUT") ||
-    causeMsg.includes("fetch failed") ||
-    causeMsg.includes("ECONNREFUSED") ||
-    causeMsg.includes("ENOTFOUND")
-  );
+/** Each runtime words these its own way, and a plain fetch has nothing else to go by. */
+const TRANSPORT_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ConnectionRefused",
+  "ConnectionClosed",
+  "FailedToOpenSocket",
+]);
+
+const TRANSPORT_WORDS = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/;
+
+/** True for transport failures (offline, DNS, refused, cut off, timed out); the request may or may not have arrived. */
+export function isNetworkError(err: unknown): boolean {
+  if ((err as { status?: unknown } | null | undefined)?.status === NO_RESPONSE) return true;
+  const seen = new Set<unknown>();
+  for (let e = err; e instanceof Error && !seen.has(e); e = e.cause) {
+    seen.add(e);
+    if (TRANSPORT_WORDS.test(e.message) || TRANSPORT_CODES.has((e as NodeJS.ErrnoException).code ?? "")) return true;
+  }
+  return false;
 }
