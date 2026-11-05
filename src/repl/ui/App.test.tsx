@@ -67,6 +67,7 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
     unlike: vi.fn(async () => true),
     repost: vi.fn(async () => {}),
     unrepost: vi.fn(async () => true),
+    deletePost: vi.fn(async () => {}),
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
   const saveConfig = vi.fn(async () => {});
@@ -81,6 +82,8 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
+      listDrafts={async () => []}
+      switchAccount={async () => ({ agent, handle: "work.bsky.social" })}
       keeper={o.keeper}
       resume={o.resume}
       configName="config.toml"
@@ -834,5 +837,28 @@ describe("App resuming", drawn, () => {
     });
     await type("\r");
     await vi.waitFor(() => expect(agent.post).toHaveBeenCalledWith("left over", undefined, undefined, undefined));
+  });
+});
+
+describe("App deleting", drawn, () => {
+  it("asks, defaulting to no", async () => {
+    const { type, shows, agent } = setup();
+    await type("/post one", "\r");
+    await tick();
+    await type("/delete 1", "\r");
+    await shows('Delete (1) "one"? [y/N]');
+    await type("\r");
+    await tick();
+    expect(agent.deletePost).not.toHaveBeenCalled();
+  });
+  it("deletes on y", async () => {
+    const { type, shows, agent } = setup();
+    await type("/post one", "\r");
+    await tick();
+    await type("/undo", "\r");
+    await shows('Delete (1) "one"? [y/N]');
+    await type("y");
+    await shows("Deleted (1)");
+    expect(agent.deletePost).toHaveBeenCalledWith(ref(1).uri);
   });
 });

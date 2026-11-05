@@ -96,6 +96,7 @@ function checkEntry(e: unknown, at: string): void {
   need(optional(e.parent, isAtUri), `${at}.parent`);
   need(typeof e.excerpt === "string", `${at}.excerpt`);
   need(optional(e.notes, (v) => typeof v === "string"), `${at}.notes`);
+  need(optional(e.deleted, (v) => typeof v === "boolean"), `${at}.deleted`);
   need(optional(e.external, isHandle), `${at}.external`);
   need(optional(e.letter, isThreadLetter), `${at}.letter`);
 }

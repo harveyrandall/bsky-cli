@@ -19,6 +19,10 @@ function fakeRepl() {
     quote: vi.fn(async () => "done" as const),
     newMenu: vi.fn(async () => "done" as const),
     engage: vi.fn(async () => "done" as const),
+    deletePost: vi.fn(async () => "done" as const),
+    undo: vi.fn(async () => "done" as const),
+    drafts: vi.fn(async () => "done" as const),
+    switchProfile: vi.fn(async () => "done" as const),
     openPost: vi.fn(async () => "done" as const),
     copyPost: vi.fn(async () => "done" as const),
     uriOf: vi.fn(async (_: string): Promise<string | undefined> => "at://x"),
@@ -40,6 +44,30 @@ describe("parseInput", () => {
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
     expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
+  });
+});
+
+describe("managing posts", () => {
+  it("/delete takes a ref, /undo nothing", async () => {
+    const c = ctx();
+    await dispatch("/delete 2", c);
+    await dispatch("/undo", c);
+    expect(c.fake.deletePost).toHaveBeenCalledWith("2");
+    expect(c.fake.undo).toHaveBeenCalledOnce();
+    expect(await dispatch("/delete", c)).toBe("keep");
+  });
+  it("/drafts lists, or loads one", async () => {
+    const c = ctx();
+    await dispatch("/drafts", c);
+    expect(c.fake.drafts).toHaveBeenLastCalledWith(undefined);
+    await dispatch("/drafts 174", c);
+    expect(c.fake.drafts).toHaveBeenLastCalledWith("174");
+  });
+  it("/switch needs a profile", async () => {
+    const c = ctx();
+    await dispatch("/switch work", c);
+    expect(c.fake.switchProfile).toHaveBeenCalledWith("work");
+    expect(await dispatch("/switch", c)).toBe("keep");
   });
 });
 

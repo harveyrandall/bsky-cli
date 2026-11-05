@@ -28,6 +28,8 @@ export interface RegistryEntry {
   excerpt: string;
   /** What went with it, as printed: `📷 2`, `🎞`, `❝ 3`. */
   notes?: string;
+  /** Deleted since. It keeps its label: labels are never reused. */
+  deleted?: boolean;
   /** The author's handle, for a post not made in this session: someone else's, or an older one of yours. */
   external?: Handle;
   letter?: ThreadLetter;
@@ -93,8 +95,18 @@ export class Registry {
 
   constructor(
     readonly prefixed: boolean,
-    private readonly self?: Did,
+    private self?: Did,
   ) {}
+
+  /** Who's writing, after a `/switch`. */
+  setSelf(did: Did): void {
+    this.self = did;
+  }
+
+  markDeleted(uri: string): void {
+    const entry = this.byUri(uri);
+    if (entry) entry.deleted = true;
+  }
 
   newLetter(): ThreadLetter {
     this.lastLetter = letterOf(this.letters++);

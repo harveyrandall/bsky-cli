@@ -34,6 +34,8 @@ export interface AppProps {
   saveConfig: ReplDeps["saveConfig"];
   saveScheduled: ReplDeps["saveScheduled"];
   schedulerRunning: ReplDeps["schedulerRunning"];
+  listDrafts: ReplDeps["listDrafts"];
+  switchAccount: ReplDeps["switchAccount"];
   /** Keeps the session on disk, so it can be resumed. */
   keeper?: Pick<SessionKeeper, "track" | "save">;
   /** A saved session to pick back up. */
@@ -58,6 +60,7 @@ type Overlay =
   | { kind: "choice"; label: string; options: readonly string[]; start?: number; resolve(i: number | undefined): void }
   | { kind: "text"; label: string; resolve(text: string | undefined): void }
   | { kind: "drop"; paths: readonly string[]; resolve(ok: boolean): void }
+  | { kind: "yesno"; label: string; resolve(ok: boolean): void }
   | { kind: "exit" };
 
 export function App(props: AppProps) {
@@ -111,6 +114,7 @@ export function App(props: AppProps) {
             ),
           choose: (label, options, start) => new Promise((resolve) => ask({ kind: "choice", label, options, start, resolve })),
           text: (label) => new Promise((resolve) => ask({ kind: "text", label, resolve })),
+          yesNo: (label) => new Promise((resolve) => ask({ kind: "yesno", label, resolve })),
         },
         print,
         onChange: () => {
@@ -129,6 +133,8 @@ export function App(props: AppProps) {
         schedulerRunning: props.schedulerRunning,
         openUrl,
         copyText,
+        listDrafts: props.listDrafts,
+        switchAccount: props.switchAccount,
         composerBusy: () => held.current !== undefined || composerText().trim() !== "",
       }),
   );
@@ -346,6 +352,17 @@ export function App(props: AppProps) {
           />
         );
       }
+      case "yesno":
+        return (
+          <YesNo
+            label={overlay.label}
+            defaultNo
+            onAnswer={(ok) => {
+              close();
+              overlay.resolve(ok);
+            }}
+          />
+        );
       case "exit":
         return <ExitPrompt onChoose={(c) => void chooseExit(c)} />;
     }

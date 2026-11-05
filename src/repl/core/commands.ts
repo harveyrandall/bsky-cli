@@ -167,6 +167,44 @@ export const COMMANDS: readonly ReplCommand[] = [
     },
   },
   {
+    name: "delete",
+    aliases: [],
+    usage: "/delete <ref>",
+    summary: "Delete one of your posts",
+    run([ref], ctx) {
+      if (ref === undefined) throw new Error("Usage: /delete <ref>");
+      return ctx.repl.deletePost(ref);
+    },
+  },
+  {
+    name: "undo",
+    aliases: [],
+    usage: "/undo",
+    summary: "Delete the last post you made",
+    run(_args, ctx) {
+      return ctx.repl.undo();
+    },
+  },
+  {
+    name: "drafts",
+    aliases: [],
+    usage: "/drafts [id]",
+    summary: "List drafts, or load one into the composer",
+    run([id], ctx) {
+      return ctx.repl.drafts(id);
+    },
+  },
+  {
+    name: "switch",
+    aliases: [],
+    usage: "/switch <profile>",
+    summary: "Post as another account",
+    run([profile], ctx) {
+      if (profile === undefined) throw new Error("Usage: /switch <profile>");
+      return ctx.repl.switchProfile(profile);
+    },
+  },
+  {
     name: "open",
     aliases: [],
     usage: "/open <ref>",

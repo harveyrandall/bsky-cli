@@ -298,6 +298,18 @@ describe("saved sessions", () => {
     writeFileSync(join(sessions(), "k3f7xq.lock"), String(process.pid));
     await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow(join(sessions(), "k3f7xq.lock"));
   });
+  it("switches to another profile's login, and back if it can't", async () => {
+    const { getClient } = await import("@/index");
+    const p = makeProgram();
+    await p.parseAsync(["repl"], { from: "user" });
+    const { switchAccount } = startRepl.mock.lastCall![0];
+    vi.mocked(getClient).mockResolvedValueOnce({ session: { did: "did:plc:work", handle: "work.bsky.social" } } as never);
+    await expect(switchAccount("work")).resolves.toMatchObject({ handle: "work.bsky.social", agent: { selfDid: "did:plc:work" } });
+    expect(p.opts().profile).toBe("work");
+    vi.mocked(getClient).mockRejectedValueOnce(new Error("Not logged in"));
+    await expect(switchAccount("nope")).rejects.toThrow("Not logged in");
+    expect(p.opts().profile).toBe("work");
+  });
   it("uses the session's own profile", async () => {
     write({ profile: "work" });
     const p = makeProgram();
@@ -364,6 +376,11 @@ describe("replAgent", () => {
     const root = { uri: `${uri}r`, cid: "bafyr" } as never;
     await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
     expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
+  });
+  it("deletes a post", async () => {
+    const deletePost = vi.fn(async () => {});
+    await replAgent({ session: { did: "did:plc:me" }, deletePost } as never).deletePost(uri as never);
+    expect(deletePost).toHaveBeenCalledWith(uri);
   });
   it("passes likes and reposts on to what the CLI uses", async () => {
     const { likePost, unlikePost } = await import("@/commands/like");

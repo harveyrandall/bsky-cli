@@ -24,7 +24,9 @@ export function exitSummary(r: {
   /** Set if this session can be resumed. */
   resumeId?: string;
 }): string[] {
-  const own = r.registry.entries().filter((e) => !e.external);
+  const mine = r.registry.entries().filter((e) => !e.external);
+  const own = mine.filter((e) => !e.deleted);
+  const deleted = mine.filter((e) => e.deleted);
   const byRoot = new Map<string, RegistryEntry[]>();
   for (const e of own) byRoot.set(e.root.uri, [...(byRoot.get(e.root.uri) ?? []), e]);
   const groups = [...byRoot.values()];
@@ -52,6 +54,7 @@ export function exitSummary(r: {
     `Session ${span} (${duration(r.endedAt.getTime() - r.startedAt.getTime())})${r.handle && ` as @${r.handle}`}`,
     ...threads.flatMap((g) => [`Thread (${g[0].label}):`, ...g.map(line)]),
     ...(standalone.length ? ["Standalone:", ...standalone.map(line)] : []),
+    ...(deleted.length ? ["Deleted:", ...deleted.map(line)] : []),
     ...r.failures.map(failed),
   ];
 }

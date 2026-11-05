@@ -77,6 +77,7 @@ export function replAgent(agent: AtpAgent): ReplAgent {
     unlike: (post) => unlikePost(agent, post.uri),
     repost: async (post) => void (await repostPost(agent, post)),
     unrepost: (post) => unrepostPost(agent, post.uri),
+    deletePost: async (uri) => void (await agent.deletePost(uri)),
   };
 }
 
@@ -180,7 +181,7 @@ async function openRepl(
     forceAlt: opts.forceAlt === true,
   };
   const client = replAgent(agent);
-  const profile: string | undefined = program.opts().profile;
+  let profile: string | undefined = program.opts().profile;
   const { startRepl } = await import("@/repl");
   await startRepl({
     markers: resume?.settings.markers ?? flagMarkers,
@@ -192,6 +193,18 @@ async function openRepl(
     passthrough: {
       names: () => passthroughNames(program),
       run: (argv, print) => runPassthrough(program, argv, { print, profile }),
+    },
+    async switchAccount(name) {
+      const before = profile;
+      program.setOptionValue("profile", name);
+      try {
+        const next = await getClient(program);
+        profile = name;
+        return { agent: replAgent(next), handle: next.session?.handle ?? "" };
+      } catch (err) {
+        program.setOptionValue("profile", before);
+        throw err;
+      }
     },
     // A resumed session keeps saving even with -R, or what you answer would be asked again.
     session:

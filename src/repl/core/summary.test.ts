@@ -33,6 +33,14 @@ describe("exitSummary", () => {
     });
     expect(lines).toEqual(["3 posts in 1 thread, 1 standalone", "Failed: 2 posts saved as draft d1"]);
   });
+  it("leaves deleted posts out of the count, and lists them when verbose", () => {
+    const reg = sample();
+    reg.markDeleted(ref("c").uri);
+    expect(exitSummary({ registry: reg, failures: [], verbose: false, handle: "me.bsky.social", ...times })).toEqual(["2 posts in 1 thread"]);
+    const lines = exitSummary({ registry: reg, failures: [], verbose: true, handle: "me.bsky.social", ...times });
+    expect(lines.some((l) => l.startsWith("Deleted:"))).toBe(true);
+    expect(lines.join("\n")).toContain("an aside");
+  });
   it("says how to resume", () => {
     const lines = exitSummary({ registry: sample(), failures: [], verbose: false, handle: "me.bsky.social", resumeId: "k3f7xq", ...times });
     expect(lines).toEqual(["3 posts in 1 thread, 1 standalone · resume: bsky -r k3f7xq"]);

@@ -108,10 +108,10 @@ export function TextPrompt({ label, onDone }: { label: string; onDone(text: stri
   );
 }
 
-/** `Attach chart.png? [Y/n]`: Enter or `y` for yes, any other key for no. */
-export function YesNo({ label, onAnswer }: { label: string; onAnswer(ok: boolean): void }) {
-  useInput((input, key) => onAnswer(key.return || input === "y" || input === "Y"));
-  return <Text>{`${label} [Y/n]`}</Text>;
+/** `Attach chart.png? [Y/n]`: `y` for yes, and Enter for the default. Any other key is no. */
+export function YesNo({ label, defaultNo, onAnswer }: { label: string; defaultNo?: boolean; onAnswer(ok: boolean): void }) {
+  useInput((input, key) => onAnswer((key.return && !defaultNo) || input === "y" || input === "Y"));
+  return <Text>{`${label} ${defaultNo ? "[y/N]" : "[Y/n]"}`}</Text>;
 }
 
 /** `Sending in 7s… [Esc] cancel  [Enter] send now` in the undo window; without the keys while pacing. */

@@ -100,6 +100,7 @@ const breaks: [string, (f: Mutable) => void][] = [
   ["posts[0].authorDid", (f) => (f.posts[0].authorDid = "nope")],
   ["posts[0].external", (f) => (f.posts[0].external = "not a handle")],
   ["posts[0].letter", (f) => (f.posts[0].letter = "a")],
+  ["posts[0].deleted", (f) => (f.posts[0].deleted = "yes")],
   ["thread.root", (f) => (f.thread.root = { uri: "x", cid: "y" })],
   ["pending[0].id", (f) => (f.pending[0].id = -1)],
   ["pending[0].createdAt", (f) => (f.pending[0].createdAt = "then")],

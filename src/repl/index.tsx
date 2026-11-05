@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { render, renderToString } from "ink";
 import { LaunchList } from "@/repl/ui/LaunchList";
-import { deleteDraft, saveDraft } from "@/drafts";
+import { deleteDraft, listDrafts, saveDraft } from "@/drafts";
 import { setPostLabeler } from "@/lib/format";
 import { getSchedulerStatus } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
@@ -24,6 +24,8 @@ export interface ReplOptions {
   configPath: string;
   profile?: string;
   passthrough?: AppProps["passthrough"];
+  /** `/switch`: the account behind a profile. */
+  switchAccount?(profile: string): Promise<{ agent: ReplAgent; handle: string }>;
   session?: {
     store: Pick<SessionStore, "save" | "delete" | "lock" | "unlock" | "prune">;
     id: SessionId;
@@ -69,6 +71,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // protocol, and restores it on every exit path, when told it's supported.
   const kitty = await detectKittyKeyboard(process.stdin, process.stdout);
   const session = opts.session;
+  // /switch changes these.
+  let { profile, handle } = opts;
   const startedAt = session?.resume ? new Date(session.createdAt) : new Date();
   let repl: Repl | undefined;
   const keeper =
@@ -85,10 +89,19 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       kittyHint={!kitty}
       settings={opts.settings}
       agent={opts.agent}
-      drafts={{ save: (d) => saveDraft(d, opts.profile), delete: (id) => deleteDraft(id, opts.profile) }}
+      drafts={{ save: (d) => saveDraft(d, profile), delete: (id) => deleteDraft(id, profile) }}
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
-      saveScheduled={(p) => saveScheduledPost(p, opts.profile)}
+      saveScheduled={(p) => saveScheduledPost(p, profile)}
       schedulerRunning={schedulerRunning}
+      listDrafts={() => listDrafts(profile)}
+      switchAccount={async (name) => {
+        if (!opts.switchAccount) throw new Error("Can't switch accounts here");
+        const next = await opts.switchAccount(name);
+        profile = name;
+        handle = next.handle;
+        keeper?.setAccount({ handle: handle as Handle, did: next.agent.selfDid, profile });
+        return next;
+      }}
       keeper={keeper}
       resume={session?.resume}
       passthrough={opts.passthrough}
@@ -143,7 +156,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       verbose: opts.settings.verbose,
       startedAt,
       endedAt: new Date(),
-      handle: opts.handle,
+      handle,
       resumeId: resumable ? session?.id : undefined,
     });
     for (const line of lines) process.stdout.write(`${line}\n`);
@@ -157,11 +170,13 @@ const offline = async (): Promise<never> => {
 /** Props for a frame with no account behind it: the smoke run and tests. */
 export const offlineProps: Omit<AppProps, "markers" | "kittyHint"> = {
   settings: { autoThread: false, prefixThread: false, threadLabel: false, undo: 0, pace: 0, askToSave: false, verbose: false, forceAlt: false },
-  agent: { selfDid: "did:plc:offline", resolveHandle: offline, getPosts: offline, post: offline, like: offline, unlike: offline, repost: offline, unrepost: offline },
+  agent: { selfDid: "did:plc:offline", resolveHandle: offline, getPosts: offline, post: offline, like: offline, unlike: offline, repost: offline, unrepost: offline, deletePost: offline },
   drafts: { save: offline, delete: offline },
   saveConfig: offline,
   saveScheduled: offline,
   schedulerRunning: () => false,
+  listDrafts: offline,
+  switchAccount: offline,
   configName: "config.toml",
 };
 
