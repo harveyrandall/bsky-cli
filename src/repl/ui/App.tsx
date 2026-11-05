@@ -429,7 +429,7 @@ export function App(props: AppProps) {
       {failure && (
         <Text color="yellow">
           {failure.kind === "expired"
-            ? "Paused: session expired — exit and run `bsky login`, or Esc to cancel what's queued"
+            ? "Paused: session expired — exit and reopen, or Esc to cancel what's queued"
             : failure.kind === "limited"
               ? "Paused: rate limited — /retry to resend it later, Esc to cancel what's queued"
               : "Paused after a network error — /retry to resend it, Esc to cancel what's queued"}

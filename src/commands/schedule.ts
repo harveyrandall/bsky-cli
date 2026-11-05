@@ -573,7 +573,10 @@ To automate posting, you can:
 
       const job = new Cron(
         opts.interval,
-        { catch: true, protect: true },
+        {
+          catch: (err) => console.error(`Scheduled run failed: ${err instanceof Error ? err.message : String(err)}`),
+          protect: true,
+        },
         async () => {
           const count = await postDueItems(program);
           if (count > 0) {

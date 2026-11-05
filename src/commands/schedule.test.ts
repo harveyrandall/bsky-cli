@@ -322,9 +322,16 @@ describe("schedule watch", () => {
 
     expect(Cron).toHaveBeenCalledWith(
       "* * * * *",
-      { catch: true, protect: true },
+      { catch: expect.any(Function), protect: true },
       expect.any(Function),
     );
+  });
+
+  it("says why a run failed, or a dead session would look like a healthy watcher", async () => {
+    await program.parseAsync(["node", "bsky", "schedule", "watch"]);
+    const { catch: onError } = vi.mocked(Cron).mock.lastCall![1] as unknown as { catch(err: unknown): void };
+    onError(new Error("Session expired"));
+    expect(errorSpy).toHaveBeenCalledWith("Scheduled run failed: Session expired");
   });
 
   it("passes custom --interval to Cron", async () => {

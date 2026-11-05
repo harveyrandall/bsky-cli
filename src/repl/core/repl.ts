@@ -70,6 +70,8 @@ export interface ReplAgent extends RefAgent {
   /** False if there was no repost to remove. */
   unrepost(post: StrongRef): Promise<boolean>;
   deletePost(uri: AtUri): Promise<void>;
+  /** False once the server has refused the session's tokens. */
+  signedIn(): boolean;
 }
 
 export interface ReplDeps {
@@ -161,6 +163,7 @@ export class Repl {
     this.pipeline = new Pipeline({
       ...this.timers,
       send: (text, reply, media, quote) => this.agent.post(text, reply, media, quote),
+      signedIn: () => this.agent.signedIn(),
       threadTarget: () => this.threadState && { parent: this.threadState.cursor, root: this.threadState.root },
       saveDraft: deps.saveDraft,
       deleteDraft: deps.deleteDraft,
@@ -1189,7 +1192,7 @@ export class Repl {
     } else if (f.kind === "network" || f.kind === "limited") {
       this.deps.print(`${why}; saved as draft ${f.draftId}. /retry to send it ${f.kind === "limited" ? "later" : "now"}.`, "error");
     } else if (f.kind === "expired") {
-      this.deps.print("Session expired — exit and run `bsky login`", "error");
+      this.deps.print("Session expired — exit and reopen the REPL, or run `bsky login` if that fails", "error");
       if (f.draftId) this.deps.print(`Unsent posts are saved as draft ${f.draftId}.`, "dim");
       else this.deps.print(f.message, "error");
     } else {

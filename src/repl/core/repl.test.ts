@@ -39,6 +39,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     repost: vi.fn(async (_: StrongRef) => {}),
     unrepost: vi.fn(async (_: StrongRef) => true),
     deletePost: vi.fn(async (_: string) => {}),
+    signedIn: vi.fn(() => false),
   };
   const ask: ReplAsk = {
     cooldown: vi.fn(async () => 0 as const),
@@ -1337,6 +1338,16 @@ describe("/delete and /undo", () => {
     await act(repl);
     expect(deps.onChange).toHaveBeenCalled();
   });
+  it("asks the current account whether it's still signed in", async () => {
+    const s = setup();
+    const next = { ...s.agent, selfDid: "did:plc:work" as Did, signedIn: vi.fn(() => true), post: vi.fn(async () => { throw Object.assign(new Error("Token has expired"), { status: 400, error: "ExpiredToken" }); }) };
+    s.deps.switchAccount.mockResolvedValueOnce({ agent: next, handle: "work.bsky.social" });
+    await s.repl.switchProfile("work");
+    await s.repl.post("one");
+    await s.flush();
+    expect(next.signedIn).toHaveBeenCalled();
+    expect(s.repl.failures()[0].kind).toBe("network");
+  });
   it("/undo says when there's nothing to take back", async () => {
     const { repl, printed } = setup();
     expect(await repl.undo()).toBe("done");
@@ -2284,6 +2295,6 @@ describe("failures", () => {
     agent.post.mockRejectedValueOnce(Object.assign(new Error("expired"), { status: 401 }));
     await repl.post("hello");
     await flush();
-    expect(printed()).toContain("Session expired — exit and run `bsky login`");
+    expect(printed()).toContain("Session expired — exit and reopen the REPL, or run `bsky login` if that fails");
   });
 });

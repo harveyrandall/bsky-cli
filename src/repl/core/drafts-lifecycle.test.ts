@@ -22,7 +22,7 @@ function setup(settings: Partial<ReplSettings> = {}, store = new Map<string, Dra
   const agent = {
     selfDid: me, resolveHandle: vi.fn(async () => me), getPosts: vi.fn(async () => [] as never[]),
     post: vi.fn(async (text: string) => { posted.push(text); return ref(++n); }),
-    like: vi.fn(), unlike: vi.fn(), repost: vi.fn(), unrepost: vi.fn(), deletePost: vi.fn(),
+    like: vi.fn(), unlike: vi.fn(), repost: vi.fn(), unrepost: vi.fn(), deletePost: vi.fn(), signedIn: vi.fn(() => false),
   };
   const ask: ReplAsk = { cooldown: vi.fn(async () => 0 as const), saveOffer: vi.fn(async () => "no" as const), confirm: vi.fn(async () => true), alt: vi.fn(async () => undefined), choose: vi.fn(async () => undefined), text: vi.fn(async () => undefined), yesNo: vi.fn(async () => true), ...answers };
   const lines: string[] = [];

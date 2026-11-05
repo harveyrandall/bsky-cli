@@ -78,6 +78,7 @@ export function replAgent(agent: AtpAgent): ReplAgent {
     repost: async (post) => void (await repostPost(agent, post)),
     unrepost: (post) => unrepostPost(agent, post.uri),
     deletePost: async (uri) => void (await agent.deletePost(uri)),
+    signedIn: () => agent.hasSession,
   };
 }
 

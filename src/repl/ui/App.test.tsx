@@ -71,6 +71,7 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
     repost: vi.fn(async () => {}),
     unrepost: vi.fn(async () => true),
     deletePost: vi.fn(async () => {}),
+    signedIn: vi.fn(() => false),
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
   const saveConfig = vi.fn(async () => {});

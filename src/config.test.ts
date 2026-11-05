@@ -13,6 +13,8 @@ vi.mock("node:fs", () => ({
   readdirSync: vi.fn(),
 }));
 
+vi.mock("@/lib/files", () => ({ replaceFile: vi.fn() }));
+
 vi.mock("chalk", () => ({
   default: {
     yellow: (s: string) => s,
@@ -295,9 +297,7 @@ describe("loadSessionConfig — handle-based fallback", () => {
 
 describe("saveSessionConfig", () => {
   it("writes session as JSON with 0o600 permissions", async () => {
-    const { writeFile, mkdir } = await import("node:fs/promises");
-    (mkdir as any).mockResolvedValue(undefined);
-    (writeFile as any).mockResolvedValue(undefined);
+    const { replaceFile } = await import("@/lib/files");
 
     const { saveSessionConfig } = await import("./config");
     const session = {
@@ -308,10 +308,10 @@ describe("saveSessionConfig", () => {
       accessJwt: "access",
       refreshJwt: "refresh",
     };
-    await saveSessionConfig(session);
-    expect(writeFile).toHaveBeenCalled();
-    const [, content, opts] = (writeFile as any).mock.calls[0];
-    expect(opts.mode).toBe(0o600);
+    saveSessionConfig(session);
+    expect(replaceFile).toHaveBeenCalled();
+    const [, content, mode] = (replaceFile as any).mock.calls[0];
+    expect(mode).toBe(0o600);
     const parsed = JSON.parse(content.trim());
     expect(parsed).toEqual(session);
     expect(parsed.password).toBeUndefined();

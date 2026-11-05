@@ -233,10 +233,15 @@ describe("saved sessions", () => {
   const session = () => startRepl.mock.lastCall?.[0].session;
   beforeEach(() => {
     sessionsHome.dir = mkdtempSync(join(tmpdir(), "bsky-repl-"));
+    // The bskyDir mock above doesn't reach sessionPath, which calls its own.
+    vi.stubEnv("XDG_CONFIG_HOME", sessionsHome.dir);
     setTTY(true, true);
     pickSession.mockResolvedValue(undefined);
   });
-  afterEach(() => rmSync(sessionsHome.dir, { recursive: true, force: true }));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(sessionsHome.dir, { recursive: true, force: true });
+  });
 
   it("starts a new session without asking when none are saved", async () => {
     await makeProgram().parseAsync(["repl"], { from: "user" });
@@ -452,6 +457,10 @@ describe("replAgent", () => {
     const root = { uri: `${uri}r`, cid: "bafyr" } as never;
     await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
     expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
+  });
+  it("says whether the session is still good", () => {
+    const agent = replAgent({ session: { did: "did:plc:me" }, hasSession: true } as never);
+    expect(agent.signedIn()).toBe(true);
   });
   it("deletes a post", async () => {
     const deletePost = vi.fn(async () => {});

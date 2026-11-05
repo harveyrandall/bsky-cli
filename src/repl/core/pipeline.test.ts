@@ -27,6 +27,7 @@ function setup(o: { undo?: number; pace?: number } = {}) {
     saveDraft: vi.fn(async () => ({ id: "d1" })),
     deleteDraft: vi.fn(async () => {}),
     settings: () => ({ undo: o.undo ?? 0, pace: o.pace ?? 0 }),
+    signedIn: vi.fn(() => false),
     onSent: vi.fn((item, _i, r: StrongRef, target?: SendTarget) => {
       if (item.intent.kind === "thread") {
         root ??= target?.root ?? r;
@@ -410,6 +411,22 @@ describe("Pipeline errors", () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(deps.send).toHaveBeenCalledTimes(2);
     expect(deps.onFailed).toHaveBeenCalledWith(expect.objectContaining({ kind: "limited" }));
+  });
+  it("doesn't call a token expired while the session is still good: its refresh only failed for now", async () => {
+    const { pipeline, deps } = setup();
+    deps.signedIn.mockReturnValue(true);
+    deps.send.mockRejectedValueOnce(Object.assign(new Error("Token has expired"), { status: 400, error: "ExpiredToken" }));
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.onFailed).toHaveBeenCalledWith(expect.objectContaining({ kind: "network" }));
+  });
+  it("still takes the server's word for a token it won't accept", async () => {
+    const { pipeline, deps } = setup();
+    deps.signedIn.mockReturnValue(true);
+    deps.send.mockRejectedValueOnce(Object.assign(new Error("Bad token"), { status: 400, error: "InvalidToken" }));
+    pipeline.enqueue({ kind: "standalone" }, ["a"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(deps.onFailed).toHaveBeenCalledWith(expect.objectContaining({ kind: "expired" }));
   });
   it("reports an expired session and keeps the text as a draft", async () => {
     const { pipeline, deps } = setup();

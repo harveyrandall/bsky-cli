@@ -1,9 +1,10 @@
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readdirSync } from "node:fs";
 import chalk from "chalk";
+import { replaceFile } from "@/lib/files";
 import type { Config, SessionConfig, AuthInfo } from "@/lib/types";
 
 // ── Platform-appropriate config directory ────────────────────────────
@@ -145,7 +146,13 @@ async function migrateIfNeeded(profile?: string): Promise<SessionConfig | null> 
     };
 
     // Save to new location
-    await saveSessionConfig(session, profile);
+    try {
+      saveSessionConfig(session, profile);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(chalk.yellow(`Couldn't move your session to ${sessionPath(profile)}: ${reason}`));
+      return null;
+    }
 
     // Rename old config (don't delete — keep as backup)
     await rename(legacyConfigFp, legacyConfigFp + ".bak").catch(() => {});
@@ -225,15 +232,21 @@ export async function loadSessionConfig(
   );
 }
 
-export async function saveSessionConfig(
-  session: SessionConfig,
-  profile?: string,
-): Promise<void> {
-  const fp = sessionPath(profile);
-  await mkdir(dirname(fp), { recursive: true });
-  await writeFile(fp, JSON.stringify(session, null, "  ") + "\n", {
-    mode: 0o600,
-  });
+/** Who's logged in to a profile, going by its file: undefined if that can't be read. */
+export function sessionDid(profile?: string): string | undefined {
+  try {
+    return (JSON.parse(readFileSync(sessionPath(profile), "utf-8")) as Partial<SessionConfig>).did;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Done before it returns, and in one step: a refresh has already spent the old
+ * token, and another process may be reading this file.
+ */
+export function saveSessionConfig(session: SessionConfig, profile?: string): void {
+  replaceFile(sessionPath(profile), JSON.stringify(session, null, "  ") + "\n", 0o600);
 }
 
 /** @deprecated Use saveSessionConfig — this persists passwords */
