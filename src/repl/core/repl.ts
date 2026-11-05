@@ -790,9 +790,18 @@ export class Repl {
       this.deps.print("Media on later posts can't be loaded here: use bsky drafts send", "error");
       return "keep";
     }
-    const images = (first.images ?? []).map((path, i): StagedMedia => ({ path, kind: "image", ...(first.imageAlts?.[i] !== undefined && { alt: first.imageAlts[i] }) }));
-    const video: StagedMedia[] = first.video ? [{ path: first.video, kind: "video", ...(first.videoAlt !== undefined && { alt: first.videoAlt }) }] : [];
+    const absolute = (path: string) => resolve(expandHome(path));
+    const images = (first.images ?? []).map((path, i): StagedMedia => ({ path: absolute(path), kind: "image", ...(first.imageAlts?.[i] !== undefined && { alt: first.imageAlts[i] }) }));
+    const video: StagedMedia[] = first.video ? [{ path: absolute(first.video), kind: "video", ...(first.videoAlt !== undefined && { alt: first.videoAlt }) }] : [];
     const all = [...images, ...video];
+    for (const m of all) {
+      const { error } = await inspectMedia(m.path, this.deps.fs ?? nodeMediaFs);
+      // Sent without it, the draft would be deleted with the file still to go.
+      if (error !== undefined) {
+        this.deps.print(`Can't load that draft: ${error}`, "error");
+        return "keep";
+      }
+    }
     // Loading it again, as after Esc, finds its media staged already.
     const media = all.filter((m) => !this.media.some((s) => s.path === m.path));
     if (!this.fits(media)) {
