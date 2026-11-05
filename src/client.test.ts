@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockAgent = { resumeSession: vi.fn() };
-let persistSession: (event: string, data?: object) => void;
+let persistSession: AtpPersistSessionHandler;
 
 vi.mock("@atproto/api", () => ({
   AtpAgent: vi.fn(function (options: { persistSession: typeof persistSession }) {
@@ -15,7 +15,7 @@ vi.mock("@/config", () => ({
   sessionDid: vi.fn(),
 }));
 
-import type { AtpAgent } from "@atproto/api";
+import type { AtpAgent, AtpPersistSessionHandler, AtpSessionEvent } from "@atproto/api";
 import { createClient, sharedClient } from "./client";
 import { saveSessionConfig } from "@/config";
 
@@ -29,7 +29,7 @@ const session = {
 };
 
 describe("createClient", () => {
-  const refreshed = { did: "did:plc:test", handle: "alice.bsky.social", accessJwt: "new-access", refreshJwt: "new-refresh" };
+  const refreshed = { did: "did:plc:test", handle: "alice.bsky.social", accessJwt: "new-access", refreshJwt: "new-refresh", active: true };
 
   beforeEach(() => {
     // mockReset clears history AND implementations (mockRejectedValue, etc.)
@@ -56,8 +56,9 @@ describe("createClient", () => {
     expect(saveSessionConfig).toHaveBeenCalledWith(expect.objectContaining({ accessJwt: "new-access" }), "work");
   });
 
-  it.each(["expired", "network-error", "create-failed"])("saves nothing on %s", async (event) => {
-    mockAgent.resumeSession.mockImplementation(async () => persistSession(event));
+  // The library passes the session on a network error, and it's the one that may be out of date.
+  it.each<AtpSessionEvent>(["expired", "network-error", "create-failed"])("saves nothing on %s", async (event) => {
+    mockAgent.resumeSession.mockImplementation(async () => persistSession(event, event === "network-error" ? refreshed : undefined));
     await createClient(session);
     expect(saveSessionConfig).not.toHaveBeenCalled();
   });

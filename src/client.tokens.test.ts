@@ -172,12 +172,13 @@ describe("a session's tokens", () => {
     });
     await expect(createClient(session)).rejects.toThrow(`Couldn't sign in at ${HOST}: Was there a typo`);
   });
-  it("stay as they were if the server can't be reached", async () => {
+  it("stay as they were if the server can't be reached, even if the file has moved on", async () => {
     const session = loggedIn();
+    saveSessionConfig({ ...session, refreshJwt: "from-another-terminal" });
     vi.stubGlobal("fetch", async () => {
       throw new TypeError("fetch failed");
     });
     await expect(createClient(session)).rejects.toThrow("Can't reach");
-    expect(onDisk().refreshJwt).toBe("refresh-1");
+    expect(onDisk().refreshJwt).toBe("from-another-terminal");
   });
 });
