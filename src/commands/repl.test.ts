@@ -213,7 +213,7 @@ describe("ignoredFlags", () => {
     [{ threadLabel: true }, "--thread-label: /settings thread-label append"],
     [{ prependThreadLabel: true }, "--prepend-thread-label: /settings thread-label prepend"],
     [{ verbose: true }, "-v: /settings verbose on"],
-    [{ prefixThread: true }, "-l: a session's labels can't change, so start a new session to use it"],
+    [{ prefixThread: true }, "-l: start a new session, as a session's labels can't change"],
   ])("gives what to run for %j", (flags, note) => {
     expect(notes(flags)).toEqual([note]);
   });
@@ -346,6 +346,45 @@ describe("saved sessions", () => {
     write();
     await makeProgram().parseAsync(["repl", "-r", "k3f7xq", "--undo", "10"], { from: "user" });
     expect(session().ignoredFlags).toEqual(["--undo 10: /settings undo 10"]);
+  });
+  describe("flags a session overrules that aren't settings", () => {
+    const withProfile = () => {
+      const p = new Command().exitOverride().option("-p, --profile <name>");
+      registerRepl(p);
+      return p;
+    };
+    it("says when -p lost to the session's own profile, so you don't post as the wrong account", async () => {
+      write({ profile: "home" });
+      await withProfile().parseAsync(["-p", "work", "repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual(["-p work: /switch work, as this session belongs to @me.bsky.social"]);
+    });
+    it("says so when the session has no profile of its own", async () => {
+      write();
+      await withProfile().parseAsync(["-p", "work", "repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual(["-p work: /switch work, as this session belongs to @me.bsky.social"]);
+    });
+    it("says nothing when -p is the session's own", async () => {
+      write({ profile: "home" });
+      await withProfile().parseAsync(["-p", "home", "repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual([]);
+    });
+    it("doesn't count a profile from the environment", async () => {
+      write({ profile: "home" });
+      const p = withProfile();
+      p.setOptionValueWithSource("profile", "work", "env");
+      await p.parseAsync(["repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual([]);
+    });
+    it("says -R can't stop a resumed session saving", async () => {
+      write();
+      await makeProgram().parseAsync(["repl", "-r", "k3f7xq", "-R"], { from: "user" });
+      expect(session().ignoredFlags).toEqual(["-R: start a new session, as one you resume keeps saving"]);
+    });
+    it("doesn't count resumable = false from the config", async () => {
+      write();
+      await makeProgram({ repl: { resumable: false } }).parseAsync(["repl", "-r", "k3f7xq"], { from: "user" });
+      expect(session().ignoredFlags).toEqual([]);
+    });
   });
   it("has none to pass on for a new session", async () => {
     await makeProgram().parseAsync(["repl", "--undo", "10"], { from: "user" });

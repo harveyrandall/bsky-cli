@@ -115,10 +115,10 @@ export function ignoredFlags(given: (option: string) => boolean, flags: Record<s
   if (given("autoThread") && flags.autoThread !== saved.autoThread) {
     notes.push(flags.autoThread ? "-t: /auto-thread on" : "--no-auto-thread: /auto-thread off");
   }
-  if (given("prefixThread") && !saved.prefixThread) notes.push("-l: a session's labels can't change, so start a new session to use it");
+  if (given("prefixThread") && !saved.prefixThread) notes.push("-l: start a new session, as a session's labels can't change");
   if (given("forceAlt") && !saved.forceAlt) notes.push("-f: /settings force-alt on");
   if (given("prependThreadLabel") && saved.threadLabel !== "prepend") notes.push("--prepend-thread-label: /settings thread-label prepend");
-  else if (given("threadLabel") && !given("prependThreadLabel") && saved.threadLabel !== "append") notes.push("--thread-label: /settings thread-label append");
+  if (given("threadLabel") && !given("prependThreadLabel") && saved.threadLabel !== "append") notes.push("--thread-label: /settings thread-label append");
   if (given("verbose") && !saved.verbose) notes.push("-v: /settings verbose on");
   return notes;
 }
@@ -166,9 +166,11 @@ export function registerRepl(program: Command): void {
       const store = new SessionStore(join(bskyDir(), "repl", "sessions"));
       const resume = await chooseSession(opts, store);
       if (resume === null) return;
+      // Read first: the session's own profile replaces it.
+      const asked: string | undefined = program.getOptionValueSource("profile") === "cli" ? program.opts().profile : undefined;
       if (resume) program.setOptionValue("profile", resume.profile);
       try {
-        await openRepl(program, cmd, opts, store, keep, markers, resume);
+        await openRepl(program, cmd, opts, store, keep, markers, resume, asked);
       } catch (err) {
         if (resume) await store.unlock(resume.id);
         throw err;
@@ -184,6 +186,7 @@ async function openRepl(
   keep: number,
   flagMarkers: Markers,
   resume: ReplSessionFile | undefined,
+  asked?: string,
 ): Promise<void> {
   const agent = await getClient(program);
   if (resume && agent.session?.did !== resume.did) {
@@ -251,11 +254,11 @@ async function openRepl(
             keep,
             resume,
             ignoredFlags: resume
-              ? ignoredFlags(
-                  (name) => (name === "verbose" ? program : cmd).getOptionValueSource(name) === "cli",
-                  { ...opts, verbose: program.opts().verbose },
-                  resume.settings,
-                )
+              ? [
+                  ...(asked !== undefined && asked !== (resume.profile ?? "") ? [`-p ${asked}: /switch ${asked}, as this session belongs to @${resume.handle}`] : []),
+                  ...(cmd.getOptionValueSource("resumable") === "cli" && opts.resumable === false ? ["-R: start a new session, as one you resume keeps saving"] : []),
+                  ...ignoredFlags((name) => (name === "verbose" ? program : cmd).getOptionValueSource(name) === "cli", opts, resume.settings),
+                ]
               : [],
           }
         : undefined,
