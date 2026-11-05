@@ -21,21 +21,27 @@ export async function sharedClient(profile: string | undefined, signIn: () => Pr
 }
 
 /** Must not throw: the refresh has worked by now, but a throw would fail the sign-in, or the request that set it off. */
-function saveRefreshed(session: SessionConfig, profile?: string): boolean {
+function saveRefreshed(session: SessionConfig, profile?: string): void {
   // A session can outlive its place in the file: `bsky login` in another terminal, say.
   const owner = savedSession(profile)?.did;
   if (owner && owner !== session.did) {
     console.error(chalk.yellow("Another account has logged in to this profile, so this session's tokens weren't saved"));
-    return false;
+    return;
   }
   try {
     saveSessionConfig(session, profile);
-    return true;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.error(chalk.yellow(`Couldn't save your session to ${sessionPath(profile)}: ${reason}. Fix that, or you'll have to log in again.`));
-    return false;
   }
+}
+
+/** The server says this token is finished, by the same test the library drops a session on. */
+async function refused(response: Response): Promise<boolean> {
+  if (response.status === 401) return true;
+  if (response.status !== 400) return false;
+  const body = (await response.clone().json().catch(() => undefined)) as { error?: string } | undefined;
+  return body?.error === "ExpiredToken" || body?.error === "InvalidToken";
 }
 
 /**
@@ -52,25 +58,33 @@ export async function createClient(
 ): Promise<AtpAgent> {
   // `-p <handle>` finds a session by its handle, and its tokens go back where they came from.
   const home = profile && (await findProfile(profile));
-  let lastSaved = session.refreshJwt;
   const agent = new AtpAgent({
     service: session.host,
     // Another process using this login spends the token held here, and leaves the next in
-    // the file. If this one's own save failed, the file is the older of the two.
-    fetch: (input, init) => {
+    // the file. That's only worth trying once the server refuses this one: the file can
+    // hold something older, from a backup, say, and trusting it would end a good session.
+    fetch: async (input, init) => {
+      const own = await globalThis.fetch(input, init);
       const url = input instanceof Request ? input.url : String(input);
-      if (!url.endsWith("/xrpc/com.atproto.server.refreshSession")) return globalThis.fetch(input, init);
+      if (!url.endsWith("/xrpc/com.atproto.server.refreshSession") || !(await refused(own))) return own;
       const saved = savedSession(home);
-      if (saved?.did !== session.did || !saved.refreshJwt || saved.refreshJwt === lastSaved) return globalThis.fetch(input, init);
+      const token = saved?.refreshJwt;
+      if (saved?.did !== session.did || saved.host !== session.host || typeof token !== "string") return own;
       const request = new Request(input, init);
-      request.headers.set("authorization", `Bearer ${saved.refreshJwt}`);
+      if (request.headers.get("authorization") === `Bearer ${token}`) return own;
+      try {
+        request.headers.set("authorization", `Bearer ${token}`);
+      } catch {
+        return own; // not a token anyone issued
+      }
+      await own.body?.cancel();
       return globalThis.fetch(request);
     },
     // Every refresh spends the token before it, here or hours later in a REPL.
     persistSession: (event, data) => {
       if (event !== "update" || !data) return;
       const { did, handle, accessJwt, refreshJwt } = data;
-      if (saveRefreshed({ ...session, did, handle, accessJwt, refreshJwt }, home)) lastSaved = refreshJwt;
+      saveRefreshed({ ...session, did, handle, accessJwt, refreshJwt }, home);
     },
   });
 

@@ -192,6 +192,57 @@ describe("a session's tokens", () => {
         chmodSync(dirname(sessionPath()), 0o700);
       }
     });
+    it("try their own first, so a dead token in the file can't end a good session", async () => {
+      const agent = await createClient(loggedIn());
+      saveSessionConfig({ ...onDisk(), refreshJwt: "restored-from-a-backup" });
+      server.at(150);
+      await expect(agent.getTimeline()).resolves.toBeDefined();
+      expect(server.refreshedWith).not.toContain("restored-from-a-backup");
+      expect(onDisk().refreshJwt).toBe(agent.session?.refreshJwt);
+    });
+    it.skipIf(process.getuid?.() === 0)("keep going after borrowing one whose replacement couldn't be saved", async () => {
+      const agent = await createClient(loggedIn());
+      server.at(10);
+      await createClient(onDisk());
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      chmodSync(dirname(sessionPath()), 0o500);
+      try {
+        server.at(150);
+        await agent.getTimeline();
+        server.at(300);
+        await expect(agent.getTimeline()).resolves.toBeDefined();
+      } finally {
+        chmodSync(dirname(sessionPath()), 0o700);
+      }
+    });
+    it("won't send a token from a login at another host to this one", async () => {
+      const agent = await createClient(loggedIn());
+      server.at(10);
+      await createClient(onDisk());
+      saveSessionConfig({ ...onDisk(), host: "https://other.test.invalid", refreshJwt: "for-the-other-host" });
+      server.at(150);
+      await expect(agent.getTimeline()).rejects.toThrow();
+      expect(server.refreshedWith).not.toContain("for-the-other-host");
+    });
+    it("ends cleanly if the file holds nothing that could be a token", async () => {
+      const agent = await createClient(loggedIn());
+      server.at(10);
+      await createClient(onDisk());
+      saveSessionConfig({ ...onDisk(), refreshJwt: "broken\ntoken" });
+      server.at(150);
+      await expect(agent.getTimeline()).rejects.toThrow();
+      expect(agent.hasSession).toBe(false);
+    });
+    it("end if the server refuses both", async () => {
+      const agent = await createClient(loggedIn());
+      server.at(10);
+      await createClient(onDisk());
+      saveSessionConfig({ ...onDisk(), refreshJwt: "no-longer-any-good" });
+      server.at(150);
+      await expect(agent.getTimeline()).rejects.toThrow();
+      expect(agent.hasSession).toBe(false);
+      expect(server.refreshedWith).toContain("no-longer-any-good");
+    });
     it("use their own when nothing's changed", async () => {
       const agent = await createClient(loggedIn());
       const own = agent.session?.refreshJwt;
