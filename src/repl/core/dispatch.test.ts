@@ -18,6 +18,14 @@ function fakeRepl() {
     detach: vi.fn(),
     quote: vi.fn(async () => "done" as const),
     newMenu: vi.fn(async () => "done" as const),
+    engage: vi.fn(async () => "done" as const),
+    deletePost: vi.fn(async () => "done" as const),
+    undo: vi.fn(async () => "done" as const),
+    drafts: vi.fn(async () => "done" as const),
+    switchProfile: vi.fn(async () => "done" as const),
+    openPost: vi.fn(async () => "done" as const),
+    copyPost: vi.fn(async () => "done" as const),
+    uriOf: vi.fn(async (_: string): Promise<string | undefined> => "at://x"),
     settings: () => ({ verbose: false }),
     registry: { entries: () => [{ excerpt: "hello" }], format: () => "(1) 3lbx7kt5def2a" },
   };
@@ -36,6 +44,142 @@ describe("parseInput", () => {
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
     expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
+  });
+});
+
+describe("managing posts", () => {
+  it("/delete takes a ref, /undo nothing", async () => {
+    const c = ctx();
+    await dispatch("/delete 2", c);
+    await dispatch("/undo", c);
+    expect(c.fake.deletePost).toHaveBeenCalledWith("2");
+    expect(c.fake.undo).toHaveBeenCalledOnce();
+    expect(await dispatch("/delete", c)).toBe("keep");
+  });
+  it("/drafts lists, or loads one", async () => {
+    const c = ctx();
+    await dispatch("/drafts", c);
+    expect(c.fake.drafts).toHaveBeenLastCalledWith(undefined);
+    await dispatch("/drafts 174", c);
+    expect(c.fake.drafts).toHaveBeenLastCalledWith("174");
+  });
+  it("/switch takes a profile, or goes back to the unnamed one", async () => {
+    const c = ctx();
+    await dispatch("/switch work", c);
+    expect(c.fake.switchProfile).toHaveBeenLastCalledWith("work");
+    await dispatch("/switch", c);
+    expect(c.fake.switchProfile).toHaveBeenLastCalledWith("");
+  });
+});
+
+describe("/open, /copy and /view", () => {
+  it("take a ref", async () => {
+    const c = ctx();
+    await dispatch("/open 2", c);
+    await dispatch("/copy 2", c);
+    expect(c.fake.openPost).toHaveBeenCalledWith("2");
+    expect(c.fake.copyPost).toHaveBeenCalledWith("2");
+    expect(await dispatch("/open", c)).toBe("keep");
+    expect(await dispatch("/copy", c)).toBe("keep");
+    expect(await dispatch("/view", c)).toBe("keep");
+  });
+  it("/view prints the thread through the CLI", async () => {
+    const run = vi.fn(async (_: string[]) => "done" as const);
+    const c = { ...ctx(), passthrough: { names: () => [], knows: () => false, run } };
+    expect(await dispatch("/view #2", c)).toBe("done");
+    expect(run).toHaveBeenCalledWith(["thread", "at://x"]);
+  });
+  it("/view keeps the text on a bad ref", async () => {
+    const run = vi.fn(async (_: string[]) => "done" as const);
+    const c = { ...ctx(), passthrough: { names: () => [], knows: () => false, run } };
+    c.fake.uriOf.mockResolvedValueOnce(undefined);
+    expect(await dispatch("/view 9", c)).toBe("keep");
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("/open failing", () => {
+  it("keeps the REPL and the text", async () => {
+    const c = ctx();
+    c.fake.openPost.mockRejectedValueOnce(new Error("no browser"));
+    expect(await dispatch("/open 1", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith("/open: no browser", "error");
+  });
+});
+
+describe("likes and reposts", () => {
+  it.each(["like", "unlike", "repost", "unrepost"])("/%s takes a ref", async (name) => {
+    const c = ctx();
+    await dispatch(`/${name} #2`, c);
+    expect(c.fake.engage).toHaveBeenLastCalledWith(name, "#2");
+    expect(await dispatch(`/${name}`, c)).toBe("keep");
+  });
+});
+
+describe("CLI commands", () => {
+  const withCli = () => {
+    const c = ctx();
+    const run = vi.fn(async (_: string[]) => "done" as const);
+    return { c: { ...c, passthrough: { names: () => ["timeline", "search", "post"], knows: (n: string) => ["timeline", "search", "post", "login", "tl"].includes(n), run } }, run };
+  };
+  it("say what became of the text", async () => {
+    const { c, run } = withCli();
+    run.mockResolvedValueOnce("keep" as never);
+    expect(await dispatch("/timeline --nope", c)).toBe("keep");
+    run.mockResolvedValueOnce("keep" as never);
+    expect(await dispatch("/run timeline --nope", c)).toBe("keep");
+  });
+  it("reach blocked commands and aliases, which aren't offered but can say why", async () => {
+    const { c, run } = withCli();
+    await dispatch("/login me", c);
+    await dispatch("/tl -n 5", c);
+    expect(run.mock.calls.map(([argv]) => argv)).toEqual([["login", "me"], ["tl", "-n", "5"]]);
+  });
+  it("/help on a blocked command says why", async () => {
+    const { c, run } = withCli();
+    await dispatch("/help login", c);
+    expect(run).toHaveBeenCalledWith(["login", "--help"]);
+  });
+  it("run when no REPL command has the name, with shell-style arguments", async () => {
+    const { c, run } = withCli();
+    expect(await dispatch(`/search "two words" -n 5`, c)).toBe("done");
+    expect(run).toHaveBeenCalledWith(["search", "two words", "-n", "5"]);
+  });
+  it("lose to a REPL command of the same name", async () => {
+    const { c, run } = withCli();
+    await dispatch("/post hi", c);
+    expect(run).not.toHaveBeenCalled();
+    expect(c.fake.post).toHaveBeenCalledWith("hi");
+  });
+  it("can be asked for by name with /run", async () => {
+    const { c, run } = withCli();
+    await dispatch("/run post hi", c);
+    expect(run).toHaveBeenCalledWith(["post", "hi"]);
+  });
+  it("say so if /run has nothing to run", async () => {
+    const { c } = withCli();
+    expect(await dispatch("/run", c)).toBe("keep");
+    expect(printed(c)).toContain("Usage: /run");
+    const none = ctx();
+    expect(await dispatch("/run timeline", none)).toBe("keep");
+    expect(printed(none)).toContain("aren't available");
+  });
+  it("are suggested for a typo", async () => {
+    const { c } = withCli();
+    expect(await dispatch("/timelin", c)).toBe("keep");
+    expect(printed(c)).toContain("Did you mean /timeline?");
+  });
+  it("show up in /help, marked, and show their own help", async () => {
+    const { c, run } = withCli();
+    await dispatch("/help", c);
+    expect(printed(c)).toContain("↗ From the CLI: /timeline /search");
+    await dispatch("/help timeline", c);
+    expect(run).toHaveBeenCalledWith(["timeline", "--help"]);
+  });
+  it("keep the text if the arguments don't parse", async () => {
+    const { c, run } = withCli();
+    expect(await dispatch(`/search "open`, c)).toBe("keep");
+    expect(run).not.toHaveBeenCalled();
   });
 });
 

@@ -352,7 +352,7 @@ describe("Pipeline errors", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(pipeline.pending()[0]).toMatchObject({ posts: ["b"], draftId: "d1" });
   });
-  it("deletes the old draft when the server rejects a retry: the text goes back to the composer", async () => {
+  it("keeps the old draft when the server rejects a retry: nothing of it went", async () => {
     const { pipeline, deps } = setup();
     deps.send.mockRejectedValueOnce(fetchFailed());
     pipeline.enqueue({ kind: "standalone" }, ["a"]);
@@ -360,8 +360,8 @@ describe("Pipeline errors", () => {
     deps.send.mockRejectedValueOnce(new Error("Record too large"));
     await pipeline.retry();
     await vi.advanceTimersByTimeAsync(0);
-    expect(deps.onFailed).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "rejected" }));
-    expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
+    expect(deps.onFailed).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "rejected", source: "d1" }));
+    expect(deps.deleteDraft).not.toHaveBeenCalled();
   });
   it("doesn't call a sent post failed when recording it throws", async () => {
     const { pipeline, deps, sent } = setup();

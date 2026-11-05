@@ -5,7 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { canStage, type StagedMedia } from "./media";
 import { brokenRule, type Markers } from "./markers";
 import type { Unsent } from "./pipeline";
-import type { RegistryEntry } from "./refs";
+import type { RegistryEntry, ViewedEntry } from "./refs";
 import type { ReplSettings, ReturnTo, ThreadState } from "./repl";
 import {
   isAtUri,
@@ -18,6 +18,7 @@ import {
   isRkey,
   isSessionId,
   isThreadLetter,
+  isViewedLabel,
   type Did,
   type Handle,
   type IsoUtc,
@@ -43,13 +44,14 @@ export interface ReplSessionFile {
   profile?: string;
   settings: ReplSettings & { markers: Markers };
   posts: RegistryEntry[];
-  /** `#n` labels, which arrive with viewing posts. */
-  viewed: never[];
+  viewed: ViewedEntry[];
   thread?: ThreadState;
   /** What a bare number means once the thread has stopped. */
   lastThreadLetter?: ThreadLetter;
   mode: SavedMode;
   composer: { text: string; cursor: number };
+  /** The draft in the composer. */
+  loaded?: { id: string; text: string; media: string[] };
   staged: StagedMedia[];
   pending: Unsent[];
   history: string[];
@@ -96,6 +98,7 @@ function checkEntry(e: unknown, at: string): void {
   need(optional(e.parent, isAtUri), `${at}.parent`);
   need(typeof e.excerpt === "string", `${at}.excerpt`);
   need(optional(e.notes, (v) => typeof v === "string"), `${at}.notes`);
+  need(optional(e.deleted, (v) => typeof v === "boolean"), `${at}.deleted`);
   need(optional(e.external, isHandle), `${at}.external`);
   need(optional(e.letter, isThreadLetter), `${at}.letter`);
 }
@@ -138,6 +141,7 @@ function checkItem(item: unknown, at: string): void {
   need(typeof item.createdAt === "number", `${at}.createdAt`);
   need(optional(item.target, isTarget), `${at}.target`);
   need(optional(item.draftId, (v) => typeof v === "string"), `${at}.draftId`);
+  need(optional(item.stale, (v) => typeof v === "boolean"), `${at}.stale`);
   if (item.media !== undefined) checkMedia(item.media, `${at}.media`);
   const intent = item.intent as Fields;
   if (intent.kind === "quote") need(item.posts.length === 1 && item.media === undefined && item.target === undefined, at);
@@ -164,6 +168,12 @@ function checkTogether(f: ReplSessionFile): void {
     entries.set(e.uri, e);
   });
   need(f.counters.nextLabel > 0, "counters.nextLabel");
+  const viewed = new Set<string>();
+  f.viewed.forEach((v, i) => {
+    need(!viewed.has(v.label), `viewed[${i}].label`);
+    need(Number(v.label.slice(1)) < f.counters.nextViewed, "counters.nextViewed");
+    viewed.add(v.label);
+  });
   const cursor = f.thread && entries.get(f.thread.cursor.uri);
   if (cursor) need(cursor.cid === f.thread!.cursor.cid && cursor.root.uri === f.thread!.root.uri, "thread.cursor");
 }
@@ -181,7 +191,13 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   checkSettings(raw.settings);
   need(Array.isArray(raw.posts), "posts");
   raw.posts.forEach((e, i) => checkEntry(e, `posts[${i}]`));
-  need(Array.isArray(raw.viewed) && raw.viewed.length === 0, "viewed");
+  need(Array.isArray(raw.viewed), "viewed");
+  raw.viewed.forEach((v: unknown, i) => {
+    need(isObject(v), `viewed[${i}]`);
+    need(isViewedLabel(v.label), `viewed[${i}].label`);
+    need(isAtUri(v.uri), `viewed[${i}].uri`);
+    need(isCid(v.cid), `viewed[${i}].cid`);
+  });
   if (raw.thread !== undefined) {
     const t = raw.thread;
     need(isObject(t), "thread");
@@ -196,6 +212,9 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
   need(isObject(c), "composer");
   need(typeof c.text === "string", "composer.text");
   need(isCount(c.cursor), "composer.cursor");
+  const isLoaded = (v: unknown) =>
+    isObject(v) && typeof v.id === "string" && typeof v.text === "string" && Array.isArray(v.media) && v.media.every((p) => typeof p === "string");
+  need(optional(raw.loaded, isLoaded), "loaded");
   checkMedia(raw.staged, "staged");
   need(Array.isArray(raw.pending), "pending");
   raw.pending.forEach((item, i) => checkItem(item, `pending[${i}]`));
@@ -230,7 +249,7 @@ export function newSessionId(): SessionId {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function summaryOf(f: ReplSessionFile): string {
-  const own = f.posts.filter((p) => !p.external);
+  const own = f.posts.filter((p) => !p.external && !p.deleted);
   const threads = new Set(own.filter((p) => p.root.uri !== p.uri).map((p) => p.root.uri));
   const parts = [`@${f.handle}`, `${plural(threads.size, "thread")}, ${plural(own.length, "post")}`];
   return [...parts, ...(own[0] ? [`"${own[0].excerpt}"`] : [])].join(" · ");

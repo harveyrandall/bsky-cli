@@ -97,7 +97,7 @@ describe("resolveRef", () => {
   it.each([
     ["nonsense", `Can't resolve "nonsense": use a number, #n, rkey, at:// URI or bsky.app link`],
     ["9", "No post (9) in this session"],
-    ["#2", "#n labels are for viewed posts, which aren't available yet"],
+    ["#2", "No post #2 in this session"],
   ])("rejects %s", async (input, message) => {
     await expect(resolveRef(input, { registry: new Registry(false), agent: agent() })).rejects.toThrow(message);
   });
@@ -132,6 +132,43 @@ describe("Registry.format", () => {
   });
 });
 
+describe("viewed posts", () => {
+  it("get a label each, once", () => {
+    const reg = new Registry(false);
+    expect(reg.addViewed(ext).label).toBe("#1");
+    expect(reg.addViewed(r1).label).toBe("#2");
+    expect(reg.addViewed(ext).label).toBe("#1");
+    expect(reg.viewed("#2")?.uri).toBe(r1.uri);
+    expect(reg.viewed("#9")).toBeUndefined();
+  });
+  it("resolve through the network, as they could be anyone's", async () => {
+    const reg = new Registry(false);
+    reg.addViewed(ext);
+    const a = agent([alicePost]);
+    const r = await resolveRef("#1", { registry: reg, agent: a });
+    expect(r.ref).toEqual(ext);
+    expect(a.getPosts).toHaveBeenCalledWith([ext.uri]);
+  });
+  it("resolve without the network if they're already known", async () => {
+    const reg = new Registry(false);
+    reg.addOwn(r1, { root: r1, text: "a" });
+    reg.addViewed(r1);
+    const a = agent();
+    await expect(resolveRef("#1", { registry: reg, agent: a })).resolves.toMatchObject({ ref: r1 });
+    expect(a.getPosts).not.toHaveBeenCalled();
+  });
+  it("come back from a snapshot, and numbering carries on", () => {
+    const reg = new Registry(false);
+    reg.addViewed(ext);
+    const { posts, viewed, nextLabel, nextLetter, nextViewed } = reg.snapshot();
+    const back = new Registry(false);
+    back.restore(posts, { nextLabel, nextLetter, nextViewed }, viewed);
+    expect(back.viewed("#1")?.uri).toBe(ext.uri);
+    expect(back.addViewed(r1).label).toBe("#2");
+    expect(back.addViewed(ext).label).toBe("#1");
+  });
+});
+
 describe("a saved registry", () => {
   it("carries on numbering where it stopped", () => {
     const reg = new Registry(false);
@@ -139,7 +176,7 @@ describe("a saved registry", () => {
     reg.addOwn(r2, { root: r1, text: "b" });
     const { posts, nextLabel, nextLetter } = reg.snapshot();
     const back = new Registry(false);
-    back.restore(posts, { nextLabel, nextLetter });
+    back.restore(posts, { nextLabel, nextLetter, nextViewed: 1 });
     expect(back.byLabel("2")?.uri).toBe(r2.uri);
     expect(back.addOwn(r3, { root: r1, text: "c" }).label).toBe("3");
   });
@@ -150,7 +187,7 @@ describe("a saved registry", () => {
     reg.addOwn(r2, { root: r1, text: "b", letter: a });
     const { posts, nextLabel, nextLetter } = reg.snapshot();
     const back = new Registry(true);
-    back.restore(posts, { nextLabel, nextLetter });
+    back.restore(posts, { nextLabel, nextLetter, nextViewed: 1 });
     expect(back.currentLetter()).toBe("A");
     expect(back.addOwn(r3, { root: r1, text: "c", letter: "A" }).label).toBe("A3");
     expect(back.newLetter()).toBe("B");
@@ -174,5 +211,42 @@ describe("an external reply", () => {
     expect(r.ref).toEqual(ext);
     expect(r.root).toEqual(aliceRoot);
     expect(new Registry(false).addExternal(reply, {}).root).toEqual(aliceRoot);
+  });
+});
+
+describe("recentLabels", () => {
+  it("lists your posts, then what you've read, newest first", () => {
+    const reg = new Registry(false, self);
+    const [a, b] = [ref(self, "3lbx7kt5aaa2a"), ref(self, "3lbx7kt5aaa2b")];
+    reg.addOwn(a, { root: a, text: "one" });
+    reg.addOwn(b, { root: a, parent: a.uri, text: "two" });
+    reg.addViewed(ref(alice, "3lbx7kt5aaa2c"));
+    reg.addViewed(ref(alice, "3lbx7kt5aaa2d"));
+    expect(reg.recentLabels()).toEqual(["2", "1", "#2", "#1"]);
+  });
+  it("leaves out what you've deleted", () => {
+    const reg = new Registry(false, self);
+    const a = ref(self, "3lbx7kt5aaa2a");
+    reg.addOwn(a, { root: a, text: "one" });
+    reg.markDeleted(a.uri);
+    expect(reg.recentLabels()).toEqual([]);
+  });
+});
+
+describe("a deleted post", () => {
+  it("says so wherever it's listed", () => {
+    const reg = new Registry(false, self);
+    const a = ref(self, "3lbx7kt5aaa2a");
+    const entry = reg.addOwn(a, { root: a, text: "one" });
+    reg.markDeleted(a.uri);
+    expect(reg.format(entry, false)).toBe("(1) 3lbx7kt5aaa2a deleted");
+  });
+});
+
+describe("a session saved before #n labels existed", () => {
+  it("starts them at #1, not #0", () => {
+    const reg = new Registry(false, self);
+    reg.restore([], { nextLabel: 1, nextViewed: 0, nextLetter: 0 });
+    expect(reg.addViewed(ref(alice, "3lbx7kt5aaa2c")).label).toBe("#1");
   });
 });

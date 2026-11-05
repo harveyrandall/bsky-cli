@@ -21,7 +21,7 @@ export class SessionKeeper {
 
   constructor(
     private readonly store: Pick<SessionStore, "save" | "delete" | "lock" | "unlock" | "prune">,
-    private readonly meta: Meta,
+    private meta: Meta,
     private readonly keep: number,
     /** Already locked, by whoever opened it. */
     resume?: ReplSessionFile,
@@ -29,6 +29,11 @@ export class SessionKeeper {
     this.draft = resume ? { ...resume.composer, history: resume.history } : { text: "", cursor: 0, history: [] };
     this.written = resume !== undefined;
     if (resume) this.locked = Promise.resolve(true);
+  }
+
+  /** After a `/switch`: the session follows the account. */
+  setAccount(account: Pick<Meta, "handle" | "did"> & { profile: string | undefined }): void {
+    this.meta = { ...this.meta, ...account };
   }
 
   /** The composer as it is now, which needn't be saved yet. */

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { bskyDir } from "@/config";
@@ -200,7 +200,7 @@ function unsupported(): never {
 
 export function enableScheduler(interval: number, profile?: string): void {
   // It's written into a crontab line, a plist or a schtasks command.
-  if (profile !== undefined && !/^[\w.-]+$/.test(profile)) {
+  if (profile && !/^[\w.-]+$/.test(profile)) {
     throw new Error(`Can't schedule for profile "${profile}": use letters, digits, ".", "_" and "-"`);
   }
   const bskyPath = resolveBskyPath();
@@ -240,6 +240,24 @@ export function getSchedulerStatus(): SchedulerState {
     default:
       unsupported();
   }
+}
+
+function installedJob(): string {
+  switch (process.platform) {
+    case "linux":
+      return readCrontab().split("\n").find((l) => l.includes(CRONTAB_MARKER)) ?? "";
+    case "darwin":
+      return existsSync(LAUNCHD_PLIST) ? readFileSync(LAUNCHD_PLIST, "utf-8") : "";
+    case "win32":
+      return execFileSync("schtasks", ["/query", "/tn", SCHTASKS_NAME, "/v", "/fo", "LIST"], { encoding: "utf-8" });
+    default:
+      return "";
+  }
+}
+
+/** The profile the installed job sends for: undefined for the unnamed one, or if there's no job. */
+export function schedulerProfile(): string | undefined {
+  return /(?:\s-p ['"]|--profile<\/string>\s*<string>)([\w.-]+)/.exec(installedJob())?.[1];
 }
 
 export function uninstallScheduler(): void {

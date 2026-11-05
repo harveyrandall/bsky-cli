@@ -1,6 +1,22 @@
 import { AtpAgent } from "@atproto/api";
 import { saveSessionConfig } from "@/config";
+import { isNetworkError } from "@/lib/errors";
 import type { SessionConfig } from "@/lib/types";
+
+const clients = new Map<string, AtpAgent>();
+
+/**
+ * One sign-in per profile, however often a process asks: the REPL runs CLI commands
+ * all session, and each new sign-in would spend the refresh token its own agent holds.
+ * Everyone gets a clone, which shares the session but can set its own proxy.
+ */
+export async function sharedClient(profile: string | undefined, signIn: () => Promise<AtpAgent>): Promise<AtpAgent> {
+  const known = clients.get(profile ?? "");
+  if (known?.hasSession) return known.clone();
+  const agent = await signIn();
+  clients.set(profile ?? "", agent);
+  return agent.clone();
+}
 
 /**
  * Create an authenticated AT Protocol client from a saved session.
@@ -56,7 +72,12 @@ export async function createClient(
     await saveSessionConfig(updated, profile);
 
     return agent;
-  } catch {
+  } catch (err) {
+    // Only the server saying no means the login is bad.
+    const { status } = err as { status?: number };
+    if (isNetworkError(err) || (status ?? 0) >= 500 || status === 429) {
+      throw new Error(`Can't reach ${session.host}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    }
     throw new Error(
       "Session expired. Run 'bsky login' to re-authenticate.",
     );

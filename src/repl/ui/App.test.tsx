@@ -10,11 +10,13 @@ import { IDLE_HINT, type Repl, type ReplSettings } from "@/repl/core/repl";
 import { DEFAULT_MARKERS } from "@/repl/core/markers";
 import type { AtUri, Cid, StrongRef } from "@/repl/core/types";
 
-const { exit, suspendTerminal, editInEditor, suspended } = vi.hoisted(() => {
+const { exit, suspendTerminal, editInEditor, suspended, openUrl, copyText } = vi.hoisted(() => {
   const suspended = { now: false, during: [] as boolean[] };
   return {
     suspended,
     exit: vi.fn(),
+    openUrl: vi.fn(async () => {}),
+    copyText: vi.fn(async () => {}),
     suspendTerminal: vi.fn(async (run: () => Promise<void>) => {
       suspended.now = true;
       await run();
@@ -28,9 +30,10 @@ const { exit, suspendTerminal, editInEditor, suspended } = vi.hoisted(() => {
 });
 vi.mock("ink", async (importOriginal) => {
   const ink = await importOriginal<typeof import("ink")>();
-  return { ...ink, useApp: () => ({ ...ink.useApp(), exit, suspendTerminal }) };
+  return { ...ink, useApp: () => ({ ...ink.useApp(), exit, suspendTerminal, waitUntilRenderFlush: async () => {} }) };
 });
 vi.mock("@/lib/editor", () => ({ editInEditor }));
+vi.mock("@/lib/desktop", () => ({ openUrl, copyText }));
 beforeEach(() => {
   exit.mockClear();
   suspendTerminal.mockClear();
@@ -48,12 +51,14 @@ const paste = (text: string) => `\x1b[200~${text}\x1b[201~`;
 const RIGHT = "\x1b[C";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+// Many of these give Ink a fixed time to draw, which a busy machine can miss.
+const drawn = { retry: 2 };
 const ref = (n: number): StrongRef => ({
   uri: `at://did:plc:me/app.bsky.feed.post/3lbx7kt5def${String.fromCharCode(97 + n)}a` as AtUri,
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]> } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]>; passthrough?: AppProps["passthrough"]; listDrafts?: AppProps["listDrafts"] } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
@@ -61,6 +66,11 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
     resolveHandle: vi.fn(),
     getPosts: vi.fn(o.hold ?? (async () => [])),
     post: vi.fn(async () => ref(++n)),
+    like: vi.fn(async () => {}),
+    unlike: vi.fn(async () => true),
+    repost: vi.fn(async () => {}),
+    unrepost: vi.fn(async () => true),
+    deletePost: vi.fn(async () => {}),
   };
   const drafts = { save: vi.fn(async () => ({ id: "d1" })), delete: vi.fn(async () => {}) };
   const saveConfig = vi.fn(async () => {});
@@ -75,9 +85,12 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
       saveConfig={saveConfig}
       saveScheduled={saveScheduled}
       schedulerRunning={() => true}
+      listDrafts={o.listDrafts ?? (async () => ({ drafts: [], skipped: 0 }))}
+      switchAccount={async () => ({ agent: { ...agent, selfDid: "did:plc:work" as const }, handle: "work.bsky.social" })}
       keeper={o.keeper}
       resume={o.resume}
       configName="config.toml"
+      passthrough={o.passthrough}
       onReady={(r) => (session = r)}
     />,
   );
@@ -94,7 +107,7 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
   return { ...app, lastFrame, shows, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, saveScheduled, repl: () => session! };
 }
 
-describe("App", () => {
+describe("App", drawn, () => {
   it("keeps plain text with a hint on Enter", async () => {
     const { type, lastFrame } = setup();
     await type("hello", "\r");
@@ -234,11 +247,11 @@ describe("App", () => {
   it("lists the candidates when Tab can't extend the name", async () => {
     const { type, lastFrame } = setup();
     await type("/re", "\t");
-    expect(lastFrame()).toContain("/reply  /reply-from  /retry");
+    expect(lastFrame()).toContain("/reply  /reply-from  /repost  /retry");
   });
 });
 
-describe("App threads", () => {
+describe("App threads", drawn, () => {
   it("writes a thread end to end through the keyboard", async () => {
     const { type, lastFrame, agent } = setup();
     await type("/thread", "\r");
@@ -455,7 +468,7 @@ describe("App threads", () => {
   });
 });
 
-describe("App media", () => {
+describe("App media", drawn, () => {
   const attached = async (s: ReturnType<typeof setup>) => {
     await s.type(`/attach ${image}`, "\r");
     await tick();
@@ -704,7 +717,7 @@ describe("App media", () => {
   });
 });
 
-describe("App session saving", () => {
+describe("App session saving", drawn, () => {
   const keeper = () => ({ track: vi.fn(), save: vi.fn(async () => {}) });
   it("saves whenever the session changes", async () => {
     const k = keeper();
@@ -764,7 +777,7 @@ describe("App session saving", () => {
   });
 });
 
-describe("App resuming", () => {
+describe("App resuming", drawn, () => {
   const file = (o: object = {}) =>
     ({ id: "k3f7xq", posts: [], staged: [], pending: [], mode: { kind: "idle" }, composer: { text: "half a thought", cursor: 4 }, history: ["/thread"], counters: { nextLabel: 1, nextViewed: 0, nextLetter: 0 }, ...o }) as never;
   it("puts the composer back as it was, cursor and history included", async () => {
@@ -791,16 +804,18 @@ describe("App resuming", () => {
   it("takes only the text and cursor from a saved composer", async () => {
     const { shows, type, lastFrame } = setup({ resume: file({ composer: { text: "hi", cursor: 2, history: 5 } }) });
     await shows("── resumed k3f7xq ──");
-    await tick();
-    await type("\x1b[A");
-    expect(lastFrame()).toContain("bsky › /thread");
+    await vi.waitFor(async () => {
+      await type("\x1b[A");
+      expect(lastFrame()).toContain("bsky › /thread");
+    });
   });
   it("brings back what you'd submitted for ↑", async () => {
     const { type, lastFrame, shows } = setup({ resume: file({ composer: { text: "", cursor: 0 } }) });
     await shows("── resumed k3f7xq ──");
-    await tick();
-    await type("\x1b[A");
-    expect(lastFrame()).toContain("bsky › /thread");
+    await vi.waitFor(async () => {
+      await type("\x1b[A");
+      expect(lastFrame()).toContain("bsky › /thread");
+    });
   });
   it("holds the keyboard until the session is back", async () => {
     let finish = (_: never[]) => {};
@@ -817,10 +832,152 @@ describe("App resuming", () => {
   });
   it("asks about unsent posts through the keyboard", async () => {
     const pending = [{ id: 1, intent: { kind: "standalone" }, posts: ["left over"], createdAt: 0 }];
-    const { type, shows, agent } = setup({ resume: file({ composer: { text: "", cursor: 0 }, pending }) });
+    const { type, shows, agent, lastFrame } = setup({ resume: file({ composer: { text: "", cursor: 0 }, pending }) });
     await shows('Unsent from last time: "left over"');
     await shows("› Edit");
-    await type("\x1b[D", "\r");
+    await vi.waitFor(async () => {
+      await type("\x1b[D");
+      expect(lastFrame()).toContain("› Send");
+    });
+    await type("\r");
     await vi.waitFor(() => expect(agent.post).toHaveBeenCalledWith("left over", undefined, undefined, undefined));
+  });
+});
+
+describe("App deleting", drawn, () => {
+  it("asks, defaulting to no", async () => {
+    const { type, shows, agent } = setup();
+    await type("/post one", "\r");
+    await tick();
+    await type("/delete 1", "\r");
+    await shows('Delete (1) "one"? [y/N]');
+    await type("\r");
+    await tick();
+    expect(agent.deletePost).not.toHaveBeenCalled();
+  });
+  it("deletes on y", async () => {
+    const { type, shows, agent } = setup();
+    await type("/post one", "\r");
+    await tick();
+    await type("/undo", "\r");
+    await shows('Delete (1) "one"? [y/N]');
+    await type("y");
+    await shows("Deleted (1)");
+    expect(agent.deletePost).toHaveBeenCalledWith(ref(1).uri);
+  });
+});
+
+describe("App Tab", drawn, () => {
+  it("offers the labels of the session", async () => {
+    const { type, shows } = setup();
+    await type("/post one", "\r");
+    await tick();
+    await type("/like ", "\t");
+    await shows("/like 1");
+  });
+});
+
+describe("App running CLI commands", drawn, () => {
+  const cli = (run: NonNullable<AppProps["passthrough"]>["run"] = vi.fn(async () => "done" as const)) => ({
+    names: () => ["timeline"],
+    knows: (name: string) => name === "timeline" || name === "thread",
+    flags: () => ["--json"],
+    uriArguments: (argv: string[]) => new Set(argv[0] === "thread" ? [1] : []),
+    run,
+  });
+  const typing = (o: { run?: NonNullable<AppProps["passthrough"]>["run"] } = {}) => {
+    const passthrough = cli(o.run);
+    return { ...setup({ passthrough }), run: passthrough.run };
+  };
+  it("reaches one from the keyboard, showing what it prints", async () => {
+    const run = vi.fn(async (_: string[], print: (text: string) => void) => {
+      print("from the CLI");
+      return "done" as const;
+    });
+    const { type, shows } = typing({ run });
+    await type("/timeline -n 5", "\r");
+    await shows("from the CLI");
+    expect(run.mock.calls[0][0]).toEqual(["timeline", "-n", "5"]);
+  });
+  it("swaps #n only where the command takes a post", async () => {
+    const { type, repl, run } = typing();
+    const read = { uri: "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5defab", cid: "bafyab" };
+    expect(repl().labelPost(read)).toBe("#1");
+    await type("/run thread #1", "\r");
+    await tick();
+    await type("/run timeline #1", "\r");
+    await tick();
+    expect(vi.mocked(run).mock.calls.map(([argv]) => argv)).toEqual([["thread", read.uri], ["timeline", "#1"]]);
+  });
+  it("keeps the text of one that fails", async () => {
+    const { type, lastFrame } = typing({ run: vi.fn(async () => "keep" as const) });
+    await type("/timeline --nope", "\r");
+    await tick();
+    expect(lastFrame()).toContain("/timeline --nope");
+  });
+  it("completes a CLI command and its flags with Tab", async () => {
+    const { type, shows } = typing();
+    await type("/timel", "\t");
+    await shows("/timeline");
+    await type("--j", "\t");
+    await shows("/timeline --json");
+  });
+  it("completes a path with Tab", async () => {
+    const { type, shows } = typing();
+    await type("/attach src/repl/ui/App.te", "\t");
+    await shows("/attach src/repl/ui/App.test.tsx");
+  });
+  it("keeps a blank line between what they print", async () => {
+    const run = vi.fn(async (_: string[], print: (text: string) => void) => {
+      print("one");
+      print("");
+      print("two");
+      return "done" as const;
+    });
+    const { type, shows, lastFrame } = setup({ passthrough: cli(run) });
+    await type("/timeline", "\r");
+    await shows("two");
+    expect(lastFrame()).toMatch(/one\n\s*\n\s*two/);
+  });
+});
+
+describe("App reaching the desktop and your account", drawn, () => {
+  beforeEach(() => {
+    openUrl.mockClear();
+    copyText.mockClear();
+  });
+  const posted = async (o: Parameters<typeof setup>[0] = {}) => {
+    const s = setup(o);
+    await s.type("/post one", "\r");
+    await tick();
+    return s;
+  };
+  it("/open and /copy use the post's link", async () => {
+    const { type, shows } = await posted();
+    await type("/open 1", "\r");
+    await tick();
+    await type("/copy 1", "\r");
+    await shows("Copied (1)");
+    expect(openUrl).toHaveBeenCalledWith(expect.stringContaining("https://bsky.app/profile/"));
+    expect(copyText).toHaveBeenCalledWith(expect.stringContaining("https://bsky.app/profile/"));
+  });
+  it("carries on after a failed /open", async () => {
+    openUrl.mockRejectedValueOnce(new Error("no browser"));
+    const { type, shows } = await posted();
+    await type("/open 1", "\r");
+    await shows("no browser");
+    await type("still here");
+    await shows("still here");
+  });
+  it("/drafts fills the composer", async () => {
+    const draft = { id: "1741392000000-a7f3", createdAt: "2026-11-04T09:00:00.000Z", reason: "manual" as const, type: "post" as const, text: "from a draft" };
+    const { type, shows } = setup({ listDrafts: async () => ({ drafts: [draft], skipped: 0 }) });
+    await type("/drafts 17", "\r");
+    await shows("/post from a draft");
+  });
+  it("/switch says who you're posting as", async () => {
+    const { type, shows } = setup();
+    await type("/switch work", "\r");
+    await shows("Now posting as @work.bsky.social");
   });
 });

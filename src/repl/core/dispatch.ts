@@ -27,8 +27,11 @@ export async function dispatch(input: string, ctx: CommandContext): Promise<Subm
   try {
     if (parsed.kind === "text") return await ctx.repl.submitText(parsed.text);
     const cmd = findCommand(parsed.name);
+    if (!cmd && ctx.passthrough?.knows(parsed.name)) {
+      return await ctx.passthrough.run([parsed.name, ...tokenize(parsed.rest)]);
+    }
     if (!cmd) {
-      ctx.print(unknownMessage(parsed.name), "error");
+      ctx.print(unknownMessage(parsed.name, ctx.passthrough?.names()), "error");
       return "keep";
     }
     return (await cmd.run(cmd.raw ? [] : tokenize(parsed.rest), ctx, parsed.rest)) ?? "done";

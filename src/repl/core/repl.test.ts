@@ -6,6 +6,7 @@ import { DEFAULT_MARKERS } from "./markers";
 import { parseSessionFile } from "./persist";
 import type { AtUri, Cid, Did, StrongRef } from "./types";
 import type { SendTarget } from "./pipeline";
+import type { Draft } from "@/lib/types";
 import type { LineStyle } from "./commands";
 import type { MediaFs, StagedMedia } from "./media";
 
@@ -33,6 +34,11 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
       posted.push({ text, reply, media, quote });
       return ref(++n);
     }),
+    like: vi.fn(async (_: StrongRef) => {}),
+    unlike: vi.fn(async (_: StrongRef) => true),
+    repost: vi.fn(async (_: StrongRef) => {}),
+    unrepost: vi.fn(async (_: StrongRef) => true),
+    deletePost: vi.fn(async (_: string) => {}),
   };
   const ask: ReplAsk = {
     cooldown: vi.fn(async () => 0 as const),
@@ -41,6 +47,7 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     alt: vi.fn(async () => undefined),
     choose: vi.fn(async () => undefined),
     text: vi.fn(async () => undefined),
+    yesNo: vi.fn(async () => true),
     ...answers,
   };
   const lines: [string, LineStyle | undefined][] = [];
@@ -56,6 +63,10 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     saveScheduled: vi.fn(async () => ({ id: "s1" })),
     composerBusy: vi.fn(() => false),
     schedulerRunning: vi.fn(() => true),
+    openUrl: vi.fn(async () => {}),
+    copyText: vi.fn(async () => {}),
+    listDrafts: vi.fn(async (): Promise<{ drafts: Draft[]; skipped: number }> => ({ drafts: [], skipped: 0 })),
+    switchAccount: vi.fn(async (_: string) => ({ agent: { ...agent, selfDid: "did:plc:work" as Did }, handle: "work.bsky.social" })),
     fs,
   };
   const repl = new Repl(
@@ -335,8 +346,9 @@ describe("cancelling a retry", () => {
     await flush();
     await repl.retry();
     await flush();
-    expect(repl.escape("")).toEqual({ restore: "/reply 1 two" });
+    expect(repl.escape("")).toBe("handled");
     await flush();
+    expect(deps.saveDraft).toHaveBeenLastCalledWith({ reason: "manual", type: "reply", text: "two", replyUri: ref(1).uri });
     expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("d1");
     expect(printed()).not.toContain("Left in draft");
   });
@@ -1048,12 +1060,12 @@ describe("resume", () => {
         await flush();
         expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
       });
-      it.each([["Edit", 1], ["Discard", 2]])("deletes the draft on %s, which leaves it nowhere to come back from", async (_, answer) => {
+      it.each([["Edit", 1], ["Discard", 2]])("keeps the draft on %s, as nothing was sent", async (_, answer) => {
         const file = await fromDraft();
         const { repl, deps, flush } = answering(answer);
         await repl.resume(file);
         await flush();
-        expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
+        expect(deps.deleteDraft).not.toHaveBeenCalled();
       });
       it("keeps the draft while the question's open", async () => {
         const file = await fromDraft();
@@ -1153,7 +1165,7 @@ describe("snapshot", () => {
       composer,
       staged: [{ path: "/x/b.png", kind: "image" }],
       history: ["/thread"],
-      counters: { nextLabel: 2, nextLetter: 0 },
+      counters: { nextLabel: 2, nextViewed: 1, nextLetter: 0 },
     });
     expect(file.posts.map((p) => p.label)).toEqual(["1"]);
     expect(file.pending).toMatchObject([{ posts: ["waiting"], intent: { kind: "standalone" }, media: [{ path: "/x/a.png" }] }]);
@@ -1169,7 +1181,7 @@ describe("snapshot", () => {
   it("has only the session's own fields, so no agent state can get in", async () => {
     const { repl } = setup();
     expect(Object.keys(repl.snapshot(meta, composer, [])).sort()).toEqual(
-      ["composer", "counters", "createdAt", "did", "handle", "history", "id", "lastThreadLetter", "mode", "pending", "posts", "settings", "staged", "thread", "updatedAt", "version", "viewed"].sort(),
+      ["composer", "counters", "createdAt", "did", "handle", "history", "id", "lastThreadLetter", "loaded", "mode", "pending", "posts", "settings", "staged", "thread", "updatedAt", "version", "viewed"].sort(),
     );
   });
 });
@@ -1190,6 +1202,492 @@ describe("changes that aren't posts", () => {
     await flush();
     expect(repl.mode().kind).toBe("idle");
     expect(deps.onChange).toHaveBeenCalled();
+  });
+});
+
+describe("/delete and /undo", () => {
+  const written = async (answers: Partial<ReplAsk> = {}, posts = ["one", "two"]) => {
+    const s = setup({}, answers);
+    await s.repl.startThread();
+    for (const text of posts) {
+      await s.repl.submitText(text);
+      await s.flush();
+    }
+    return s;
+  };
+  it("asks first, showing the post", async () => {
+    const { repl, ask, agent, printed } = await written();
+    expect(await repl.deletePost("2")).toBe("done");
+    expect(ask.yesNo).toHaveBeenCalledWith('Delete (2) "two"?');
+    expect(agent.deletePost).toHaveBeenCalledWith(ref(2).uri);
+    expect(printed()).toContain("Deleted (2)");
+  });
+  it("does nothing on no", async () => {
+    const { repl, agent } = await written({ yesNo: vi.fn(async () => false) });
+    expect(await repl.deletePost("2")).toBe("done");
+    expect(agent.deletePost).not.toHaveBeenCalled();
+  });
+  it("won't touch someone else's post", async () => {
+    const { repl, ask, agent, printed } = await written();
+    const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5def2x";
+    repl.labelPost({ uri, cid: "bafyabc" });
+    agent.getPosts.mockResolvedValueOnce([{ uri, cid: "bafyabc", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "" }] as never);
+    expect(await repl.deletePost("#1")).toBe("keep");
+    expect(printed()).toContain("You can only delete your own posts");
+    expect(ask.yesNo).not.toHaveBeenCalled();
+  });
+  it("says if a post has already gone", async () => {
+    const { repl, agent, printed } = await written();
+    await repl.deletePost("2");
+    agent.deletePost.mockClear();
+    expect(await repl.deletePost("2")).toBe("keep");
+    expect(printed()).toContain("(2) is already deleted");
+    expect(agent.deletePost).not.toHaveBeenCalled();
+  });
+  it("keeps the post if the delete fails", async () => {
+    const { repl, agent } = await written();
+    agent.deletePost.mockRejectedValueOnce(new Error("fetch failed"));
+    await expect(repl.deletePost("2")).rejects.toThrow("fetch failed");
+    expect(repl.registry.byLabel("2")?.deleted).toBeUndefined();
+    expect(repl.thread()?.cursor).toEqual(ref(2));
+  });
+  it("moves the thread back to the post before", async () => {
+    const { repl, posted, flush } = await written();
+    await repl.deletePost("2");
+    expect(repl.thread()?.cursor).toEqual(ref(1));
+    await repl.submitText("three");
+    await flush();
+    expect(posted[2].reply?.parent).toEqual(ref(1));
+  });
+  it("stops the thread if nothing of it is left", async () => {
+    const { repl } = await written({}, ["one"]);
+    await repl.deletePost("1");
+    expect(repl.thread()).toBeUndefined();
+    expect(repl.mode().kind).toBe("idle");
+  });
+  it("leaves the thread where it is when another post goes", async () => {
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("2");
+    expect(repl.thread()?.cursor).toEqual(ref(3));
+  });
+  it("skips every deleted post on the way back", async () => {
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("2");
+    await repl.deletePost("3");
+    expect(repl.thread()?.cursor).toEqual(ref(1));
+  });
+  it("stops the thread with its root, and says so first", async () => {
+    const { repl, ask } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("1");
+    expect(ask.yesNo).toHaveBeenCalledWith('Delete (1) "one"? This stops the thread.');
+    expect(repl.thread()).toBeUndefined();
+  });
+  it("waits for what's queued, which may be replying to it", async () => {
+    const { repl, agent, printed } = await written();
+    repl.setCooldown("undo", 5);
+    await repl.submitText("waiting");
+    expect(await repl.deletePost("1")).toBe("keep");
+    expect(agent.deletePost).not.toHaveBeenCalled();
+    expect(printed()).toContain("Wait for pending posts");
+  });
+  it("can't be aimed at afterwards", async () => {
+    const { repl, agent, printed } = await written({}, ["one", "two", "three"]);
+    await repl.deletePost("2");
+    for (const aim of [() => repl.reply("2", "hi"), () => repl.quote("2", "hi"), () => repl.replyFrom("2"), () => repl.engage("like", "2"), () => repl.openPost("2")]) {
+      expect(await aim()).toBe("keep");
+    }
+    expect(printed()).toContain("(2) is already deleted");
+    expect(agent.post).toHaveBeenCalledTimes(3);
+    expect(agent.like).not.toHaveBeenCalled();
+  });
+  it("closes a prompt aimed at it", async () => {
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.reply("2");
+    await repl.deletePost("2");
+    expect(repl.mode().kind).toBe("thread");
+  });
+  it("leaves a prompt aimed at something else", async () => {
+    const { repl } = await written({}, ["one", "two", "three"]);
+    await repl.reply("3");
+    await repl.deletePost("2");
+    expect(repl.mode().kind).toBe("reply-once");
+  });
+  it("/undo leaves a post you only replied to", async () => {
+    const { repl, agent, flush } = await written({}, ["one"]);
+    const older = "at://did:plc:me/app.bsky.feed.post/3lbx7kt5aaa2a";
+    agent.getPosts.mockResolvedValueOnce([{ uri: older, cid: "bafyabc", authorDid: me, authorHandle: "me.bsky.social", text: "old" }] as never);
+    await repl.reply(older, "hi");
+    await flush();
+    await repl.undo();
+    await repl.undo();
+    expect(agent.deletePost.mock.calls.flat()).not.toContain(older);
+  });
+  it("/undo takes the last post you made", async () => {
+    const { repl, agent } = await written();
+    await repl.undo();
+    await repl.undo();
+    expect(agent.deletePost.mock.calls.map(([uri]) => uri)).toEqual([ref(2).uri, ref(1).uri]);
+  });
+  it.each([
+    ["a delete", (r: Repl) => r.deletePost("1")],
+    ["a switch", (r: Repl) => r.switchProfile("work")],
+  ])("saves after %s", async (_, act) => {
+    const { repl, deps } = await written();
+    deps.onChange.mockClear();
+    await act(repl);
+    expect(deps.onChange).toHaveBeenCalled();
+  });
+  it("/undo says when there's nothing to take back", async () => {
+    const { repl, printed } = setup();
+    expect(await repl.undo()).toBe("done");
+    expect(printed()).toContain("Nothing to undo");
+  });
+  it("/undo waits for what's queued, which Esc takes back", async () => {
+    const { repl, agent } = await written();
+    repl.setCooldown("undo", 5);
+    await repl.submitText("waiting");
+    expect(await repl.undo()).toBe("keep");
+    expect(agent.deletePost).not.toHaveBeenCalled();
+  });
+  it("is left out of the count, and survives a resume", async () => {
+    const { repl } = await written();
+    await repl.deletePost("2");
+    const file = parseSessionFile(JSON.parse(JSON.stringify(repl.snapshot({ id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: me } as never, { text: "", cursor: 0 }, []))));
+    expect(file.posts[1].deleted).toBe(true);
+  });
+});
+
+describe("/drafts", () => {
+  const draft = (o: Partial<Draft> = {}): Draft => ({ id: "1741392000000-a7f3", createdAt: "2026-11-04T09:00:00.000Z", reason: "manual", type: "post", text: "hello", ...o });
+  const withDrafts = (...drafts: Draft[]) => {
+    const s = setup();
+    s.deps.listDrafts.mockResolvedValue({ drafts, skipped: 0 });
+    return s;
+  };
+  it("lists them", async () => {
+    const { repl, printed } = withDrafts(draft(), draft({ id: "1741392000001-b2c4", type: "thread", text: "first line\nmore" }));
+    expect(await repl.drafts()).toBe("done");
+    expect(printed()).toContain("1741392000000-a7f3  post  hello");
+    expect(printed()).toContain("1741392000001-b2c4  thread  first line");
+  });
+  it("says when there are none", async () => {
+    const { repl, printed } = withDrafts();
+    await repl.drafts();
+    expect(printed()).toContain("No drafts");
+  });
+  it("says if some couldn't be read, rather than that there are none", async () => {
+    const { repl, deps, printed } = setup();
+    deps.listDrafts.mockResolvedValue({ drafts: [], skipped: 2 });
+    await repl.drafts();
+    expect(printed()).toContain("Skipped 2 draft files that couldn't be read");
+    expect(printed()).not.toContain("No drafts");
+  });
+  it("loads one into the composer by id or the start of one", async () => {
+    const { repl } = withDrafts(draft());
+    await expect(repl.drafts("1741392000000-a7f3")).resolves.toEqual({ restore: "/post hello" });
+    await expect(repl.drafts("17413")).resolves.toEqual({ restore: "/post hello" });
+  });
+  it("joins a thread's posts", async () => {
+    const { repl } = withDrafts(draft({ type: "thread", posts: [{ text: "a" }, { text: "b" }] }));
+    await expect(repl.drafts("17")).resolves.toEqual({ restore: "/post a /// b" });
+  });
+  it("keeps what it replies to or quotes", async () => {
+    const reply = withDrafts(draft({ type: "reply", replyUri: ref(1).uri }));
+    await expect(reply.repl.drafts("17")).resolves.toEqual({ restore: `/reply ${ref(1).uri} hello` });
+    const quote = withDrafts(draft({ type: "quote", quoteUri: ref(1).uri }));
+    await expect(quote.repl.drafts("17")).resolves.toEqual({ restore: `/quote ${ref(1).uri} hello` });
+  });
+  it("stages its media", async () => {
+    const { repl } = withDrafts(draft({ images: ["/x/a.png"], imageAlts: ["A chart"] }));
+    await repl.drafts("17");
+    expect(repl.staged()).toEqual([{ path: "/x/a.png", kind: "image", alt: "A chart" }]);
+  });
+  it("stages a thread's media from its first post", async () => {
+    const { repl } = withDrafts(draft({ type: "thread", posts: [{ text: "a", video: "/x/a.mp4", videoAlt: "A clip" }, { text: "b" }] }));
+    await repl.drafts("17");
+    expect(repl.staged()).toEqual([{ path: "/x/a.mp4", kind: "video", alt: "A clip" }]);
+  });
+  it("won't load one whose later posts have media, which only the first can carry here", async () => {
+    const { repl, printed } = withDrafts(draft({ type: "thread", posts: [{ text: "a" }, { text: "b", images: ["/x/a.png"] }] }));
+    expect(await repl.drafts("17")).toBe("keep");
+    expect(printed()).toContain("Media on later posts can't be loaded here: use bsky drafts send");
+  });
+  it("won't load one whose media can't join what's staged", async () => {
+    const { repl, printed } = withDrafts(draft({ images: ["/x/a.png"] }));
+    await repl.attach(["/x/b.mp4"]);
+    expect(await repl.drafts("17")).toBe("keep");
+    expect(printed()).toContain("/detach what's staged first");
+  });
+  it("deletes the draft only once what was loaded has gone", async () => {
+    const { repl, deps, flush } = withDrafts(draft());
+    await repl.drafts("17");
+    expect(deps.deleteDraft).not.toHaveBeenCalled();
+    await repl.post("hello");
+    await flush();
+    expect(deps.deleteDraft).toHaveBeenCalledExactlyOnceWith("1741392000000-a7f3");
+  });
+  it("keeps the draft if the server refuses it, and the text comes back", async () => {
+    const { repl, deps, agent, flush } = withDrafts(draft());
+    await repl.drafts("17");
+    agent.post.mockRejectedValueOnce(rejected());
+    await repl.post("hello");
+    await flush();
+    expect(deps.restore).toHaveBeenCalledWith("/post hello");
+    expect(deps.deleteDraft).not.toHaveBeenCalled();
+  });
+  it("keeps the draft if you post something else", async () => {
+    const { repl, deps, flush } = withDrafts(draft());
+    await repl.drafts("17");
+    await repl.post("something else");
+    await flush();
+    expect(deps.deleteDraft).not.toHaveBeenCalled();
+  });
+  it("says if nothing matches, or too much does", async () => {
+    const { repl, printed } = withDrafts(draft(), draft({ id: "1741392000001-b2c4" }));
+    expect(await repl.drafts("99")).toBe("keep");
+    expect(printed()).toContain('No draft "99"');
+    expect(await repl.drafts("17")).toBe("keep");
+    expect(printed()).toContain('"17" could be 1741392000000-a7f3 or 1741392000001-b2c4');
+  });
+});
+
+describe("/switch", () => {
+  const other = (s: ReturnType<typeof setup>) => ({ ...s.agent, selfDid: "did:plc:work" as Did, post: vi.fn(async () => ref(9)) });
+  it("posts as the new account, and says so", async () => {
+    const s = setup();
+    const agent = other(s);
+    s.deps.switchAccount.mockResolvedValueOnce({ agent, handle: "work.bsky.social" });
+    expect(await s.repl.switchProfile("work")).toBe("done");
+    expect(s.deps.switchAccount).toHaveBeenCalledWith("work");
+    expect(s.printed()).toContain("Now posting as @work.bsky.social");
+    await s.repl.post("hello");
+    await s.flush();
+    expect(agent.post).toHaveBeenCalled();
+    expect(s.agent.post).not.toHaveBeenCalled();
+  });
+  it("waits for what's queued, which belongs to this account", async () => {
+    const { repl, deps } = setup({ undo: 5 });
+    await repl.post("waiting");
+    expect(await repl.switchProfile("work")).toBe("keep");
+    expect(deps.switchAccount).not.toHaveBeenCalled();
+  });
+  it("stops the thread, which belongs to this account", async () => {
+    const { repl, flush, printed } = setup();
+    await repl.startThread("one");
+    await flush();
+    await repl.switchProfile("work");
+    expect(repl.thread()).toBeUndefined();
+    expect(repl.mode().kind).toBe("idle");
+    expect(printed()).toContain("Thread stopped");
+  });
+  it("leaves a reply or quote prompt, whose target was this account's choice", async () => {
+    const { repl, flush } = setup();
+    await repl.post("one");
+    await flush();
+    await repl.reply("1");
+    await repl.switchProfile("work");
+    expect(repl.mode().kind).toBe("idle");
+  });
+  it("clears staged media, with a warning", async () => {
+    const { repl, printed } = setup();
+    await repl.attach(["/x/a.png"]);
+    await repl.switchProfile("work");
+    expect(repl.staged()).toEqual([]);
+    expect(printed()).toContain("Unstaged 📎 a.png");
+  });
+  it("likes and deletes as the new account", async () => {
+    const s = setup();
+    await s.repl.post("one");
+    await s.flush();
+    const next = { ...other(s), like: vi.fn(async () => {}), deletePost: vi.fn(async () => {}) };
+    s.deps.switchAccount.mockResolvedValueOnce({ agent: next, handle: "work.bsky.social" });
+    await s.repl.switchProfile("work");
+    await s.repl.engage("like", "1");
+    expect(next.like).toHaveBeenCalled();
+    expect(s.agent.like).not.toHaveBeenCalled();
+  });
+  it("leaves everything be if it turns out to be the same account", async () => {
+    const s = setup();
+    await s.repl.startThread("one");
+    await s.flush();
+    await s.repl.attach(["/x/a.png"]);
+    s.deps.switchAccount.mockResolvedValueOnce({ agent: s.agent, handle: "me.bsky.social" });
+    expect(await s.repl.switchProfile("me")).toBe("done");
+    expect(s.repl.thread()).toBeDefined();
+    expect(s.repl.staged()).toHaveLength(1);
+    expect(s.printed()).toContain("Still posting as @me.bsky.social");
+  });
+  it("stops a thread that hasn't had a post yet", async () => {
+    const { repl, printed } = setup();
+    await repl.startThread();
+    await repl.switchProfile("work");
+    expect(repl.mode().kind).toBe("idle");
+    expect(printed()).toContain("Thread stopped");
+  });
+  it("changes nothing if the account can't be opened", async () => {
+    const { repl, deps, flush } = setup();
+    await repl.startThread("one");
+    await flush();
+    deps.switchAccount.mockRejectedValueOnce(new Error("Not logged in"));
+    await expect(repl.switchProfile("work")).rejects.toThrow("Not logged in");
+    expect(repl.thread()).toBeDefined();
+  });
+  it("won't delete the old account's posts as the new one", async () => {
+    const s = setup();
+    await s.repl.post("one");
+    await s.flush();
+    s.deps.switchAccount.mockResolvedValueOnce({ agent: other(s), handle: "work.bsky.social" });
+    await s.repl.switchProfile("work");
+    expect(await s.repl.deletePost("1")).toBe("keep");
+    expect(s.printed()).toContain("You can only delete your own posts");
+    await s.repl.undo();
+    expect(s.printed()).toContain("Nothing to undo");
+  });
+});
+
+describe("a link that can't be opened or copied", () => {
+  it.each(["openUrl", "copyText"] as const)("is still shown when %s fails", async (dep) => {
+    const { repl, deps, flush } = setup();
+    await repl.post("one");
+    await flush();
+    deps[dep].mockRejectedValueOnce(new Error("no browser"));
+    await expect(dep === "openUrl" ? repl.openPost("1") : repl.copyPost("1")).rejects.toThrow(`no browser: https://bsky.app/profile/${me}/post/`);
+  });
+});
+
+describe("/open, /copy and /view", () => {
+  const url = `https://bsky.app/profile/${me}/post/${ref(1).uri.split("/").pop()}`;
+  const withPost = async () => {
+    const s = setup();
+    await s.repl.post("first");
+    await s.flush();
+    return s;
+  };
+  it("/open opens a post in the browser", async () => {
+    const { repl, deps } = await withPost();
+    expect(await repl.openPost("1")).toBe("done");
+    expect(deps.openUrl).toHaveBeenCalledWith(url);
+  });
+  it("/copy copies a post's link, and says so", async () => {
+    const { repl, deps, printed } = await withPost();
+    expect(await repl.copyPost("1")).toBe("done");
+    expect(deps.copyText).toHaveBeenCalledWith(url);
+    expect(printed()).toContain("Copied (1)");
+  });
+  it("/view finds the post's URI", async () => {
+    const { repl } = await withPost();
+    await expect(repl.uriOf("1")).resolves.toBe(ref(1).uri);
+  });
+  it("keep the text on a bad ref", async () => {
+    const { repl, deps } = await withPost();
+    expect(await repl.openPost("9")).toBe("keep");
+    expect(await repl.copyPost("9")).toBe("keep");
+    await expect(repl.uriOf("9")).resolves.toBeUndefined();
+    expect(deps.openUrl).not.toHaveBeenCalled();
+  });
+});
+
+describe("likes and reposts", () => {
+  const withPost = async () => {
+    const s = setup();
+    await s.repl.post("first");
+    await s.flush();
+    return s;
+  };
+  it.each([
+    ["like", "Liked (1)"],
+    ["unlike", "Unliked (1)"],
+    ["repost", "Reposted (1)"],
+    ["unrepost", "Removed your repost of (1)"],
+  ] as const)("%s a post by its label", async (action, message) => {
+    const { repl, agent, printed } = await withPost();
+    expect(await repl.engage(action, "1")).toBe("done");
+    expect(agent[action]).toHaveBeenCalledWith(ref(1));
+    expect(printed()).toContain(message);
+  });
+  it("work on a post you read", async () => {
+    const { repl, agent } = await withPost();
+    const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5def2x";
+    repl.labelPost({ uri, cid: "bafyabc" });
+    agent.getPosts.mockResolvedValueOnce([{ uri, cid: "bafyabc", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "" }] as never);
+    await repl.engage("like", "#1");
+    expect(agent.like).toHaveBeenCalledWith({ uri, cid: "bafyabc" });
+  });
+  it("say so if there's nothing to undo", async () => {
+    const { repl, agent, printed } = await withPost();
+    agent.unlike.mockResolvedValueOnce(false);
+    agent.unrepost.mockResolvedValueOnce(false);
+    await repl.engage("unlike", "1");
+    await repl.engage("unrepost", "1");
+    expect(printed()).toContain("You hadn't liked (1)");
+    expect(printed()).toContain("You hadn't reposted (1)");
+  });
+  it("keep the text when the ref is wrong", async () => {
+    const { repl, agent } = await withPost();
+    expect(await repl.engage("like", "9")).toBe("keep");
+    expect(agent.like).not.toHaveBeenCalled();
+  });
+});
+
+describe("posts you read", () => {
+  const seen = (n: number) => ({ uri: `at://did:plc:alice/app.bsky.feed.post/3lbx7kt5def${letter(n)}b`, cid: `bafy${letter(n)}` });
+  it("get #n, and keep it", () => {
+    const { repl } = setup();
+    expect(repl.labelPost(seen(1))).toBe("#1");
+    expect(repl.labelPost(seen(2))).toBe("#2");
+    expect(repl.labelPost(seen(1))).toBe("#1");
+  });
+  it("show their own label if you wrote them", async () => {
+    const { repl, flush } = setup();
+    await repl.post("mine");
+    await flush();
+    expect(repl.labelPost({ uri: ref(1).uri, cid: ref(1).cid })).toBe("(1)");
+  });
+  it("go without a label if the API sends something odd", () => {
+    const { repl } = setup();
+    expect(repl.labelPost({ uri: "nonsense", cid: "x" })).toBeUndefined();
+  });
+  it("don't redraw from inside the command printing them", () => {
+    const { repl, deps } = setup();
+    deps.onChange.mockClear();
+    repl.labelPost(seen(1));
+    expect(deps.onChange).not.toHaveBeenCalled();
+  });
+  it("can be replied to", async () => {
+    const { repl, agent, posted, flush } = setup();
+    const post = { ...seen(1), cid: "bafyabc", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "hi" };
+    repl.labelPost(post);
+    agent.getPosts.mockResolvedValueOnce([post] as never);
+    await repl.reply("#1", "hello");
+    await flush();
+    expect(posted[0].reply?.parent.uri).toBe(post.uri);
+  });
+  it("expand in CLI arguments, but only as a whole argument", () => {
+    const { repl } = setup();
+    repl.labelPost(seen(1));
+    expect(repl.expandLabels(["thread", "#1", "-n", "5", "#12", "see #1"], new Set([1, 4, 5]))).toEqual(["thread", seen(1).uri, "-n", "5", "#12", "see #1"]);
+  });
+  it("can be quoted or reposted", async () => {
+    const { repl, agent, posted, flush } = setup();
+    repl.labelPost(seen(1));
+    agent.getPosts.mockResolvedValue([{ uri: seen(1).uri, cid: seen(1).cid, authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "" }] as never);
+    await repl.quote("#1", "look");
+    await flush();
+    await repl.engage("repost", "#1");
+    expect(posted[0].quote?.uri).toBe(seen(1).uri);
+    expect(agent.repost).toHaveBeenCalled();
+  });
+  it("keep #n across a resume, and new ones carry on", async () => {
+    const first = setup();
+    first.repl.labelPost(seen(1));
+    await first.repl.post("mine");
+    await first.flush();
+    const file = parseSessionFile(JSON.parse(JSON.stringify(first.repl.snapshot({ id: "k3f7xq", createdAt: "2026-11-04T09:00:00.000Z", handle: "me.bsky.social", did: me } as never, { text: "", cursor: 0 }, []))));
+    expect(file.viewed).toHaveLength(1);
+    const { repl } = setup();
+    await repl.resume(file);
+    expect(repl.labelPost(seen(1))).toBe("#1");
+    expect(repl.labelPost(seen(2))).toBe("#2");
   });
 });
 
@@ -1351,7 +1849,7 @@ describe("/new", () => {
     await s.repl.post("first");
     await s.flush();
     await s.repl.newMenu();
-    expect(s.ask.text).toHaveBeenCalledWith("Post to quote (number, link or at:// URI):");
+    expect(s.ask.text).toHaveBeenCalledWith("Post to quote (number, #n, link or at:// URI):");
     expect(s.repl.prompt()).toBe("quote→1 ›");
   });
   it("writes a draft", async () => {
@@ -1427,7 +1925,7 @@ describe("scheduled posts", () => {
     deps.schedulerRunning.mockReturnValue(false);
     await repl.newMenu();
     await repl.submitText("later");
-    expect(printed()).toContain("Nothing sends it until the scheduler runs: `bsky schedule enable`, or `bsky schedule watch` in another terminal");
+    expect(printed()).toContain("Nothing sends it until a scheduler runs for this account: `bsky schedule enable`, or `bsky schedule watch` in another terminal");
   });
   it("don't mention the scheduler when it's running", async () => {
     const { repl, printed } = setup({}, answers("05-11-2026", "15:30"));

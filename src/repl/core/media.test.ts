@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { afterAll, describe, it, expect, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { maxImages } from "@/lib/limits";
-import { canStage, chips, expandHome, inspectMedia, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
+import { canStage, chips, expandHome, inspectMedia, nodeMediaFs, parseDroppedPaths, pathMatches, type MediaFs, type StagedMedia } from "./media";
 
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 const mp4 = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]);
@@ -111,5 +111,38 @@ describe("expandHome", () => {
   it("expands a leading ~/ only", () => {
     expect(expandHome("~/a.png")).toBe(`${homedir()}/a.png`);
     expect(expandHome("/x/~/a.png")).toBe("/x/~/a.png");
+  });
+});
+
+describe("pathMatches", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bsky-paths-"));
+  mkdirSync(join(dir, "pics"));
+  writeFileSync(join(dir, "a b.png"), "");
+  writeFileSync(join(dir, "pic.png"), "");
+  writeFileSync(join(dir, ".hidden"), "");
+  symlinkSync(join(dir, "pics"), join(dir, "link"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("lists what starts that way, marking folders", () => {
+    expect(pathMatches(`${dir}/pi`)).toEqual([`${dir}/pic.png`, `${dir}/pics/`]);
+  });
+  it("sees a folder through a link", () => {
+    expect(pathMatches(`${dir}/li`)).toEqual([`${dir}/link/`]);
+  });
+  it("keeps ~/ as it was typed", () => {
+    vi.stubEnv("HOME", dir);
+    expect(pathMatches("~/a")).toEqual(["~/a b.png"]);
+    vi.unstubAllEnvs();
+  });
+  it("shows hidden files only when asked", () => {
+    expect(pathMatches(`${dir}/`)).not.toContain(`${dir}/.hidden`);
+    expect(pathMatches(`${dir}/.`)).toEqual([`${dir}/.hidden`]);
+  });
+  it("isn't stopped by a link that goes nowhere", () => {
+    symlinkSync(join(dir, "loop"), join(dir, "loop"));
+    expect(pathMatches(`${dir}/lo`)).toEqual([`${dir}/loop`]);
+  });
+  it("finds nothing in a folder that isn't there", () => {
+    expect(pathMatches(`${dir}/nope/a`)).toEqual([]);
   });
 });

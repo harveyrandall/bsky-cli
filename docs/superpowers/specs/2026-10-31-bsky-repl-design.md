@@ -1,6 +1,6 @@
 # Design: `bsky repl` — interactive REPL with slash commands
 
-- **Status:** Approved design, awaiting implementation plan
+- **Status:** Implemented (PRs 1 to 5; see the plans in `docs/superpowers/plans/`)
 - **Date:** 2026-10-31
 - **Branch:** `bsky-repl-slash-commands-8aa192`
 - **Related:** `docs/plans/2026-03-09-create-thread-design.md` (thread splitting, drafts), deferred "remove Bun" spec (see Future work), update-checker spec (separate, next)
@@ -169,7 +169,7 @@ Anything else: `Can't resolve "<x>": use a number, #n, rkey, at:// URI or bsky.a
 
 **Output per post:** `(4) 3lbx7kt5def2v`; verbose `(4) 3lbx7kt5def2v (at://did:plc:…/app.bsky.feed.post/3lbx7kt5def2v)`. Suffixes: `↳ 1` when the parent is not the previous post, `❝ #2` for quotes, `📷 2` / `🎞` for media.
 
-**Deletes** (`/undo`, `/delete <ref>`, own posts only, confirmation required): entry marked `deleted` (struck through in `/history`). If it was the cursor, the cursor moves to its parent. Deleting the root stops the thread (confirmation says so).
+**Deletes** (`/undo`, `/delete <ref>`, own posts only, confirmation required): entry marked `deleted` (shown as `deleted` in `/history`). If it was the cursor, the cursor moves to its parent. Deleting the root stops the thread (confirmation says so).
 
 **`/switch <profile>`** stops the active thread; the registry is kept.
 
@@ -386,9 +386,9 @@ Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from co
 | | `/edit` (Ctrl+G), `/retry` | `$EDITOR`; resend last failed batch |
 | Manage | `/undo`, `/delete <ref>` | Delete last / any own post (confirm) |
 | | `/drafts` | List drafts; load one into the composer (thread drafts joined with `///`); deleted only after a successful send |
-| | `/switch <profile>`, `/history` | Change account; list session posts |
+| | `/switch [profile]`, `/history` | Change account; list session posts |
 | Engage | `/like <ref>`, `/unlike <ref>`, `/repost <ref>`, `/unrepost <ref>` | Using extracted `like.ts` / `repost.ts` functions; un-actions use `viewer.like` / `viewer.repost` |
-| | `/open <ref>`, `/view <ref>`, `/copy <ref>` | Browser (`open`/`xdg-open`/`start`); print thread via `printPost`; clipboard (`pbcopy`/`wl-copy`/`xclip`/`clip`) |
+| | `/open <ref>`, `/view <ref>`, `/copy <ref>` | Browser (`open`/`xdg-open`/`rundll32 url.dll,FileProtocolHandler`); print thread via `printPost`; clipboard (`pbcopy`/`wl-copy`/`xclip`/`clip`) |
 | Session | `/auto-thread [on\|off]`, `/settings [undo\|pace N]` | Toggle; settings menu with no args |
 | | `/help [cmd]`, `/exit` (`/quit`), `/run <cmd> [args]` | Help; exit (= Ctrl+D); explicit passthrough |
 
@@ -400,8 +400,8 @@ Newest first, local time as `YYYY-MM-DDTHH:MM:SS`, summary dimmed (built from co
 
 1. Input is a command only if it matches `^/[a-z]` (markers never match; a leading `\/` posts a literal `/`).
 2. Shell-style tokenizer (quotes, backslash escapes).
-3. Native command → Commander subcommand (passthrough) → `Unknown /usr. Did you mean /undo?` (edit distance over both sets). `/run` skips native lookup.
-4. `/help` and Tab completion come from one registry; passthrough entries marked `↗`.
+3. Native command → Commander subcommand (passthrough) → `Unknown /hlp. Did you mean /help?` (edit distance over both sets). `/run` skips native lookup.
+4. `/help` and Tab completion come from one registry; `/help` lists passthrough entries on one `↗ From the CLI:` line.
 
 Name collisions that `/run` resolves: `thread`, `reply`, `post`, `quote`, `like`, `unlike`, `repost`, `delete`, `drafts`.
 

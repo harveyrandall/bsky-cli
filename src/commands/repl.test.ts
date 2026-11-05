@@ -22,6 +22,8 @@ vi.mock("@/index", () => ({
   getClient: vi.fn(async () => ({ session: { did: "did:plc:me", handle: "me.bsky.social" } })),
 }));
 vi.mock("@/commands/post", () => ({ createPost: vi.fn() }));
+vi.mock("@/commands/like", () => ({ likePost: vi.fn(), unlikePost: vi.fn() }));
+vi.mock("@/commands/repost", () => ({ repostPost: vi.fn(), unrepostPost: vi.fn() }));
 
 const original = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY };
 function setTTY(stdin: boolean | undefined, stdout: boolean | undefined) {
@@ -296,6 +298,94 @@ describe("saved sessions", () => {
     writeFileSync(join(sessions(), "k3f7xq.lock"), String(process.pid));
     await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow(join(sessions(), "k3f7xq.lock"));
   });
+  it("switches to another profile's login, and back if it can't", async () => {
+    const { getClient } = await import("@/index");
+    const p = makeProgram();
+    await p.parseAsync(["repl"], { from: "user" });
+    const { switchAccount } = startRepl.mock.lastCall![0];
+    vi.mocked(getClient).mockResolvedValueOnce({ session: { did: "did:plc:work", handle: "work.bsky.social" } } as never);
+    await expect(switchAccount("work")).resolves.toMatchObject({ handle: "work.bsky.social", agent: { selfDid: "did:plc:work" } });
+    expect(p.opts().profile).toBe("work");
+    vi.mocked(getClient).mockRejectedValueOnce(new Error("Not logged in"));
+    await expect(switchAccount("nope")).rejects.toThrow("Not logged in");
+    expect(p.opts().profile).toBe("work");
+  });
+  describe("/switch", () => {
+    let home: string;
+    const open = async () => {
+      await makeProgram().parseAsync(["repl"], { from: "user" });
+      return startRepl.mock.lastCall![0].switchAccount as (name: string) => Promise<{ profile: string }>;
+    };
+    const session = (file: string, handle: string) => writeFileSync(join(home, "bsky-cli", file), JSON.stringify({ handle }));
+    beforeEach(() => {
+      home = mkdtempSync(join(tmpdir(), "bsky-switch-"));
+      mkdirSync(join(home, "bsky-cli"));
+      // It decides bskyDir on every platform: a stubbed HOME alone would write to the real folder.
+      vi.stubEnv("XDG_CONFIG_HOME", home);
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    });
+    it("lists the profiles on ?, which would otherwise exit", async () => {
+      session("session-work.json", "work.bsky.social");
+      const exit = vi.spyOn(process, "exit");
+      const switchAccount = await open();
+      await expect(switchAccount("?")).rejects.toThrow("Pick a profile: work");
+      expect(exit).not.toHaveBeenCalled();
+    });
+    it("refuses when the environment chooses the account", async () => {
+      const { getClient } = await import("@/index");
+      const switchAccount = await open();
+      vi.mocked(getClient).mockClear();
+      vi.stubEnv("BSKY_HANDLE", "me.bsky.social");
+      vi.stubEnv("BSKY_PASSWORD", "fake");
+      await expect(switchAccount("work")).rejects.toThrow("BSKY_HANDLE and BSKY_PASSWORD choose the account here");
+      expect(getClient).not.toHaveBeenCalled();
+    });
+    it.each([
+      ["", ""],
+      ["default", ""],
+      ["work", "work"],
+      ["work.bsky.social", "work"],
+      ["me.bsky.social", ""],
+      ["nosuch", "nosuch"],
+    ])("takes %j as profile %j", async (name, profile) => {
+      session("session.json", "me.bsky.social");
+      session("session-work.json", "work.bsky.social");
+      const switchAccount = await open();
+      await expect(switchAccount(name)).resolves.toMatchObject({ profile });
+    });
+    it("CLI commands follow it, and -c stays", async () => {
+      const p = new Command().exitOverride().option("-p, --profile <name>").option("-c, --config <path>");
+      registerRepl(p);
+      p.command("who").action(() => console.log(`${p.opts().profile} ${p.opts().config}`));
+      await p.parseAsync(["-c", "custom.toml", "repl"], { from: "user" });
+      const { passthrough, switchAccount } = startRepl.mock.lastCall![0];
+      await switchAccount("work");
+      const print = vi.fn();
+      await passthrough.run(["who"], print);
+      expect(print).toHaveBeenCalledWith("work custom.toml", undefined);
+    });
+    it("keeps the old profile if the new agent can't be used", async () => {
+      const { getClient } = await import("@/index");
+      const p = makeProgram();
+      p.option("-p, --profile <name>");
+      p.command("who").action(() => console.log(p.opts().profile));
+      await p.parseAsync(["repl"], { from: "user" });
+      const { passthrough, switchAccount } = startRepl.mock.lastCall![0];
+      vi.mocked(getClient).mockResolvedValueOnce({ session: { handle: "work.bsky.social" } } as never);
+      await expect(switchAccount("work")).rejects.toThrow("Not logged in");
+      const print = vi.fn();
+      await passthrough.run(["who"], print);
+      expect(print).toHaveBeenCalledWith("undefined", undefined);
+    });
+    it("prefers a profile that's really called default", async () => {
+      session("session-default.json", "other.bsky.social");
+      const switchAccount = await open();
+      await expect(switchAccount("default")).resolves.toMatchObject({ profile: "default" });
+    });
+  });
   it("uses the session's own profile", async () => {
     write({ profile: "work" });
     const p = makeProgram();
@@ -362,6 +452,27 @@ describe("replAgent", () => {
     const root = { uri: `${uri}r`, cid: "bafyr" } as never;
     await expect(replAgent(agent).post("hi", { parent, root })).resolves.toEqual({ uri, cid: "bafyabc" });
     expect(createPost).toHaveBeenCalledWith(agent, "hi", { reply: parent, replyRoot: root });
+  });
+  it("deletes a post", async () => {
+    const deletePost = vi.fn(async () => {});
+    await replAgent({ session: { did: "did:plc:me" }, deletePost } as never).deletePost(uri as never);
+    expect(deletePost).toHaveBeenCalledWith(uri);
+  });
+  it("passes likes and reposts on to what the CLI uses", async () => {
+    const { likePost, unlikePost } = await import("@/commands/like");
+    const { repostPost, unrepostPost } = await import("@/commands/repost");
+    vi.mocked(unlikePost).mockResolvedValueOnce(true);
+    const agent = { session: { did: "did:plc:me" } } as never;
+    const post = { uri, cid: "bafyabc" } as never;
+    const client = replAgent(agent);
+    await client.like(post);
+    await client.repost(post);
+    await expect(client.unlike(post)).resolves.toBe(true);
+    await client.unrepost(post);
+    expect(likePost).toHaveBeenCalledWith(agent, post);
+    expect(repostPost).toHaveBeenCalledWith(agent, post);
+    expect(unlikePost).toHaveBeenCalledWith(agent, uri);
+    expect(unrepostPost).toHaveBeenCalledWith(agent, uri);
   });
   it("won't start without a session", () => {
     expect(() => replAgent({} as never)).toThrow("Not logged in");

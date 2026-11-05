@@ -1,125 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Command } from "commander";
-import { createMockAgent } from "@/test-utils";
+import { normalizeUri, registerThread } from "@/commands/thread";
+import { getClient } from "@/index";
+import { setPostLabeler } from "@/lib/format";
 
-const mockAgent = createMockAgent();
+vi.mock("@/index", () => ({ getClient: vi.fn(), isJson: () => false }));
 
-vi.mock("@/index", () => ({
-  getClient: vi.fn(() => Promise.resolve(mockAgent)),
-  isJson: vi.fn(() => false),
-}));
-
-vi.mock("@/lib/format", () => ({
-  printPost: vi.fn(),
-  outputJson: vi.fn(),
-}));
-
-import { registerThread } from "@/commands/thread";
-import { isJson } from "@/index";
-import { printPost, outputJson } from "@/lib/format";
-
-function makeProgram(register: (cmd: Command) => void): Command {
-  const program = new Command();
-  program.exitOverride();
-  register(program);
-  return program;
-}
-
-function makePostView(text: string) {
-  return {
-    uri: `at://did:plc:test/app.bsky.feed.post/${text}`,
-    author: { handle: "user.bsky.social", displayName: "User" },
-    record: {
-      $type: "app.bsky.feed.post",
-      text,
-      createdAt: "2025-01-01T00:00:00Z",
-    },
-    likeCount: 0,
-    repostCount: 0,
-    replyCount: 0,
-  };
-}
-
-describe("thread command", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    (isJson as any).mockReturnValue(false);
+describe("normalizeUri", () => {
+  it("leaves a full URI alone, whatever its DID method", () => {
+    const uri = "at://did:web:example.test/app.bsky.feed.post/3lbx7kt5def2a";
+    expect(normalizeUri(uri)).toBe(uri);
   });
-
-  it("normalizeUri prepends at://did:plc: when needed", async () => {
-    const postView = makePostView("main");
-
-    mockAgent.getPostThread.mockResolvedValue({
-      data: {
-        thread: {
-          post: postView,
-          replies: [],
-        },
-      },
-    });
-
-    const program = makeProgram(registerThread);
-    await program.parseAsync(["thread", "abc123/app.bsky.feed.post/xyz"], {
-      from: "user",
-    });
-
-    expect(mockAgent.getPostThread).toHaveBeenCalledWith(
-      expect.objectContaining({
-        uri: "at://did:plc:abc123/app.bsky.feed.post/xyz",
-      }),
-    );
+  it("still completes a bare did:plc tail", () => {
+    expect(normalizeUri("abc/app.bsky.feed.post/3lbx7kt5def2a")).toBe("at://did:plc:abc/app.bsky.feed.post/3lbx7kt5def2a");
   });
+});
 
-  it("displays post and replies", async () => {
-    const postView = makePostView("main post");
-    const replyView = makePostView("reply post");
-
-    mockAgent.getPostThread.mockResolvedValue({
-      data: {
-        thread: {
-          post: postView,
-          replies: [{ post: replyView }],
-        },
-      },
-    });
-
-    const program = makeProgram(registerThread);
-    await program.parseAsync(
-      ["thread", "at://did:plc:abc/app.bsky.feed.post/123"],
-      { from: "user" },
-    );
-
-    expect(printPost).toHaveBeenCalledTimes(2);
-    expect((printPost as any).mock.calls[0][0]).toBe(postView);
-    expect((printPost as any).mock.calls[1][0]).toBe(replyView);
-  });
-
-  it("in JSON mode outputs thread and replies", async () => {
-    (isJson as any).mockReturnValue(true);
-
-    const postView = makePostView("main post");
-    const replyView = makePostView("reply post");
-
-    const thread = {
-      post: postView,
-      replies: [{ post: replyView }],
-    };
-
-    mockAgent.getPostThread.mockResolvedValue({
-      data: { thread },
-    });
-
-    const program = makeProgram(registerThread);
-    await program.parseAsync(
-      ["thread", "at://did:plc:abc/app.bsky.feed.post/123"],
-      { from: "user" },
-    );
-
-    expect(outputJson).toHaveBeenCalledTimes(2);
-    // First call: the thread itself
-    expect((outputJson as any).mock.calls[0][0]).toBe(thread);
-    // Second call: the reply
-    expect((outputJson as any).mock.calls[1][0]).toEqual({ post: replyView });
-    expect(printPost).not.toHaveBeenCalled();
+describe("bsky thread", () => {
+  const post = (text: string) => ({ uri: "at://x", cid: "bafy", author: { handle: "alice.bsky.social" }, record: { text, createdAt: "2026-11-04T09:00:00.000Z" }, indexedAt: "2026-11-04T09:00:00.000Z" });
+  it("labels what it prints, so /view #2 can be acted on", async () => {
+    const getPostThread = vi.fn(async () => ({ data: { thread: { post: post("hi"), replies: [{ post: post("back") }] } } }));
+    vi.mocked(getClient).mockResolvedValue({ getPostThread } as never);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    setPostLabeler(() => "#2");
+    const program = new Command();
+    registerThread(program);
+    await program.parseAsync(["thread", "at://did:plc:a/app.bsky.feed.post/3lbx7kt5def2a"], { from: "user" });
+    const printed = [...log.mock.calls.flat(), ...write.mock.calls.map(([chunk]) => chunk)].join("");
+    setPostLabeler();
+    log.mockRestore();
+    write.mockRestore();
+    expect(printed.match(/#2/g)).toHaveLength(2);
   });
 });

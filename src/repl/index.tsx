@@ -1,8 +1,9 @@
 import { basename } from "node:path";
 import { render, renderToString } from "ink";
 import { LaunchList } from "@/repl/ui/LaunchList";
-import { deleteDraft, saveDraft } from "@/drafts";
-import { getSchedulerStatus } from "@/lib/scheduler";
+import { deleteDraft, readDrafts, saveDraft } from "@/drafts";
+import { setPostLabeler } from "@/lib/format";
+import { getSchedulerStatus, schedulerProfile } from "@/lib/scheduler";
 import { saveScheduledPost } from "@/scheduled";
 import { setConfigValues } from "@/toml-config";
 import { App, LEFT, type AppProps } from "@/repl/ui/App";
@@ -12,6 +13,7 @@ import { SessionKeeper } from "@/repl/core/session";
 import type { Repl, ReplAgent, ReplSettings } from "@/repl/core/repl";
 import { exitSummary } from "@/repl/core/summary";
 import type { Did, Handle, IsoUtc, SessionId } from "@/repl/core/types";
+import { outsideCommands } from "@/repl/core/passthrough";
 import { detectKittyKeyboard } from "@/repl/ui/terminal";
 
 export interface ReplOptions {
@@ -22,6 +24,9 @@ export interface ReplOptions {
   /** The config file the save offer writes to. */
   configPath: string;
   profile?: string;
+  passthrough?: AppProps["passthrough"];
+  /** `/switch`: the account behind a profile. */
+  switchAccount?(profile: string): Promise<{ agent: ReplAgent; handle: Handle; profile: string }>;
   session?: {
     store: Pick<SessionStore, "save" | "delete" | "lock" | "unlock" | "prune">;
     id: SessionId;
@@ -53,9 +58,10 @@ export async function pickSession(store: Pick<SessionStore, "delete">, listings:
   return picked as SessionId | undefined | null;
 }
 
-function schedulerRunning(): boolean {
+/** There's one job per machine, and it only sends one profile's posts. */
+function schedulerRunning(profile?: string): boolean {
   try {
-    return getSchedulerStatus() === "enabled";
+    return getSchedulerStatus() === "enabled" && (schedulerProfile() ?? "") === (profile ?? "");
   } catch {
     return false; // an unsupported platform: nothing runs by itself
   }
@@ -67,6 +73,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // protocol, and restores it on every exit path, when told it's supported.
   const kitty = await detectKittyKeyboard(process.stdin, process.stdout);
   const session = opts.session;
+  // /switch changes these.
+  let { profile } = opts;
+  const handles = new Set([opts.handle]);
   const startedAt = session?.resume ? new Date(session.createdAt) : new Date();
   let repl: Repl | undefined;
   const keeper =
@@ -83,16 +92,29 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       kittyHint={!kitty}
       settings={opts.settings}
       agent={opts.agent}
-      drafts={{ save: (d) => saveDraft(d, opts.profile), delete: (id) => deleteDraft(id, opts.profile) }}
+      drafts={{ save: (d) => saveDraft(d, profile), delete: (id) => deleteDraft(id, profile) }}
       saveConfig={(values) => setConfigValues(opts.configPath, "repl", values)}
-      saveScheduled={(p) => saveScheduledPost(p, opts.profile)}
-      schedulerRunning={schedulerRunning}
+      saveScheduled={(p) => saveScheduledPost(p, profile)}
+      schedulerRunning={() => schedulerRunning(profile)}
+      listDrafts={() => readDrafts(profile)}
+      switchAccount={async (name) => {
+        if (!opts.switchAccount) throw new Error("Can't switch accounts here");
+        const next = await opts.switchAccount(name);
+        profile = next.profile;
+        handles.add(next.handle);
+        keeper?.setAccount({ handle: next.handle, did: next.agent.selfDid, profile: profile || undefined });
+        return next;
+      }}
       keeper={keeper}
       resume={session?.resume}
+      passthrough={opts.passthrough}
       configName={basename(opts.configPath)}
-      onReady={(r) => (repl = r)}
+      onReady={(r) => {
+        repl = r;
+        setPostLabeler((post) => r.labelPost(post));
+      }}
     />,
-    { exitOnCtrlC: false, kittyKeyboard: { mode: kitty ? "enabled" : "disabled" } },
+    { exitOnCtrlC: false, kittyKeyboard: { mode: kitty ? "enabled" : "disabled" }, stdout: outsideCommands(process.stdout) },
   );
   // Ink restores the terminal on an uncaught error under Node but not under
   // Bun, which left the shell in kitty and bracketed-paste mode. Unmounting
@@ -126,6 +148,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       repl.close();
       if (left) await repl.settled();
     }
+    setPostLabeler(undefined);
     process.off("uncaughtException", crash);
     process.off("unhandledRejection", crash);
   }
@@ -136,7 +159,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       verbose: opts.settings.verbose,
       startedAt,
       endedAt: new Date(),
-      handle: opts.handle,
+      handle: [...handles].join(", @"),
       resumeId: resumable ? session?.id : undefined,
     });
     for (const line of lines) process.stdout.write(`${line}\n`);
@@ -150,11 +173,13 @@ const offline = async (): Promise<never> => {
 /** Props for a frame with no account behind it: the smoke run and tests. */
 export const offlineProps: Omit<AppProps, "markers" | "kittyHint"> = {
   settings: { autoThread: false, prefixThread: false, threadLabel: false, undo: 0, pace: 0, askToSave: false, verbose: false, forceAlt: false },
-  agent: { selfDid: "did:plc:offline", resolveHandle: offline, getPosts: offline, post: offline },
+  agent: { selfDid: "did:plc:offline", resolveHandle: offline, getPosts: offline, post: offline, like: offline, unlike: offline, repost: offline, unrepost: offline, deletePost: offline },
   drafts: { save: offline, delete: offline },
   saveConfig: offline,
   saveScheduled: offline,
   schedulerRunning: () => false,
+  listDrafts: offline,
+  switchAccount: offline,
   configName: "config.toml",
 };
 

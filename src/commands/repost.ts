@@ -3,6 +3,22 @@ import chalk from "chalk";
 import { getClient, isJson } from "@/index";
 import { outputJson } from "@/lib/format";
 
+type Client = Awaited<ReturnType<typeof getClient>>;
+
+export async function repostPost(agent: Client, post: { uri: string; cid: string }): Promise<string> {
+  const { uri } = await agent.repost(post.uri, post.cid);
+  return uri;
+}
+
+/** Removes your repost of a post, which the post itself knows. False if there wasn't one. */
+export async function unrepostPost(agent: Client, postUri: string): Promise<boolean> {
+  const { data } = await agent.getPosts({ uris: [postUri] });
+  if (data.posts.length === 0) throw new Error("Post not found");
+  const repost = data.posts[0].viewer?.repost;
+  if (repost) await agent.deleteRepost(repost);
+  return repost !== undefined;
+}
+
 export function registerRepost(program: Command): void {
   program
     .command("repost")
@@ -24,8 +40,7 @@ export function registerRepost(program: Command): void {
           rkey,
         });
 
-        const resp = await agent.repost(record.data.uri, record.data.cid!);
-        console.log(resp.uri);
+        console.log(await repostPost(agent, { uri: record.data.uri, cid: record.data.cid! }));
       }
     });
 }

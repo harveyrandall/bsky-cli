@@ -59,3 +59,15 @@ describe("YesNo", () => {
     },
   );
 });
+
+describe("YesNo defaulting to no", () => {
+  it.each([["Enter", "\r", false], ["y", "y", true], ["n", "n", false]])("takes %s", async (_, key, answer) => {
+    const onAnswer = vi.fn();
+    const app = render(<YesNo label="Delete?" defaultNo onAnswer={onAnswer} />);
+    await tick();
+    app.stdin.write(key);
+    await tick();
+    expect(onAnswer).toHaveBeenCalledWith(answer);
+    expect(app.lastFrame()).toContain("Delete? [y/N]");
+  });
+});

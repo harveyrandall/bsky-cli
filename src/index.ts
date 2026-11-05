@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { AtpAgent } from "@atproto/api";
 import { loadSessionConfig, saveSessionConfig } from "@/config";
-import { createClient } from "@/client";
+import { createClient, sharedClient } from "@/client";
 import { promptPassword, prompt2FA } from "@/auth";
 import { registerLogin } from "@/commands/login";
 import { registerTimeline, registerStream } from "@/commands/timeline";
@@ -68,7 +68,10 @@ let syncDone = false;
 
 export async function getClient(program: Command): Promise<AtpAgent> {
   const profile = resolveProfile(program);
+  return sharedClient(profile, () => signIn(profile));
+}
 
+async function signIn(profile: string | undefined): Promise<AtpAgent> {
   // Check for env-var-only auth (CI/scripts) — no session file needed
   if (process.env.BSKY_HANDLE && process.env.BSKY_PASSWORD) {
     const host = process.env.BSKY_HOST ?? "https://bsky.social";

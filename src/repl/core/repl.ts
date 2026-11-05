@@ -7,8 +7,8 @@ import { escapeMarkers, parseSubmit, type Markers, type SubmitPlan } from "./mar
 import { canStage, chips, expandHome, inspectMedia, mediaOptions, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
 import { Pipeline, draftOf, quoteOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
 import type { ReplSessionFile, SavedMode } from "./persist";
-import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
-import type { AtUri, Cooldown, IsoUtc, OwnLabel, StrongRef, ThreadLetter } from "./types";
+import { Registry, didOf, looksLikeRef, postUrl, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
+import { isAtUri, isCid, rkeyOf, type AtUri, type Cooldown, type IsoUtc, type OwnLabel, type StrongRef, type ThreadLetter } from "./types";
 
 export const IDLE_HINT =
   "Plain text needs a thread: /thread to start one, /post for a single post, or -t to do this automatically.";
@@ -20,7 +20,7 @@ const NEW_ITEMS = ["Post", "Thread", "Image post", "Video post", "Quote post", "
 const NEW_QUESTIONS: Partial<Record<(typeof NEW_ITEMS)[number], string>> = {
   "Image post": "Path to the file:",
   "Video post": "Path to the file:",
-  "Quote post": "Post to quote (number, link or at:// URI):",
+  "Quote post": "Post to quote (number, #n, link or at:// URI):",
 };
 
 export type ReturnTo = "idle" | "thread";
@@ -57,10 +57,19 @@ export interface ReplAsk {
   choose(label: string, options: readonly string[], start?: number): Promise<number | undefined>;
   /** A line of text; undefined when dismissed. */
   text(label: string): Promise<string | undefined>;
+  /** Defaults to no. */
+  yesNo(label: string): Promise<boolean>;
 }
 
 export interface ReplAgent extends RefAgent {
   post(text: string, reply?: SendTarget, media?: readonly StagedMedia[], quote?: StrongRef): Promise<StrongRef>;
+  like(post: StrongRef): Promise<void>;
+  /** False if there was no like to remove. */
+  unlike(post: StrongRef): Promise<boolean>;
+  repost(post: StrongRef): Promise<void>;
+  /** False if there was no repost to remove. */
+  unrepost(post: StrongRef): Promise<boolean>;
+  deletePost(uri: AtUri): Promise<void>;
 }
 
 export interface ReplDeps {
@@ -77,12 +86,18 @@ export interface ReplDeps {
   saveConfig(values: Record<string, string | number | boolean>): Promise<void>;
   saveScheduled(p: Omit<ScheduledPost, "id" | "createdAt">): Promise<{ id: string }>;
   schedulerRunning(): boolean;
+  openUrl(url: string): Promise<void>;
+  copyText(text: string): Promise<void>;
+  listDrafts(): Promise<{ drafts: Draft[]; skipped: number }>;
+  /** Everything else that depends on the account follows it: drafts, scheduled posts, the session file, CLI commands. */
+  switchAccount(profile: string): Promise<{ agent: ReplAgent; handle: string }>;
   timers?: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   fs?: MediaFs;
 }
 
 /** "done" clears the composer, "keep" leaves it, `restore` replaces it. */
-export type SubmitOutcome = "done" | "keep" | { restore: string };
+/** `clear` empties the composer without remembering the text. */
+export type SubmitOutcome = "done" | "keep" | "clear" | { restore: string };
 export type EscapeResult = "handled" | "unhandled" | { restore: string };
 
 export interface ThreadState {
@@ -96,6 +111,8 @@ export interface ThreadState {
 type WriteKind = Intent["kind"];
 
 const stripLabel = (text: string) => text.replace(/\n🧵$|^🧵\n/, "");
+/** Whether a draft still holds exactly these posts, so they needn't be saved again. */
+const held = (item: Unsent) => item.draftId !== undefined && !item.stale;
 const manualDraft = (item: Unsent) =>
   draftOf("manual", item.posts.map(stripLabel), { target: item.target, media: item.media, quote: quoteOf(item.intent) });
 
@@ -123,6 +140,9 @@ export class Repl {
   /** A resumed thread's posts couldn't be found. */
   private threadLost = false;
   private readonly timers: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
+  private agent: ReplAgent;
+  /** A draft in the composer: sending exactly this deletes it, once it's gone. */
+  private loaded?: { id: string; text: string; media: string[] };
   private readonly letters = new Map<number, ThreadLetter | undefined>();
 
   constructor(
@@ -131,6 +151,7 @@ export class Repl {
     private readonly deps: ReplDeps,
   ) {
     this.s = { ...settings };
+    this.agent = deps.agent;
     this.registry = new Registry(settings.prefixThread, deps.agent.selfDid);
     this.timers = deps.timers ?? {
       now: () => Date.now(),
@@ -139,7 +160,7 @@ export class Repl {
     };
     this.pipeline = new Pipeline({
       ...this.timers,
-      send: (text, reply, media, quote) => deps.agent.post(text, reply, media, quote),
+      send: (text, reply, media, quote) => this.agent.post(text, reply, media, quote),
       threadTarget: () => this.threadState && { parent: this.threadState.cursor, root: this.threadState.root },
       saveDraft: deps.saveDraft,
       deleteDraft: deps.deleteDraft,
@@ -186,6 +207,11 @@ export class Repl {
     const media = this.media;
     if (text.trim() === "") return media.length > 0 ? [draftOf("manual", [""], { media })] : [];
     const { words, target, quote } = this.destination(text);
+    if (this.isLoaded(words)) {
+      // Its draft is still there; only what's been staged since isn't.
+      const added = media.filter((m) => !this.loaded!.media.includes(m.path));
+      return added.length > 0 ? [draftOf("manual", [""], { media: added })] : [];
+    }
     if (quote) {
       // A quote can't carry media, or be a thread.
       return [draftOf("manual", [words], { quote }), ...(media.length > 0 ? [draftOf("manual", [""], { media })] : [])];
@@ -196,22 +222,23 @@ export class Repl {
   }
 
   /** Where composer text would go: a command that came back says, or else the mode does. */
-  private destination(text: string): { words: string; target?: SendTarget; quote?: StrongRef } {
+  private destination(text: string): { words: string; target?: { parent: { uri: string } }; quote?: { uri: string } } {
     const command = /^\/(post|thread|reply|quote)\s+([\s\S]*)$/.exec(text.trim());
     if (command?.[1] === "post" || command?.[1] === "thread") return { words: command[2] };
     if (command) {
       const [, label = "", words = ""] = /^(\S+)\s*([\s\S]*)$/.exec(command[2]) ?? [];
-      const entry = this.registry.byLabel(label);
-      if (entry) {
-        const ref = { uri: entry.uri, cid: entry.cid };
-        return command[1] === "quote" ? { words, quote: ref } : { words, target: { parent: ref, root: entry.root } };
-      }
+      const uri = this.registry.byLabel(label)?.uri ?? this.registry.viewed(label)?.uri ?? (isAtUri(label) ? label : undefined);
+      if (uri) return command[1] === "quote" ? { words, quote: { uri } } : { words, target: { parent: { uri } } };
     }
     const m = this.current;
-    if (m.kind === "reply-once") return { words: text, target: { parent: m.target.ref, root: m.target.root } };
+    if (m.kind === "reply-once") return { words: text, target: { parent: m.target.ref } };
     if (m.kind === "quote-once") return { words: text, quote: m.target.ref };
     const t = this.threadState;
-    return { words: text, ...(m.kind === "thread" && t && { target: { parent: t.cursor, root: t.root } }) };
+    return { words: text, ...(m.kind === "thread" && t && { target: { parent: t.cursor } }) };
+  }
+
+  private isLoaded(text: string): boolean {
+    return this.loaded?.text.trim() === text.trim();
   }
 
   /** What paused the queue, while it's paused. */
@@ -226,10 +253,11 @@ export class Repl {
   /** Picks a saved session back up. Nothing is sent without being asked: a kill leaves no telling what went. */
   async resume(file: ReplSessionFile): Promise<void> {
     // All of it first, so a save at any moment from here has the whole session.
-    this.registry.restore(file.posts, file.counters);
+    this.registry.restore(file.posts, file.counters, file.viewed);
     this.threadState = file.thread;
     this.lastThreadLetter = file.lastThreadLetter;
     this.media = [...file.staged];
+    this.loaded = file.loaded;
     this.unanswered = [...file.pending];
     this.current = this.resumeMode(file.mode);
     this.deps.print(`── resumed ${file.id} ──`, "dim");
@@ -271,7 +299,7 @@ export class Repl {
     for (let uri: string | undefined = saved.cursor.uri; uri && chain.length < 25; uri = this.registry.byUri(uri)?.parent) chain.push(uri);
     let found: Set<string>;
     try {
-      found = new Set((await this.within(this.deps.agent.getPosts(chain as AtUri[]), 10_000)).map((p) => p.uri));
+      found = new Set((await this.within(this.agent.getPosts(chain as AtUri[]), 10_000)).map((p) => p.uri));
     } catch (err) {
       this.deps.print(`Couldn't check the thread (${err instanceof Error ? err.message : String(err)}); carrying on from where it was`, "error");
       return;
@@ -294,7 +322,7 @@ export class Repl {
   private resumeMode(saved: SavedMode): ReplMode {
     if (!("target" in saved)) return saved;
     const entry = this.registry.byLabel(saved.target);
-    if (!entry) return { kind: saved.returnTo };
+    if (!entry || entry.deleted) return { kind: saved.returnTo };
     const target = { ref: { uri: entry.uri, cid: entry.cid }, root: entry.root, entry };
     return { kind: saved.kind, target, label: entry.label, returnTo: saved.returnTo };
   }
@@ -312,14 +340,16 @@ export class Repl {
       const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item);
       this.letters.set(sent.id, this.letterFor(item.intent));
       if (threadPost && this.current.kind === "idle") this.current = { kind: "thread" };
-    } else if (answer !== 2 && (this.deps.composerBusy() || !this.fits(item.media ?? []))) {
+    } else if (answer === 2) {
+      if (held(item)) this.deps.print(`Left in draft ${item.draftId}`, "dim");
+    } else if (item.stale || this.deps.composerBusy() || !this.fits(item.media ?? [])) {
       await this.saveToDrafts([item], (id) => `Saved as draft ${id}`);
-    } else if (answer !== 2) {
+    } else {
       this.restage(item.media);
       this.deps.restore(this.asResend(item));
     }
-    // Sending deletes it on success; otherwise it's dealt with now, and sync mustn't send it too.
-    if (answer !== 0 && item.draftId) {
+    // It holds posts that went, so sending it would send them twice.
+    if (answer !== 0 && item.stale && item.draftId) {
       await this.deps.deleteDraft(item.draftId).catch((err: unknown) => {
         this.deps.print(`Couldn't delete draft ${item.draftId}, so it may send again on your next run: ${err instanceof Error ? err.message : String(err)}`, "error");
       });
@@ -335,7 +365,7 @@ export class Repl {
     composer: ReplSessionFile["composer"],
     history: string[],
   ): ReplSessionFile {
-    const { posts, nextLabel, nextLetter } = this.registry.snapshot();
+    const { posts, viewed, nextLabel, nextViewed, nextLetter } = this.registry.snapshot();
     const m = this.current;
     const mode: SavedMode = "target" in m ? { kind: m.kind, target: m.label, returnTo: m.returnTo } : m;
     return {
@@ -344,17 +374,33 @@ export class Repl {
       updatedAt: new Date().toISOString() as IsoUtc,
       settings: { ...this.s, markers: this.markers },
       posts,
-      viewed: [],
+      viewed,
       thread: this.threadState,
       lastThreadLetter: this.lastThreadLetter,
       mode,
       composer,
+      loaded: this.loaded,
       staged: this.media,
       // Everything queued, a post in flight included: a kill leaves no telling if it went.
       pending: [...this.pipeline.pending(), ...this.unanswered],
       history,
-      counters: { nextLabel, nextViewed: 0, nextLetter },
+      counters: { nextLabel, nextViewed, nextLetter },
     };
+  }
+
+  /**
+   * What to print before a post: `(n)` if it's in the session, or a `#n` to act on it by.
+   * Saved when the command ends, as the composer clears: this runs inside the command.
+   */
+  labelPost(post: { uri: string; cid: string }): string | undefined {
+    if (!isAtUri(post.uri) || !isCid(post.cid)) return undefined;
+    const own = this.registry.byUri(post.uri);
+    return own ? `(${own.label})` : this.registry.addViewed({ uri: post.uri, cid: post.cid }).label;
+  }
+
+  /** CLI arguments with each whole `#n` as its URI. A bare number is usually a count, so it's left alone. */
+  expandLabels(argv: readonly string[], at: ReadonlySet<number>): string[] {
+    return argv.map((arg, i) => (at.has(i) && this.registry.viewed(arg)?.uri) || arg);
   }
 
   /** Media waiting for the next post. */
@@ -364,7 +410,7 @@ export class Repl {
 
   /** What's queued, as drafts that send it to the same places. */
   draftItems(): Omit<Draft, "id" | "createdAt">[] {
-    return this.pipeline.unsent().map(manualDraft);
+    return this.pipeline.unsent().filter((i) => !held(i)).map(manualDraft);
   }
 
   prompt(): string {
@@ -461,7 +507,7 @@ export class Repl {
     try {
       return await resolveRef(input, {
         registry: this.registry,
-        agent: this.deps.agent,
+        agent: this.agent,
         letter: this.threadState?.letter ?? this.threadLetter ?? this.lastThreadLetter,
       });
     } catch (err) {
@@ -672,6 +718,178 @@ export class Repl {
     return "done";
   }
 
+  /** `/delete <ref>`: your own post, after asking. */
+  async deletePost(input: string): Promise<SubmitOutcome> {
+    // A queued post may be replying to it.
+    if (this.blockedByPending()) return "keep";
+    const resolved = await this.resolve(input);
+    return resolved ? this.remove(resolved.ref, resolved.post?.text ?? "") : "keep";
+  }
+
+  /** `/undo`: this account's last post this session. What's still queued is Esc's. */
+  async undo(): Promise<SubmitOutcome> {
+    if (this.blockedByPending()) return "keep";
+    const last = this.registry.entries().filter((e) => !e.external && !e.deleted && didOf(e.uri) === this.agent.selfDid).at(-1);
+    if (!last) {
+      this.deps.print("Nothing to undo", "dim");
+      return "done";
+    }
+    return this.remove({ uri: last.uri, cid: last.cid }, last.excerpt);
+  }
+
+  private async remove(ref: StrongRef, text: string): Promise<SubmitOutcome> {
+    if (didOf(ref.uri) !== this.agent.selfDid) {
+      this.deps.print("You can only delete your own posts", "error");
+      return "keep";
+    }
+    const entry = this.registry.byUri(ref.uri);
+    const name = entry ? `(${entry.label})` : rkeyOf(ref.uri);
+    const excerpt = entry?.excerpt ?? text.split("\n")[0];
+    const stops = this.threadState?.root.uri === ref.uri;
+    if (!(await this.deps.ask.yesNo(`Delete ${name} "${excerpt}"?${stops ? " This stops the thread." : ""}`))) return "done";
+    await this.agent.deletePost(ref.uri);
+    this.registry.markDeleted(ref.uri);
+    this.deps.print(`Deleted ${name}`, "dim");
+    const mode = this.current;
+    if ("target" in mode && mode.target.ref.uri === ref.uri) this.current = { kind: mode.returnTo };
+    if (stops) this.stopThread();
+    else this.stepBackFrom(ref.uri);
+    this.deps.onChange();
+    return "done";
+  }
+
+  /** A deleted cursor can't be replied to, so the thread goes back to the post before it, or stops if none is left. */
+  private stepBackFrom(uri: string): void {
+    const t = this.threadState;
+    if (t?.cursor.uri !== uri) return;
+    let entry = this.registry.byUri(uri);
+    while (entry?.deleted) entry = entry.parent ? this.registry.byUri(entry.parent) : undefined;
+    if (entry) this.threadState = { ...t, cursor: { uri: entry.uri, cid: entry.cid } };
+    else this.stopThread();
+  }
+
+  /** `/drafts [id]`: list them, or load one to send. The draft goes once that text has been sent. */
+  async drafts(id?: string): Promise<SubmitOutcome> {
+    const { drafts: all, skipped } = await this.deps.listDrafts();
+    if (skipped > 0) this.deps.print(`Skipped ${skipped} draft file${skipped === 1 ? "" : "s"} that couldn't be read`, "error");
+    if (id === undefined) {
+      if (all.length === 0 && skipped === 0) this.deps.print("No drafts", "dim");
+      for (const d of all) this.deps.print(`${d.id}  ${d.type}  ${d.text.split("\n")[0]}`);
+      return "done";
+    }
+    const matches = all.filter((d) => d.id.startsWith(id));
+    if (matches.length !== 1) {
+      this.deps.print(matches.length === 0 ? `No draft "${id}"` : `"${id}" could be ${matches.map((d) => d.id).join(" or ")}`, "error");
+      return "keep";
+    }
+    return await this.loadDraft(matches[0]);
+  }
+
+  private async loadDraft(d: Draft): Promise<SubmitOutcome> {
+    const [first = d, ...rest] = d.posts ?? [];
+    if (rest.some((p) => p.images?.length || p.video)) {
+      this.deps.print("Media on later posts can't be loaded here: use bsky drafts send", "error");
+      return "keep";
+    }
+    const absolute = (path: string) => resolve(expandHome(path));
+    const images = (first.images ?? []).map((path, i): StagedMedia => ({ path: absolute(path), kind: "image", ...(first.imageAlts?.[i] !== undefined && { alt: first.imageAlts[i] }) }));
+    const video: StagedMedia[] = first.video ? [{ path: absolute(first.video), kind: "video", ...(first.videoAlt !== undefined && { alt: first.videoAlt }) }] : [];
+    const all = [...images, ...video];
+    for (const m of all) {
+      const { error } = await inspectMedia(m.path, this.deps.fs ?? nodeMediaFs);
+      // Sent without it, the draft would be deleted with the file still to go.
+      if (error !== undefined) {
+        this.deps.print(`Can't load that draft: ${error}`, "error");
+        return "keep";
+      }
+    }
+    // Loading it again, as after Esc, finds its media staged already.
+    const media = all.filter((m) => !this.media.some((s) => s.path === m.path));
+    if (!this.fits(media)) {
+      this.deps.print("That draft's media can't join what's staged: /detach what's staged first", "error");
+      return "keep";
+    }
+    this.restage(media);
+    this.deps.onChange();
+    const text = this.join(d.posts?.map((p) => p.text) ?? [d.text]);
+    this.loaded = { id: d.id, text, media: all.map((m) => m.path) };
+    const command = d.quoteUri ? `/quote ${d.quoteUri}` : d.replyUri ? `/reply ${d.replyUri}` : "/post";
+    return { restore: `${command} ${text}` };
+  }
+
+  /** `/switch <profile>`: post as another account. What belongs to this one stops here. */
+  async switchProfile(profile: string): Promise<SubmitOutcome> {
+    if (this.blockedByPending()) return "keep";
+    const { agent, handle } = await this.deps.switchAccount(profile);
+    this.loaded = undefined; // its draft stays with the profile it came from
+    if (agent.selfDid === this.agent.selfDid) {
+      // Another name for this account, so nothing here belongs to anyone else.
+      this.agent = agent;
+      this.deps.print(`Still posting as @${handle}`, "dim");
+      this.deps.onChange();
+      return "done";
+    }
+    if (this.inThread()) this.stopThread();
+    if (this.media.length > 0) this.deps.print(`Unstaged ${chips(this.media)}`, "dim");
+    this.media = [];
+    this.current = { kind: "idle" };
+    this.agent = agent;
+    this.registry.setSelf(agent.selfDid);
+    this.deps.print(`Now posting as @${handle}`, "dim");
+    this.deps.onChange();
+    return "done";
+  }
+
+  /** The link is what `/open` and `/copy` were after, so a failure still gives it. */
+  private async withLink(uri: AtUri, use: (url: string) => Promise<void>): Promise<void> {
+    const url = postUrl(uri);
+    await use(url).catch((err: unknown) => {
+      throw new Error(`${err instanceof Error ? err.message : String(err)}: ${url}`);
+    });
+  }
+
+  /** `/open`: the post in a browser. */
+  async openPost(input: string): Promise<SubmitOutcome> {
+    const resolved = await this.resolve(input);
+    if (!resolved) return "keep";
+    await this.withLink(resolved.ref.uri, (url) => this.deps.openUrl(url));
+    return "done";
+  }
+
+  /** `/copy`: the post's link on the clipboard. */
+  async copyPost(input: string): Promise<SubmitOutcome> {
+    const resolved = await this.resolve(input);
+    if (!resolved) return "keep";
+    await this.withLink(resolved.ref.uri, (url) => this.deps.copyText(url));
+    this.deps.print(`Copied ${resolved.entry ? `(${resolved.entry.label})` : input}`, "dim");
+    return "done";
+  }
+
+  /** A ref as a URI, or undefined having said why not. */
+  async uriOf(input: string): Promise<AtUri | undefined> {
+    return (await this.resolve(input))?.ref.uri;
+  }
+
+  /** `/like`, `/unlike`, `/repost` and `/unrepost`. */
+  async engage(action: "like" | "unlike" | "repost" | "unrepost", input: string): Promise<SubmitOutcome> {
+    const resolved = await this.resolve(input);
+    if (!resolved) return "keep";
+    const name = resolved.entry ? `(${resolved.entry.label})` : input;
+    const { agent } = this;
+    if (action === "like") {
+      await agent.like(resolved.ref);
+      this.deps.print(`Liked ${name}`, "dim");
+    } else if (action === "repost") {
+      await agent.repost(resolved.ref);
+      this.deps.print(`Reposted ${name}`, "dim");
+    } else if (action === "unlike") {
+      this.deps.print((await agent.unlike(resolved.ref)) ? `Unliked ${name}` : `You hadn't liked ${name}`, "dim");
+    } else {
+      this.deps.print((await agent.unrepost(resolved.ref)) ? `Removed your repost of ${name}` : `You hadn't reposted ${name}`, "dim");
+    }
+    return "done";
+  }
+
   /** `/new`: pick what to write next, which ends the thread. */
   async newMenu(): Promise<SubmitOutcome> {
     if (this.blockedByPending()) return "keep";
@@ -757,7 +975,7 @@ export class Repl {
     this.unstage(media);
     this.deps.print(`Scheduled for ${formatLocalDateTime(scheduledAt)} (${saved.id})`, "dim");
     if (!this.deps.schedulerRunning()) {
-      this.deps.print("Nothing sends it until the scheduler runs: `bsky schedule enable`, or `bsky schedule watch` in another terminal", "dim");
+      this.deps.print("Nothing sends it until a scheduler runs for this account: `bsky schedule enable`, or `bsky schedule watch` in another terminal", "dim");
     }
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
@@ -856,9 +1074,9 @@ export class Repl {
     const items = this.pipeline.cancelAll();
     if (items.length === 0) return "handled";
     // One text can't hold items going to different places, or say which post has the media.
-    const oneText = items.length === 1 || items.every((i) => i.intent.kind === "thread" && !i.media);
+    const oneText = items.length === 1 || items.every((i) => i.intent.kind === "thread" && !i.media && !i.draftId);
     const media = items.flatMap((i) => i.media ?? []);
-    if (composerText.trim() !== "" || !oneText || !this.fits(media)) {
+    if (composerText.trim() !== "" || !oneText || !this.fits(media) || items.some((i) => i.stale)) {
       void this.saveToDrafts(items, (id) => `Saved as draft ${id}`);
       return "handled";
     }
@@ -868,6 +1086,10 @@ export class Repl {
 
   private async saveToDrafts(items: readonly Unsent[], saved: (id: string) => string): Promise<void> {
     for (const item of items) {
+      if (held(item)) {
+        this.deps.print(`Left in draft ${item.draftId}`, "dim");
+        continue;
+      }
       try {
         const d = await this.deps.saveDraft(manualDraft(item));
         this.deps.print(saved(d.id), "dim");
@@ -909,7 +1131,10 @@ export class Repl {
     const media = quoting ? [] : this.media;
     if (quoting && this.media.length > 0) this.deps.print(`Quote posts can't have media; ${chips(this.media)} stays for the next post`, "dim");
     if (!quoting) this.media = [];
-    const item = this.pipeline.enqueue(intent, posts, media.length > 0 ? media : undefined);
+    // Only what was loaded replaces the draft: posting something else leaves it.
+    const draftId = this.isLoaded(text) ? this.loaded!.id : undefined;
+    if (draftId) this.loaded = undefined;
+    const item = this.pipeline.enqueue(intent, posts, media.length > 0 ? media : undefined, { draftId });
     this.letters.set(item.id, this.letterFor(intent));
     if (plan.discard) this.deps.print(`Discarded: ${plan.discard}`, "dim");
     return plan.keep ? { restore: plan.keep } : "done";
@@ -970,8 +1195,11 @@ export class Repl {
     } else {
       const n = f.item.posts.length;
       this.deps.print(n > 1 ? `Post ${f.from + 1} of ${n} wasn't sent: ${f.message}` : f.message, "error");
-      const back: Unsent = { ...f.item, posts: f.item.posts.slice(f.from), media: f.from === 0 ? f.item.media : undefined, target: f.target };
-      if (this.deps.composerBusy() || !this.fits(back.media ?? [])) {
+      const stale = f.from > 0 && f.source !== undefined;
+      const back: Unsent = { ...f.item, posts: f.item.posts.slice(f.from), media: f.from === 0 ? f.item.media : undefined, target: f.target, draftId: f.source, stale };
+      if (stale) {
+        void this.saveToDrafts([back], (id) => `Saved the rest as draft ${id}`);
+      } else if (this.deps.composerBusy() || !this.fits(back.media ?? [])) {
         // A draft keeps its text, media and destination together.
         void this.saveToDrafts([back], (id) => `A post came back while you were typing; saved it as draft ${id}`);
       } else {
@@ -985,6 +1213,7 @@ export class Repl {
   /** Posts coming back, as what Enter needs to send them to the same place. */
   private asResend(item: Unsent): string {
     const text = this.join(item.posts);
+    if (held(item)) this.loaded = { id: item.draftId!, text, media: (item.media ?? []).map((m) => m.path) };
     const { kind } = item.intent;
     if (kind === "thread" && this.current.kind === "thread") return text;
     if (kind === "quote") return `/quote ${this.registry.byUri(item.intent.target.uri)?.label ?? item.intent.target.uri} ${text}`;

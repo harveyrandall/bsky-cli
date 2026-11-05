@@ -3,11 +3,8 @@ import type { AppBskyFeedDefs } from "@atproto/api";
 import { getClient, isJson } from "@/index";
 import { printPost, outputJson } from "@/lib/format";
 
-function normalizeUri(uri: string): string {
-  if (!uri.startsWith("at://did:plc:")) {
-    return "at://did:plc:" + uri;
-  }
-  return uri;
+export function normalizeUri(uri: string): string {
+  return uri.startsWith("at://") ? uri : "at://did:plc:" + uri;
 }
 
 export function registerThread(program: Command): void {

@@ -21,8 +21,10 @@ export interface QueueItem {
 /** What's left of a queued item, and where its next post is going. */
 export interface Unsent extends QueueItem {
   target?: SendTarget;
-  /** The draft a retry of this replaces, for as long as it isn't sent. */
+  /** The draft holding these posts, deleted when the last of them has gone. */
   draftId?: string;
+  /** Posts of this item have gone, so that draft holds more than these. */
+  stale?: boolean;
 }
 
 /** counting = still inside the undo window; pacing = waiting on the pace only. */
@@ -48,6 +50,8 @@ export interface Failure {
   target?: SendTarget;
   message: string;
   draftId?: string;
+  /** The draft the item came from. */
+  source?: string;
 }
 
 export interface PipelineDeps {
@@ -71,7 +75,7 @@ export interface PipelineDeps {
 export function draftOf(
   reason: Draft["reason"],
   posts: readonly string[],
-  { target, media, quote }: { target?: SendTarget; media?: readonly StagedMedia[]; quote?: StrongRef } = {},
+  { target, media, quote }: { target?: { parent: { uri: string } }; media?: readonly StagedMedia[]; quote?: { uri: string } } = {},
 ): Omit<Draft, "id" | "createdAt"> {
   const thread = posts.length > 1;
   return {
@@ -150,7 +154,8 @@ export class Pipeline {
   }
 
   private remaining(a: Active, from: number): Unsent {
-    return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a), draftId: a.draftId };
+    const stale = from > 0 && a.draftId !== undefined;
+    return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a), draftId: a.draftId, ...(stale && { stale }) };
   }
 
   isPaused(): boolean {
@@ -181,15 +186,15 @@ export class Pipeline {
 
   /**
    * Cancel everything not yet sent; returns what was cancelled, oldest first.
-   * A retry's old draft goes too, since it holds posts sent since, unless the
-   * caller can't take the text on (`keepDrafts`).
+   * A draft stays unless it holds posts sent since, and then it goes too, unless
+   * the caller can't take the text on (`keepDrafts`).
    */
   cancelAll(o: { keepDrafts?: boolean } = {}): Unsent[] {
     this.clear();
     const cancelled = this.unsent();
     // A post already being sent can't be stopped; it stays queued on its own.
     const inFlight = this.sending ? this.queue[0] : undefined;
-    if (!o.keepDrafts) for (const a of this.queue) if (a !== inFlight) void this.dropDraft(a);
+    if (!o.keepDrafts) for (const a of this.queue) if (a !== inFlight && a.index > 0) void this.dropDraft(a);
     // Truncate the in-flight item in place: sendHead still holds it and checks
     // its length when the send returns.
     if (inFlight) inFlight.item = { ...inFlight.item, posts: inFlight.item.posts.slice(0, inFlight.index + 1) };
@@ -317,11 +322,11 @@ export class Pipeline {
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
-    const failure: Failure = { kind: c.kind, item: a.item, from: a.index, target, message };
+    const failure: Failure = { kind: c.kind, item: a.item, from: a.index, target, message, source: a.draftId };
     if (c.kind === "rejected") {
       if (this.queue[0] === a) this.queue.shift();
       this.deps.onFailed(failure);
-      await this.dropDraft(a);
+      if (a.index > 0) await this.dropDraft(a);
       return;
     }
     this.failure = failure;

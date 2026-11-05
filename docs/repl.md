@@ -1,6 +1,6 @@
 # REPL
 
-`bsky repl` opens an interactive composer for posts, threads, quotes, scheduled posts and drafts. In a terminal, plain `bsky` with no command opens it too.
+`bsky repl` opens an interactive composer for posts, threads, quotes, scheduled posts and drafts, where you can also read your timeline and act on what you read. In a terminal, plain `bsky` with no command opens it too.
 
 ```bash
 bsky repl
@@ -31,22 +31,57 @@ The prompt shows what Enter will do with plain text:
 | `/reply-from <ref>` | Continue the thread from another post |
 | `/post [text]` | Post on its own |
 | `/quote <ref> [text]` | Quote a post — now with text, or whatever you type next. A quote is one post, and can't have media |
-| `/new` | Pick what to write next: `Post · Thread · Image post · Video post · Quote post · Scheduled post · Draft`. Picking one stops the thread. Like `/thread` and `/reply-from`, it waits until nothing is queued |
+| `/new` | Pick what to write next: `Post · Thread · Image post · Video post · Quote post · Scheduled post · Draft`. Picking one stops the thread. Like `/thread` and `/reply-from`, it's refused while anything is queued |
 | `/attach <path…> [--alt "…"]` | Stage images or a video for the next post |
 | `/detach [n\|all]` | Unstage one file (counting from 1, in the order shown above the composer), or all of them, which is what `/detach` alone does |
 | `/edit [text]` | Write in `$EDITOR` (same as Ctrl+G) |
+| `/delete <ref>` | Delete one of your posts, after asking. A thread that was continuing from it goes back to the post before, or stops if there isn't one, and deleting a thread's first post stops the thread, as the question says. Refused while anything is queued |
+| `/undo` | Delete the last post you made this session, after asking. Refused while anything is queued: wait, or Esc takes back what hasn't gone yet |
+| `/drafts [id]` | List your drafts, or load one into the composer by its id or the start of it |
+| `/switch [profile]` | Post as another account, or with no name, the unnamed profile's. See [Switching account](#switching-account) |
+| `/like`, `/unlike`, `/repost`, `/unrepost <ref>` | Like or repost a post, or take it back |
+| `/open <ref>` | Open a post in your browser |
+| `/copy <ref>` | Copy a post's link |
+| `/view <ref>` | Print a post and its replies |
+| `/run <command> [args]` | Run a CLI command, even one whose name a REPL command has taken |
 | `/auto-thread [on\|off]` | Toggle starting a thread from plain text |
 | `/settings [undo\|pace N]` | Change the undo window or pace, then show the settings; with no arguments it asks for each |
-| `/history` | List this session's posts |
+| `/history` | List this session's posts, marking any you've deleted |
 | `/retry` | Resend what couldn't be sent (network error, rate limit or expired session) |
 | `/help [command]` | List commands, or show help for one |
 | `/exit` (`/quit`) | Leave the REPL (same as Ctrl+D) |
 
 Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it replies to something other than the post before it, `📷 2` or `🎞` for media, `❝ 2` for a quote, and the full `at://` URI with `-v`.
 
-**Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
+**Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), a `#n` label from something you've read, its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
 
 A name that isn't a command gets a suggestion and your text stays. Command names start with a lowercase letter, so `/Help` and `/ x` are text; start with `\/` to post text that begins like a command.
+
+## Reading and CLI commands
+
+Most CLI commands run from the prompt, without the `bsky`: `/timeline -n 5`, `/tl`, `/notifs`, `/search cats`. `/help` lists them on its `↗ From the CLI` line. A REPL command of the same name goes first, so use `/run drafts list` for the CLI's `drafts`. The current profile and any `-c` you started with are used, and a command that fails never ends the REPL: its error is shown and its text stays in the composer.
+
+Posts that `timeline`, `thread`, `search`, `bookmarks get` and `/view` print get a `#n` label, or their `(n)` if they're already in the session. It works as a ref and lasts for the session, including when you resume it. `/notifs` and `--json` output have no labels.
+
+```
+/timeline -n 2
+#1 alice.bsky.social ...
+#2 bob.bsky.social ...
+/like #2
+/reply #1 Nice one
+```
+
+In a CLI command's arguments, a `#n` becomes its post's `at://` URI only where the command takes a post, as in `/run thread #1`. Anywhere else it stays as you typed it, so `/run post we are #1` posts those words, and a bare number is left alone.
+
+Commands that need the terminal to themselves refuse, with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and `schedule post`, `edit`, `delete`, `uninstall` and `watch`. So does `--stdin` on any command. The hint says what to use instead, usually another terminal. A refused `/login` also clears the composer and stays out of ↑ history, as it may hold a password.
+
+## Switching account
+
+`/switch <profile>` opens the profile's saved login and posts as that account from then on. Drafts, scheduled posts, CLI commands and the session file all follow it. A handle works in place of a profile's name, and `/switch` or `/switch default` goes back to the unnamed profile. `/switch ?` lists the profiles.
+
+It's refused while anything is queued. Everything tied to the old account stops: the thread ends, a reply or quote prompt closes and staged media is unstaged, with a note saying which files. If it turns out to be the same account, nothing stops. Numbers, `#n` labels, URIs and links still reach the old account's posts: `/delete` refuses them and `/undo` skips them. If the profile can't be opened, nothing changes.
+
+With `BSKY_HANDLE` and `BSKY_PASSWORD` set, those choose the account, so `/switch` is refused.
 
 ## Markers and the preview
 
@@ -82,9 +117,11 @@ If the first post of a batch is rejected, its media is staged again and the text
 
 ## Scheduled posts and drafts
 
-`/new` → **Scheduled post** gives you a `scheduled ›` prompt. After Enter it asks for a date, a time and, if the hour could be either, AM or PM, then saves the post with any staged media. It's a single post of up to 300 characters, saved for `bsky schedule`. Nothing sends it until `bsky schedule run` runs, so use [`bsky schedule enable`](commands.md#bsky-schedule-enable) or keep `bsky schedule watch` open; the REPL says so if the scheduler isn't enabled.
+`/new` → **Scheduled post** gives you a `scheduled ›` prompt. After Enter it asks for a date, a time and, if the hour could be either, AM or PM, then saves the post with any staged media. It's a single post of up to 300 characters, saved for `bsky schedule`. Nothing sends it until `bsky schedule run` runs for that account, so use [`bsky schedule enable`](commands.md#bsky-schedule-enable) or keep `bsky schedule watch` open; the REPL says so if no scheduler is enabled for it. There's one scheduler per machine, and it sends one profile's posts.
 
-`/new` → **Draft** gives you a `draft ›` prompt and saves what you type, with any staged media, as a draft. Long text and `///` make a thread draft. Send it later with `bsky drafts send <id>`.
+`/new` → **Draft** gives you a `draft ›` prompt and saves what you type, with any staged media, as a draft. Long text and `///` make a thread draft. Send it later with `bsky drafts send <id>`, or load it with `/drafts <id>`.
+
+`/drafts <id>` puts the draft in the composer as the command that sends it (`/post …`, `/reply … …`, `/quote … …`), with a thread's posts joined by `///`, and stages its media. Once that text has been sent, the draft is deleted. Until then it stays: change the text, cancel in the undo window or have the server refuse it, and it's still there. A draft whose media can't be found won't load, and neither will a thread with media on its later posts, so use `bsky drafts send` for those.
 
 ## When something goes wrong
 
@@ -108,7 +145,7 @@ The REPL never exits on an error.
 | Alt+←/→ (Alt+B/F) | Word left / right |
 | Ctrl+W, Ctrl+U | Delete word, delete to line start |
 | Backspace, Delete | Delete one character |
-| Tab | Complete command names |
+| Tab | Complete command names, then long flags, `/attach` paths (`~/` works, and spaces are escaped for you) and recent labels after commands that take a `<ref>`. Inside an open quote it does nothing |
 | Ctrl+G | Open the draft in `$EDITOR` (or `vi`); what you save comes back to the composer. Use a waiting form for a GUI editor (`code --wait`). If the editor fails, your text stays as it was. Nothing is sent until it closes |
 
 Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
@@ -146,7 +183,7 @@ The count turns yellow 40 characters before the limit and red above it, where it
 
 ## When you leave
 
-The REPL prints what you posted and how to come back: `7 posts in 2 threads · resume: bsky -r k3f7xq`, and any drafts that failures left behind. With `-v` it lists every post with its URI, the session's start and end, and every failure.
+The REPL prints what you posted and how to come back: `7 posts in 2 threads · resume: bsky -r k3f7xq`, and any drafts that failures left behind. With `-v` it lists every post with its URI, the session's start and end, and every failure. Posts you deleted aren't counted; `-v` lists them under `Deleted:`.
 
 ## Resuming
 
@@ -164,8 +201,9 @@ Enter on `+ new` starts afresh, as does Esc; Ctrl+C quits. A session open in ano
 | What's restored | How |
 |---|---|
 | Your posts and their labels | Replayed under `── resumed k3f7xq ──`; numbering carries on |
+| `#n` labels | Kept, and new ones carry on from the saved count |
 | The thread | From its last post, or the nearest one that can still be found. If none can, the thread stops |
-| The mode, the composer and ↑ history | As you left them |
+| The mode, the composer and ↑ history | As you left them, along with which draft the composer came from |
 | Staged files | Those still usable; the rest are dropped, with a message saying which and why |
 | Settings and markers | The session's own, whatever flags you start with |
 | Unsent posts | Each asks `Send · Edit · Discard`, and nothing goes out until you choose. They stay saved until you've answered |

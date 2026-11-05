@@ -221,7 +221,7 @@ export async function loadSessionConfig(
   if (migrated) return migrated;
 
   throw new Error(
-    "No session found. Run 'bsky login' or set BSKY_HANDLE and BSKY_PASSWORD.",
+    `No session found${profile ? ` for profile ${profile}` : ""}. Run 'bsky ${profile ? `-p ${profile} ` : ""}login' or set BSKY_HANDLE and BSKY_PASSWORD.`,
   );
 }
 
@@ -250,18 +250,26 @@ export async function saveConfig(
 
 // ── Profile listing ──────────────────────────────────────────────────
 
+/** What a name means as a profile: its own, the one logged in as that handle, or `default` for the unnamed one. */
+export async function findProfile(name: string): Promise<string> {
+  if (!name || existsSync(sessionPath(name))) return name;
+  if (name === "default") return "";
+  const found = name.includes(".") ? await findSessionByHandle(name) : null;
+  return found ? (found.profile ?? "") : name;
+}
+
+/** Profiles with a saved session. */
+export function profileNames(): string[] {
+  const dir = bskyDir();
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((file) => file.startsWith("session-") && file.endsWith(".json"))
+    .map((file) => file.slice(8, -5));
+}
+
 function listProfiles(): void {
   // Check new location first
-  const dir = bskyDir();
-  if (existsSync(dir)) {
-    const files = readdirSync(dir);
-    for (const file of files) {
-      if (file.startsWith("session-") && file.endsWith(".json")) {
-        const name = file.slice(8, -5);
-        console.log(name);
-      }
-    }
-  }
+  for (const name of profileNames()) console.log(name);
 
   // Also check legacy location for unmigrated profiles
   const legacyDir = legacyBskyDir();

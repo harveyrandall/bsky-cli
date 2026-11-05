@@ -18,7 +18,7 @@ vi.mock("@/config", () => ({
 
 import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { saveDraft, loadDraft, listDrafts, deleteDraft, resolveDraftId } from "./drafts";
+import { saveDraft, loadDraft, listDrafts, readDrafts, deleteDraft, resolveDraftId } from "./drafts";
 
 const mockBase = "/mock/bsky-cli";
 const defaultDraftsDir = join(mockBase, "drafts");
@@ -206,5 +206,30 @@ describe("resolveDraftId", () => {
   it("throws when no match found", async () => {
     setupDrafts(["1741392000000-a7f3"]);
     await expect(resolveDraftId("999")).rejects.toThrow("No draft found");
+  });
+});
+
+describe("readDrafts", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const good = { id: "1", createdAt: "2026-11-04T09:00:00.000Z", text: "hello" };
+
+  it("counts the files it can't use, which listDrafts leaves out", async () => {
+    vi.mocked(readdir).mockResolvedValue(["a.json", "b.json", "c.json", "d.json"] as never);
+    vi.mocked(readFile).mockImplementation((async (path: string) => {
+      if (path.endsWith("a.json")) return JSON.stringify(good);
+      if (path.endsWith("b.json")) return "{ cut sho";
+      if (path.endsWith("c.json")) return "null";
+      return JSON.stringify({ id: "2" });
+    }) as never);
+    await expect(readDrafts()).resolves.toEqual({ drafts: [good], skipped: 3 });
+    await expect(listDrafts()).resolves.toEqual([good]);
+  });
+  it("says if the folder can't be read, rather than that it's empty", async () => {
+    vi.mocked(readdir).mockRejectedValue(Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }));
+    await expect(readDrafts()).rejects.toThrow("EACCES");
+  });
+  it("treats a missing folder as empty", async () => {
+    vi.mocked(readdir).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+    await expect(readDrafts()).resolves.toEqual({ drafts: [], skipped: 0 });
   });
 });

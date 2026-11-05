@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { stdin, stderr } from "node:process";
 import { createInterface } from "node:readline/promises";
 import chalk from "chalk";
@@ -527,9 +528,9 @@ export function registerCreateThread(program: Command): void {
 
         // Distribute media
         let postsWithMedia = distributeMedia(splitPosts, {
-          images: opts.image,
+          images: opts.image?.map((p) => resolve(p)),
           imageAlts: opts.imageAlt,
-          video: opts.video,
+          video: opts.video && resolve(opts.video),
           videoAlt: opts.videoAlt,
           links: opts.link,
           mediaAll: opts.mediaAll,

@@ -3,6 +3,22 @@ import chalk from "chalk";
 import { getClient, isJson } from "@/index";
 import { outputJson } from "@/lib/format";
 
+type Client = Awaited<ReturnType<typeof getClient>>;
+
+export async function likePost(agent: Client, post: { uri: string; cid: string }): Promise<string> {
+  const { uri } = await agent.like(post.uri, post.cid);
+  return uri;
+}
+
+/** Removes your like of a post, which the post itself knows. False if there wasn't one. */
+export async function unlikePost(agent: Client, postUri: string): Promise<boolean> {
+  const { data } = await agent.getPosts({ uris: [postUri] });
+  if (data.posts.length === 0) throw new Error("Post not found");
+  const like = data.posts[0].viewer?.like;
+  if (like) await agent.deleteLike(like);
+  return like !== undefined;
+}
+
 export function registerLike(program: Command): void {
   program
     .command("like")
@@ -24,8 +40,7 @@ export function registerLike(program: Command): void {
           rkey,
         });
 
-        const resp = await agent.like(record.data.uri, record.data.cid!);
-        console.log(resp.uri);
+        console.log(await likePost(agent, { uri: record.data.uri, cid: record.data.cid! }));
       }
     });
 }

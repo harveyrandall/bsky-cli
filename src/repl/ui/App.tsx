@@ -3,11 +3,12 @@ import { Static, Text, useApp } from "ink";
 import { basename } from "node:path";
 import type { Markers, SubmitPlan } from "@/repl/core/markers";
 import type { ReplSessionFile } from "@/repl/core/persist";
-import { chips, parseDroppedPaths, type StagedMedia } from "@/repl/core/media";
+import { chips, parseDroppedPaths, type StagedMedia, pathMatches } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
+import { copyText, openUrl } from "@/lib/desktop";
 import { editInEditor } from "@/lib/editor";
-import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
+import { Repl, type ReplAgent, type ReplDeps, type ReplSettings, type SubmitOutcome } from "@/repl/core/repl";
 import type { SessionKeeper } from "@/repl/core/session";
 import type { Cooldown } from "@/repl/core/types";
 import { Composer } from "@/repl/ui/Composer";
@@ -33,10 +34,20 @@ export interface AppProps {
   saveConfig: ReplDeps["saveConfig"];
   saveScheduled: ReplDeps["saveScheduled"];
   schedulerRunning: ReplDeps["schedulerRunning"];
+  listDrafts: ReplDeps["listDrafts"];
+  switchAccount: ReplDeps["switchAccount"];
   /** Keeps the session on disk, so it can be resumed. */
   keeper?: Pick<SessionKeeper, "track" | "save">;
   /** A saved session to pick back up. */
   resume?: ReplSessionFile;
+  /** CLI commands that can run here. */
+  passthrough?: {
+    names(): string[];
+    knows(name: string): boolean;
+    flags(name: string): string[];
+    uriArguments(argv: string[]): ReadonlySet<number>;
+    run(argv: string[], print: (text: string, style?: LineStyle) => void): Promise<SubmitOutcome>;
+  };
   /** The config file's name, for the save offer. */
   configName: string;
   onReady?(repl: Repl): void;
@@ -55,11 +66,12 @@ type Overlay =
   | { kind: "choice"; label: string; options: readonly string[]; start?: number; resolve(i: number | undefined): void }
   | { kind: "text"; label: string; resolve(text: string | undefined): void }
   | { kind: "drop"; paths: readonly string[]; resolve(ok: boolean): void }
+  | { kind: "yesno"; label: string; resolve(ok: boolean): void }
   | { kind: "exit" };
 
 export function App(props: AppProps) {
   const { markers, kittyHint } = props;
-  const { exit, suspendTerminal } = useApp();
+  const { exit, suspendTerminal, waitUntilRenderFlush } = useApp();
   const [log, setLog] = useState<LogLine[]>(() => [
     { id: 0, text: HEADER, style: "normal" },
     ...(kittyHint ? [{ id: 1, text: KITTY_HINT, style: "dim" as const }] : []),
@@ -108,6 +120,7 @@ export function App(props: AppProps) {
             ),
           choose: (label, options, start) => new Promise((resolve) => ask({ kind: "choice", label, options, start, resolve })),
           text: (label) => new Promise((resolve) => ask({ kind: "text", label, resolve })),
+          yesNo: (label) => new Promise((resolve) => ask({ kind: "yesno", label, resolve })),
         },
         print,
         onChange: () => {
@@ -124,6 +137,10 @@ export function App(props: AppProps) {
         saveConfig: props.saveConfig,
         saveScheduled: props.saveScheduled,
         schedulerRunning: props.schedulerRunning,
+        openUrl,
+        copyText,
+        listDrafts: props.listDrafts,
+        switchAccount: props.switchAccount,
         composerBusy: () => held.current !== undefined || composerText().trim() !== "",
       }),
   );
@@ -192,6 +209,8 @@ export function App(props: AppProps) {
     let edited = text;
     held.current = [];
     try {
+      // Ink drops what hasn't reached the terminal when it's suspended.
+      await waitUntilRenderFlush();
       await suspendTerminal(async () => {
         edited = await editInEditor(text);
       });
@@ -341,11 +360,28 @@ export function App(props: AppProps) {
           />
         );
       }
+      case "yesno":
+        return (
+          <YesNo
+            label={overlay.label}
+            defaultNo
+            onAnswer={(ok) => {
+              close();
+              overlay.resolve(ok);
+            }}
+          />
+        );
       case "exit":
         return <ExitPrompt onChoose={(c) => void chooseExit(c)} />;
     }
   })();
 
+  const cli = props.passthrough;
+  const passthrough = cli && {
+    names: () => cli.names(),
+    knows: (name: string) => cli.knows(name),
+    run: (argv: string[]) => cli.run(repl.expandLabels(argv, cli.uriArguments(argv)), print),
+  };
   const countdown = repl.countdown();
   const failure = repl.pausedBy();
 
@@ -354,7 +390,7 @@ export function App(props: AppProps) {
       <Static items={log}>
         {(line) => (
           <Text key={line.id} dimColor={line.style === "dim"} color={line.style === "error" ? "red" : undefined}>
-            {line.text}
+            {line.text || " "}
           </Text>
         )}
       </Static>
@@ -369,7 +405,7 @@ export function App(props: AppProps) {
         restore={restore}
         onEditor={onEditor}
         initial={startingDraft}
-        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl })}
+        onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl, passthrough })}
         onEscape={(text) => {
           setExitWhenSent(false);
           return repl.escape(text);
@@ -378,6 +414,12 @@ export function App(props: AppProps) {
         onEof={requestExit}
         onSendNow={() => repl.sendNow()}
         onEdit={edit}
+        completions={{
+          cliNames: cli?.names() ?? [],
+          flags: (name) => cli?.flags(name) ?? [],
+          labels: () => repl.registry.recentLabels(),
+          paths: pathMatches,
+        }}
         onPaste={takePaste}
         onHint={(text) => print(text, "dim")}
         onError={(text) => print(text, "error")}

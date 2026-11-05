@@ -8,6 +8,7 @@ vi.mock("node:fs", () => ({
   existsSync: vi.fn(),
   writeFileSync: vi.fn(),
   unlinkSync: vi.fn(),
+  readFileSync: vi.fn(),
 }));
 
 vi.mock("@/config", () => ({
@@ -15,8 +16,9 @@ vi.mock("@/config", () => ({
 }));
 
 import { execFileSync } from "node:child_process";
-import { existsSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import {
+  schedulerProfile,
   enableScheduler,
   disableScheduler,
   getSchedulerStatus,
@@ -371,5 +373,33 @@ describe("Windows (schtasks)", () => {
         "/f",
       ]);
     });
+  });
+});
+
+describe("schedulerProfile", () => {
+  const plist = (args: string) => `<array>\n  <string>/bin/bsky</string>\n  <string>schedule</string>\n  <string>run</string>${args}\n</array>`;
+  it.each([
+    ["with one", "  <string>--profile</string>\n  <string>work</string>", "work"],
+    ["without one", "", undefined],
+  ])("reads a plist %s", (_, args, profile) => {
+    setPlatform("darwin");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(plist(args));
+    expect(schedulerProfile()).toBe(profile);
+  });
+  it("has none with no plist", () => {
+    setPlatform("darwin");
+    vi.mocked(existsSync).mockReturnValue(false);
+    expect(schedulerProfile()).toBeUndefined();
+  });
+  it("reads the crontab's own line", () => {
+    setPlatform("linux");
+    vi.mocked(execFileSync).mockReturnValue("* * * * * other -p 'nope'\n*/1 * * * * /bin/bsky schedule run -p 'work' # bsky-cli-scheduler\n");
+    expect(schedulerProfile()).toBe("work");
+  });
+  it("reads a Windows task", () => {
+    setPlatform("win32");
+    vi.mocked(execFileSync).mockReturnValue('Task To Run:   "C:\\bsky.exe" schedule run -p "work"\n');
+    expect(schedulerProfile()).toBe("work");
   });
 });

@@ -13,6 +13,7 @@ import {
   type Rkey,
   type StrongRef,
   type ThreadLetter,
+  type ViewedLabel,
 } from "./types";
 
 /** A post you made, or an external post you targeted, in this session. */
@@ -27,9 +28,16 @@ export interface RegistryEntry {
   excerpt: string;
   /** What went with it, as printed: `📷 2`, `🎞`, `❝ 3`. */
   notes?: string;
+  /** Deleted since. It keeps its label: labels are never reused. */
+  deleted?: boolean;
   /** The author's handle, for a post not made in this session: someone else's, or an older one of yours. */
   external?: Handle;
   letter?: ThreadLetter;
+}
+
+/** A post you read: printed with a `#n`, so that you can act on it. */
+export interface ViewedEntry extends StrongRef {
+  label: ViewedLabel;
 }
 
 /** What the REPL needs to know about a post fetched from the network. */
@@ -78,6 +86,8 @@ function letterOf(n: number): ThreadLetter {
  */
 export class Registry {
   private readonly list: RegistryEntry[] = [];
+  private readonly seen: ViewedEntry[] = [];
+  private nextViewed = 1;
   private count = 0;
   private letters = 0;
   private readonly perLetter = new Map<ThreadLetter, number>();
@@ -85,8 +95,18 @@ export class Registry {
 
   constructor(
     readonly prefixed: boolean,
-    private readonly self?: Did,
+    private self?: Did,
   ) {}
+
+  /** Who's writing, after a `/switch`. */
+  setSelf(did: Did): void {
+    this.self = did;
+  }
+
+  markDeleted(uri: string): void {
+    const entry = this.byUri(uri);
+    if (entry) entry.deleted = true;
+  }
 
   newLetter(): ThreadLetter {
     this.lastLetter = letterOf(this.letters++);
@@ -143,14 +163,29 @@ export class Registry {
     });
   }
 
-  snapshot(): { posts: RegistryEntry[]; nextLabel: number; nextLetter: number } {
-    return { posts: [...this.list], nextLabel: this.count + 1, nextLetter: this.letters };
+  /** The post's `#n`, a new one if it hasn't had one. */
+  addViewed(ref: StrongRef): ViewedEntry {
+    const known = this.seen.find((v) => v.uri === ref.uri);
+    if (known) return known;
+    const entry: ViewedEntry = { label: `#${this.nextViewed++}`, ...ref };
+    this.seen.push(entry);
+    return entry;
+  }
+
+  viewed(label: string): ViewedEntry | undefined {
+    return this.seen.find((v) => v.label === label);
+  }
+
+  snapshot(): { posts: RegistryEntry[]; viewed: ViewedEntry[]; nextLabel: number; nextViewed: number; nextLetter: number } {
+    return { posts: [...this.list], viewed: [...this.seen], nextLabel: this.count + 1, nextViewed: this.nextViewed, nextLetter: this.letters };
   }
 
   /** Picks up where a saved session stopped; labels are never reused. */
-  restore(posts: readonly RegistryEntry[], counters: { nextLabel: number; nextLetter: number }): void {
+  restore(posts: readonly RegistryEntry[], counters: { nextLabel: number; nextViewed: number; nextLetter: number }, viewed: readonly ViewedEntry[] = []): void {
     this.list.push(...posts);
+    this.seen.push(...viewed);
     this.count = counters.nextLabel - 1;
+    this.nextViewed = Math.max(counters.nextViewed, 1); // a file from before #n labels has 0
     this.letters = counters.nextLetter;
     for (const e of posts) {
       if (!e.letter) continue;
@@ -172,13 +207,19 @@ export class Registry {
     return this.list;
   }
 
+  /** For Tab: the session's posts, then what you've read, each newest first. */
+  recentLabels(): string[] {
+    const own = this.list.filter((e) => !e.deleted).map((e) => e.label);
+    return [...own.reverse(), ...this.snapshot().viewed.map((e) => e.label).reverse()];
+  }
+
   /** `(4) 3lbx7kt5def2v`, then ` (at://…)` when verbose, ` ↳ 2` when its parent isn't the entry before it, ` ext @handle` for someone else's post, and what went with it. */
   format(e: RegistryEntry, verbose: boolean): string {
     const previous = this.list[this.list.indexOf(e) - 1];
     const branch = e.parent && e.parent !== previous?.uri ? ` ↳ ${this.byUri(e.parent)?.label ?? "?"}` : "";
     const uri = verbose ? ` (${e.uri})` : "";
     const ext = e.external && e.authorDid !== this.self ? ` ext @${e.external}` : "";
-    return `(${e.label}) ${e.rkey}${uri}${branch}${ext}${e.notes ? ` ${e.notes}` : ""}`;
+    return `(${e.label}) ${e.rkey}${e.deleted ? " deleted" : ""}${uri}${branch}${ext}${e.notes ? ` ${e.notes}` : ""}`;
   }
 }
 
@@ -188,7 +229,9 @@ const REF_SHAPE = /^(\d+|[A-Za-z]{1,3}\d+|#\d+|at:\/\/\S+|https:\/\/bsky\.app\/p
 /** Text that /thread reads as a ref rather than a first post. */
 export const looksLikeRef = (text: string) => REF_SHAPE.test(text.trim());
 
-const didOf = (uri: AtUri): Did => uri.slice("at://".length, uri.indexOf("/", "at://".length)) as Did;
+export const postUrl = (uri: AtUri) => `https://bsky.app/profile/${didOf(uri)}/post/${rkeyOf(uri)}`;
+
+export const didOf = (uri: AtUri): Did => uri.slice("at://".length, uri.indexOf("/", "at://".length)) as Did;
 
 const cantResolve = (input: string) =>
   new Error(`Can't resolve "${input}": use a number, #n, rkey, at:// URI or bsky.app link`);
@@ -213,7 +256,10 @@ export async function resolveRef(
   r: { registry: Registry; agent: RefAgent; letter?: ThreadLetter },
 ): Promise<ResolvedRef> {
   const s = input.trim();
-  const fromEntry = (e: RegistryEntry): ResolvedRef => ({ ref: { uri: e.uri, cid: e.cid }, root: e.root, entry: e });
+  const fromEntry = (e: RegistryEntry): ResolvedRef => {
+    if (e.deleted) throw new Error(`(${e.label}) is already deleted`);
+    return { ref: { uri: e.uri, cid: e.cid }, root: e.root, entry: e };
+  };
 
   if (/^\d+$/.test(s)) {
     const label = r.registry.prefixed ? `${r.letter ?? r.registry.currentLetter() ?? ""}${s}` : s;
@@ -227,12 +273,16 @@ export async function resolveRef(
     if (!entry) throw new Error(`No post (${s.toUpperCase()}) in this session`);
     return fromEntry(entry);
   }
-  if (/^#\d+$/.test(s)) throw new Error("#n labels are for viewed posts, which aren't available yet");
-
   let uri: string | undefined;
+  if (/^#\d+$/.test(s)) {
+    uri = r.registry.viewed(s)?.uri;
+    if (!uri) throw new Error(`No post ${s} in this session`);
+  }
   const atUri = /^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/?#]+)$/.exec(s);
   const link = /^https:\/\/bsky\.app\/profile\/([^/]+)\/post\/([^/?#]+)\/?$/.exec(s);
-  if (atUri || link) {
+  if (uri) {
+    // A viewed post: found above.
+  } else if (atUri || link) {
     const [, authority, rkey] = (atUri ?? link)!;
     const did = await lookingUp(input, () => authorityToDid(authority, r.agent));
     if (did) uri = `at://${did}/app.bsky.feed.post/${rkey}`;

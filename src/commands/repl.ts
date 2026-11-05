@@ -1,12 +1,15 @@
 import { join } from "node:path";
 import { InvalidArgumentError, type Command } from "commander";
 import type { AppBskyFeedDefs, AtpAgent } from "@atproto/api";
-import { bskyDir } from "@/config";
+import { bskyDir, findProfile, profileNames } from "@/config";
 import { getClient } from "@/index";
+import { likePost, unlikePost } from "@/commands/like";
 import { createPost } from "@/commands/post";
+import { repostPost, unrepostPost } from "@/commands/repost";
 import { activeConfigPath } from "@/toml-config";
 import { resolveMarkers, type Markers } from "@/repl/core/markers";
 import { mediaOptions } from "@/repl/core/media";
+import { passthroughFlags, passthroughKnows, passthroughNames, runPassthrough, uriArguments } from "@/repl/core/passthrough";
 import { SessionStore, newSessionId, resolveId, type ReplSessionFile } from "@/repl/core/persist";
 import type { PostLookup } from "@/repl/core/refs";
 import type { ReplAgent, ReplSettings } from "@/repl/core/repl";
@@ -51,7 +54,7 @@ function toLookup(post: AppBskyFeedDefs.PostView): PostLookup | undefined {
   };
 }
 
-/** The few agent calls the REPL needs, with every response checked. */
+/** The few agent calls the REPL needs, with every post reference checked. */
 export function replAgent(agent: AtpAgent): ReplAgent {
   const did = agent.session?.did;
   if (!isDid(did)) throw new Error("Not logged in — run `bsky login` first");
@@ -70,6 +73,11 @@ export function replAgent(agent: AtpAgent): ReplAgent {
       const target = reply ? { reply: reply.parent, replyRoot: reply.root } : {};
       return toStrongRef(await createPost(agent, text, { ...target, ...mediaOptions(media), quote }));
     },
+    like: async (post) => void (await likePost(agent, post)),
+    unlike: (post) => unlikePost(agent, post.uri),
+    repost: async (post) => void (await repostPost(agent, post)),
+    unrepost: (post) => unrepostPost(agent, post.uri),
+    deletePost: async (uri) => void (await agent.deletePost(uri)),
   };
 }
 
@@ -173,6 +181,8 @@ async function openRepl(
     forceAlt: opts.forceAlt === true,
   };
   const client = replAgent(agent);
+  let profile: string | undefined = program.opts().profile;
+  const { config } = program.opts<{ config?: string }>();
   const { startRepl } = await import("@/repl");
   await startRepl({
     markers: resume?.settings.markers ?? flagMarkers,
@@ -180,7 +190,37 @@ async function openRepl(
     agent: client,
     handle: agent.session?.handle ?? "",
     configPath: activeConfigPath(),
-    profile: program.opts().profile,
+    profile,
+    passthrough: {
+      names: () => passthroughNames(program),
+      knows: (name) => passthroughKnows(program, name),
+      flags: (name) => passthroughFlags(program, name),
+      uriArguments: (argv) => uriArguments(program, argv),
+      run: (argv, print) => runPassthrough(program, argv, { print, profile, config }),
+    },
+    async switchAccount(name) {
+      // getClient would stay on that account, whatever the profile.
+      if (process.env.BSKY_HANDLE && process.env.BSKY_PASSWORD) {
+        throw new Error("BSKY_HANDLE and BSKY_PASSWORD choose the account here: unset them to switch");
+      }
+      // `-p ?` lists them and exits, which here would end the REPL.
+      if (name === "?") throw new Error(`Pick a profile: ${profileNames().join(", ") || "there are none yet"}`);
+      const before = profile;
+      // "" is the unnamed profile: it beats BSKY_PROFILE and the config, as undefined wouldn't.
+      const target = await findProfile(name);
+      program.setOptionValue("profile", target);
+      try {
+        const next = await getClient(program);
+        const handle = next.session?.handle;
+        if (!isHandle(handle)) throw new Error(`Unexpected handle from the server: ${handle}`);
+        const agent = replAgent(next);
+        profile = target;
+        return { agent, handle, profile: target };
+      } catch (err) {
+        program.setOptionValue("profile", before);
+        throw err;
+      }
+    },
     // A resumed session keeps saving even with -R, or what you answer would be asked again.
     session:
       resume || opts.resumable !== false

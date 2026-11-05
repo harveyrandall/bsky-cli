@@ -318,6 +318,11 @@ describe("drafts delete", () => {
 });
 
 describe("syncNetworkDrafts", () => {
+  it("doesn't stop the command it runs before if the drafts can't be read", async () => {
+    mockListDrafts.mockRejectedValueOnce(new Error("EACCES"));
+    await expect(syncNetworkDrafts({} as never)).resolves.toBeUndefined();
+  });
+
   beforeEach(() => vi.clearAllMocks());
 
   it("skips when no network drafts exist", async () => {

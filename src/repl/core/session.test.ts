@@ -41,6 +41,11 @@ function session(o: { settings?: Partial<ReplSettings>; resume?: ReplSessionFile
       posted.push(text);
       return ref(++n);
     }),
+    like: async () => {},
+    unlike: async () => true,
+    repost: async () => {},
+    unrepost: async () => true,
+    deletePost: async () => {},
   };
   const keeper = new SessionKeeper(store, meta, 50, o.resume);
   let repl: Repl | undefined = undefined;
@@ -56,6 +61,7 @@ function session(o: { settings?: Partial<ReplSettings>; resume?: ReplSessionFile
         alt: async () => undefined,
         choose: o.choose ?? (async () => undefined),
         text: async () => undefined,
+        yesNo: async () => true,
       },
       print: () => {},
       // As the App does: every change saves.
@@ -67,6 +73,10 @@ function session(o: { settings?: Partial<ReplSettings>; resume?: ReplSessionFile
       saveConfig: async () => {},
       saveScheduled: async () => ({ id: "s1" }),
       schedulerRunning: () => true,
+      openUrl: async () => {},
+      copyText: async () => {},
+      listDrafts: async () => ({ drafts: [], skipped: 0 }),
+      switchAccount: async () => ({ agent, handle: "me.bsky.social" }),
       fs: { size: async () => 10, head: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]) },
     },
   );
@@ -210,6 +220,17 @@ describe("when the disk fails", () => {
     await repl.post("one");
     await flush();
     expect(await keeper.end(repl, true)).toEqual({ resumable: true });
+  });
+});
+
+describe("changing account", () => {
+  it("saves the session as the new account from then on", async () => {
+    const { repl, keeper, flush } = session();
+    await repl.post("one");
+    await flush();
+    keeper.setAccount({ handle: "work.bsky.social", did: "did:plc:work" as Did, profile: "work" });
+    await keeper.save(repl);
+    expect(onDisk()).toMatchObject({ handle: "work.bsky.social", did: "did:plc:work", profile: "work" });
   });
 });
 
