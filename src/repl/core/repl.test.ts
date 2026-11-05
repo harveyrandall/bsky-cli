@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Repl, IDLE_HINT, type ReplAsk, type ReplSettings } from "./repl";
 import { DEFAULT_MARKERS } from "./markers";
-import { parseSessionFile } from "./persist";
+import { parseSessionFile, type ReplSessionFile } from "./persist";
 import type { AtUri, Cid, Did, StrongRef } from "./types";
 import type { SendTarget } from "./pipeline";
 import type { Draft } from "@/lib/types";
@@ -1038,6 +1038,55 @@ describe("resume", () => {
         await repl.resume(file, ["--undo 10: /settings undo 10"]);
         expect(printed()).toContain("A resumed session keeps its own settings, so these flags changed nothing. To use them now:");
         expect(printed()).toContain("--undo 10: /settings undo 10");
+      });
+      describe("and you quit at the question", () => {
+        const atTheQuestion = async () => {
+          const file = await queued();
+          let quit: ReplSessionFile | undefined;
+          const s = setup({ undo: 0 }, { choose: vi.fn(async () => {
+            quit = parseSessionFile(JSON.parse(JSON.stringify(s.repl.snapshot({ id: file.id, createdAt: file.createdAt, handle: file.handle, did: file.did }, { text: "", cursor: 0 }, []))));
+            return 2;
+          }) });
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          await s.repl.resume(file);
+          return quit!;
+        };
+        it("still knows on the next resume, and offers the choice", async () => {
+          const file = await atTheQuestion();
+          const { repl, ask } = setup({ undo: 0 }, { choose: vi.fn(async () => 0) });
+          await repl.resume(file);
+          expect(vi.mocked(ask.choose).mock.calls.map(([label]) => label)).toEqual([
+            `Unsent from last time: "waiting" (its thread couldn't be found)`,
+            "Its thread couldn't be found",
+          ]);
+        });
+      });
+      it("doesn't call a thread lost that's only just begun", async () => {
+        const file = await saved({
+          posts: [],
+          then: async (s) => {
+            s.repl.setCooldown("undo", 5);
+            await s.repl.startThread("first");
+          },
+        });
+        const { repl, ask } = setup({ undo: 0 }, { choose: vi.fn(async () => 1) });
+        await repl.resume(file);
+        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "first"`);
+      });
+      it("doesn't call a live thread lost after an Edit moved on", async () => {
+        const file = await queued();
+        const first = lost(1);
+        first.agent.post.mockResolvedValueOnce(ref(7)); // its own numbering would repeat the session's
+        await first.repl.resume(file);
+        await first.repl.startThread("fresh one");
+        await first.flush();
+        first.repl.setCooldown("undo", 5);
+        await first.repl.submitText("fresh two");
+        const later = parseSessionFile(JSON.parse(JSON.stringify(first.repl.snapshot({ id: file.id, createdAt: file.createdAt, handle: file.handle, did: file.did }, { text: "", cursor: 0 }, []))));
+        const { repl, ask, agent } = setup({ undo: 0 }, { choose: vi.fn(async () => 1) });
+        agent.getPosts.mockResolvedValue(later.posts.map((p) => ({ uri: p.uri, cid: p.cid })) as never);
+        await repl.resume(later);
+        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "fresh two"`);
       });
       it("says so, leaving what Send does to the next question", async () => {
         const file = await queued();

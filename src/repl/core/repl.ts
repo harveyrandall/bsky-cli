@@ -263,6 +263,8 @@ export class Repl {
     this.media = [...file.staged];
     this.loaded = file.loaded;
     this.unanswered = [...file.pending];
+    // A kill at the question leaves no thread, and a post that still says where it was going.
+    this.threadLost = !file.thread && file.pending.some((p) => p.intent.kind === "thread" && p.target !== undefined);
     this.current = this.resumeMode(file.mode);
     this.deps.print(`── resumed ${file.id} ──`, "dim");
     for (const entry of this.registry.entries()) this.deps.print(this.registry.format(entry, this.s.verbose), "dim");
