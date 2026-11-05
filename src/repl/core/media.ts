@@ -101,6 +101,14 @@ export function mediaOptions(media: readonly StagedMedia[] = []) {
 
 export const expandHome = (path: string) => (path.startsWith("~/") ? join(homedir(), path.slice(2)) : path);
 
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false; // a link that goes nowhere is just a name
+  }
+}
+
 /** For Tab: what `partial` could be, as typed, with folders ending in `/`. */
 export function pathMatches(partial: string): string[] {
   const at = partial.lastIndexOf("/") + 1;
@@ -110,7 +118,7 @@ export function pathMatches(partial: string): string[] {
     return readdirSync(folder)
       .filter((name) => name.startsWith(base) && (base.startsWith(".") || !name.startsWith(".")))
       .sort()
-      .map((name) => `${dir}${name}${statSync(join(folder, name), { throwIfNoEntry: false })?.isDirectory() ? "/" : ""}`);
+      .map((name) => `${dir}${name}${isFolder(join(folder, name)) ? "/" : ""}`);
   } catch {
     return []; // nothing to offer: the folder isn't there, or can't be read
   }

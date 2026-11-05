@@ -138,6 +138,10 @@ describe("pathMatches", () => {
     expect(pathMatches(`${dir}/`)).not.toContain(`${dir}/.hidden`);
     expect(pathMatches(`${dir}/.`)).toEqual([`${dir}/.hidden`]);
   });
+  it("isn't stopped by a link that goes nowhere", () => {
+    symlinkSync(join(dir, "loop"), join(dir, "loop"));
+    expect(pathMatches(`${dir}/lo`)).toEqual([`${dir}/loop`]);
+  });
   it("finds nothing in a folder that isn't there", () => {
     expect(pathMatches(`${dir}/nope/a`)).toEqual([]);
   });

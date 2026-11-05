@@ -148,7 +148,8 @@ export const passthroughKnows = (program: Command, name: string) => named(progra
 
 export function passthroughFlags(program: Command, name: string): string[] {
   const command = program.commands.find((c) => c.name() === name);
-  return command ? program.createHelp().visibleOptions(command).flatMap((o) => o.long ?? []) : [];
+  const help = program.createHelp();
+  return command ? [...help.visibleOptions(command), ...help.visibleOptions(program)].flatMap((o) => o.long ?? []) : [];
 }
 
 /** Runs a CLI command in this process, its output going to `print`. A failure keeps the text. */

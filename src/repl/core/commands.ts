@@ -412,9 +412,10 @@ function extend(before: string, token: string, matches: readonly string[]): Comp
   const at = (text: string, candidates: string[] = []) => ({ text, cursor: text.length, candidates });
   if (matches.length === 0) return at(before + token);
   if (matches.length === 1) return at(`${before}${matches[0]}${matches[0].endsWith("/") ? "" : " "}`);
-  let common = matches[0];
-  for (const m of matches) while (!m.startsWith(common)) common = common.slice(0, -1);
-  return common.length > token.length ? at(before + common) : at(before + token, [...matches]);
+  let common = [...matches[0]]; // by character: two emoji can begin with the same half
+  for (const m of matches) while (!m.startsWith(common.join(""))) common.pop();
+  const shared = common.join("");
+  return shared.length > token.length ? at(before + shared) : at(before + token, [...matches]);
 }
 
 /** Tab completion for a bare `/name` with the cursor at its end. */
@@ -422,6 +423,22 @@ export function completeCommand(text: string, cursor: number, others: readonly s
   if (cursor !== text.length || !/^\/[a-z-]*$/.test(text)) return { text, cursor, candidates: [] };
   const prefix = text.slice(1);
   return extend("/", prefix, [...new Set([...allNames(), ...others])].filter((n) => n.startsWith(prefix)).sort());
+}
+
+/** Whether `text` stops inside a quote or after a lone backslash, where Tab can't tell what the word is. */
+function unfinished(text: string): boolean {
+  let quote = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\\" && quote !== "'") {
+      if (++i === text.length) return true;
+    } else if (quote) {
+      if (c === quote) quote = "";
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    }
+  }
+  return quote !== "";
 }
 
 /** Tab: command names, then flags, `/attach` paths and labels where a ref goes. */
@@ -432,7 +449,7 @@ export function complete(text: string, cursor: number, sources: Completions): Co
     const names = completeCommand(text, cursor, sources.cliNames);
     return { ...names, candidates: names.candidates.map((n) => `/${n}`) };
   }
-  if (!/^\/[a-z-]+\s/.test(text)) return unchanged;
+  if (!/^\/[a-z-]+\s/.test(text) || unfinished(text)) return unchanged;
   const token = /(?:\\.|[^\s\\])*$/.exec(text)![0];
   const before = text.slice(0, text.length - token.length);
   const starting = (list: readonly string[]) => list.filter((s) => s.startsWith(token));

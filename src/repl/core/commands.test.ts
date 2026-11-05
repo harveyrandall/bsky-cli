@@ -83,6 +83,22 @@ describe("complete", () => {
   it("stays in a folder, so Tab can carry on", () => {
     expect(tab("/attach ~/do").text).toBe("/attach ~/docs/");
   });
+  it("stays out of an open quote, where it can't tell what the word is", () => {
+    for (const text of ['/attach a.png --alt "a te', '/attach "my pho', "/attach 'my pho"]) {
+      expect(tab(text)).toEqual({ text, cursor: text.length, candidates: [] });
+    }
+  });
+  it("carries on after a closed one", () => {
+    expect(tab('/attach "a b.png" ~/no').text).toBe('/attach "a b.png" ~/notes.txt ');
+  });
+  it("stays out after a lone backslash", () => {
+    const text = "/attach ~/My\\";
+    expect(tab(text)).toEqual({ text, cursor: text.length, candidates: [] });
+  });
+  it("doesn't split an emoji two names begin with", () => {
+    const paths = () => ["~/😀a.png", "~/😁b.png"];
+    expect(tab("/attach ~/", { ...sources, paths })).toMatchObject({ text: "/attach ~/", candidates: ["😀a.png", "😁b.png"] });
+  });
   it("offers recent labels where a ref goes", () => {
     expect(tab("/like ").candidates).toEqual(["3", "2", "A1", "#7", "#6"]);
     expect(tab("/reply A").text).toBe("/reply A1 ");

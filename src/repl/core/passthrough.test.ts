@@ -303,6 +303,9 @@ describe("passthroughFlags", () => {
   it("lists a command's long flags", () => {
     expect(passthroughFlags(program(), "hello")).toContain("--loud");
   });
+  it("lists the CLI's global flags too", () => {
+    expect(passthroughFlags(program(), "hello")).toContain("--json");
+  });
   it("has none for a command that isn't there", () => {
     expect(passthroughFlags(program(), "nope")).toEqual([]);
   });
