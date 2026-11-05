@@ -23,6 +23,7 @@ import {
   type IsoUtc,
   type OwnLabel,
   type SessionId,
+  type ThreadLetter,
 } from "./types";
 
 /** The mode, with a target as its label: the registry knows the rest. */
@@ -45,6 +46,8 @@ export interface ReplSessionFile {
   /** `#n` labels, which arrive with viewing posts. */
   viewed: never[];
   thread?: ThreadState;
+  /** What a bare number means once the thread has stopped. */
+  lastThreadLetter?: ThreadLetter;
   mode: SavedMode;
   composer: { text: string; cursor: number };
   staged: StagedMedia[];
@@ -134,6 +137,7 @@ function checkItem(item: unknown, at: string): void {
   need(Array.isArray(item.posts) && item.posts.length > 0 && item.posts.every((p) => typeof p === "string"), `${at}.posts`);
   need(typeof item.createdAt === "number", `${at}.createdAt`);
   need(optional(item.target, isTarget), `${at}.target`);
+  need(optional(item.draftId, (v) => typeof v === "string"), `${at}.draftId`);
   if (item.media !== undefined) checkMedia(item.media, `${at}.media`);
   const intent = item.intent as Fields;
   if (intent.kind === "quote") need(item.posts.length === 1 && item.media === undefined && item.target === undefined, at);
@@ -186,6 +190,7 @@ export function parseSessionFile(raw: unknown): ReplSessionFile {
     need(optional(t.letter, isThreadLetter), "thread.letter");
     need(isCount(t.count), "thread.count");
   }
+  need(optional(raw.lastThreadLetter, isThreadLetter), "lastThreadLetter");
   checkMode(raw.mode);
   const c = raw.composer;
   need(isObject(c), "composer");

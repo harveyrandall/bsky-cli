@@ -21,6 +21,8 @@ export interface QueueItem {
 /** What's left of a queued item, and where its next post is going. */
 export interface Unsent extends QueueItem {
   target?: SendTarget;
+  /** The draft a retry of this replaces, for as long as it isn't sent. */
+  draftId?: string;
 }
 
 /** counting = still inside the undo window; pacing = waiting on the pace only. */
@@ -124,10 +126,10 @@ export class Pipeline {
 
   constructor(private readonly deps: PipelineDeps) {}
 
-  /** `after` is the post sent before these, for what's left of a resumed batch. */
-  enqueue(intent: Intent, posts: string[], media?: readonly StagedMedia[], after?: SendTarget): QueueItem {
+  /** `resumed` is where a saved item left off: the post before it, and the draft it replaces. */
+  enqueue(intent: Intent, posts: string[], media?: readonly StagedMedia[], resumed?: Pick<Unsent, "target" | "draftId">): QueueItem {
     const item = { id: this.nextId++, intent, posts, media, createdAt: this.deps.now() };
-    this.queue.push({ item, index: 0, last: after });
+    this.queue.push({ item, index: 0, last: resumed?.target, draftId: resumed?.draftId });
     this.schedule();
     return item;
   }
@@ -148,7 +150,7 @@ export class Pipeline {
   }
 
   private remaining(a: Active, from: number): Unsent {
-    return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a) };
+    return { ...a.item, posts: a.item.posts.slice(from), media: mediaFrom(a.item, from), target: this.target(a), draftId: a.draftId };
   }
 
   isPaused(): boolean {

@@ -329,6 +329,18 @@ describe("saved sessions", () => {
     await expect(makeProgram({ repl: { "keep-sessions": "lots" } }).parseAsync(["repl"], { from: "user" })).rejects.toThrow(
       'Invalid [repl] keep-sessions = "lots"',
     );
+    await expect(makeProgram({ repl: { "keep-sessions": 0 } }).parseAsync(["repl"], { from: "user" })).rejects.toThrow("Invalid [repl] keep-sessions = 0");
+  });
+  it("checks keep-sessions in the smoke run too", async () => {
+    process.env.BSKY_REPL_SMOKE = "1";
+    await expect(makeProgram({ repl: { "keep-sessions": 0 } }).parseAsync(["repl"], { from: "user" })).rejects.toThrow("keep-sessions");
+  });
+  it("lets go of the session if its profile can't log in", async () => {
+    write({ profile: "work" });
+    const { getClient } = await import("@/index");
+    vi.mocked(getClient).mockRejectedValueOnce(new Error("Not logged in"));
+    await expect(makeProgram().parseAsync(["repl", "-r", "last"], { from: "user" })).rejects.toThrow("Not logged in");
+    expect(existsSync(join(sessions(), "k3f7xq.lock"))).toBe(false);
   });
 });
 

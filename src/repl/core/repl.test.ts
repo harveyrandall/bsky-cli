@@ -834,6 +834,19 @@ describe("resume", () => {
     expect(repl.staged().map((m) => m.path)).toEqual(["/x/a.png"]);
     expect(printed()).toContain("Dropped /x/missing.png: missing.png not found");
   });
+  it("reads a bare number as the last thread's, as it did before the kill", async () => {
+    const first = setup({ prefixThread: true });
+    await first.repl.startThread("one");
+    await first.flush();
+    first.repl.escape("");
+    await first.repl.post("solo");
+    await first.flush();
+    const file = parseSessionFile(JSON.parse(JSON.stringify(first.repl.snapshot(meta, { text: "", cursor: 0 }, []))));
+    const { repl } = setup({ prefixThread: true });
+    await repl.resume(file);
+    await repl.reply("1");
+    expect(repl.prompt()).toBe("reply→A1 ›");
+  });
   it("goes back into a once mode", async () => {
     const file = await saved({ then: (s) => s.repl.reply("1").then(() => undefined) });
     const { repl, agent } = setup();
@@ -1022,6 +1035,55 @@ describe("resume", () => {
         expect(deps.restore).toHaveBeenCalledWith("/thread waiting");
       });
     });
+    describe("that came from a draft", () => {
+      const fromDraft = async () => {
+        const file = await queued();
+        file.pending[0].draftId = "d9";
+        return file;
+      };
+      it("deletes the draft once it's sent, so draft sync can't send it again", async () => {
+        const file = await fromDraft();
+        const { repl, deps, flush } = answering(0);
+        await repl.resume(file);
+        await flush();
+        expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
+      });
+      it.each([["Edit", 1], ["Discard", 2]])("deletes the draft on %s, which leaves it nowhere to come back from", async (_, answer) => {
+        const file = await fromDraft();
+        const { repl, deps, flush } = answering(answer);
+        await repl.resume(file);
+        await flush();
+        expect(deps.deleteDraft).toHaveBeenCalledWith("d9");
+      });
+      it("keeps the draft while the question's open", async () => {
+        const file = await fromDraft();
+        const { repl, deps, flush } = setup({}, { choose: vi.fn(() => new Promise<undefined>(() => {})) });
+        void repl.resume(file);
+        await flush();
+        expect(deps.deleteDraft).not.toHaveBeenCalled();
+        expect(repl.snapshot(meta, { text: "", cursor: 0 }, []).pending[0].draftId).toBe("d9");
+      });
+    });
+    it("restages media on Edit, and sends it to a draft with its text if it doesn't fit", async () => {
+      const file = await saved({
+        settings: { undo: 0 },
+        then: async (s) => {
+          s.repl.setCooldown("undo", 5);
+          await s.repl.attach(["/x/a.png"]);
+          await s.repl.submitText("waiting");
+        },
+      });
+      const fits = answering(1);
+      await fits.repl.resume(file);
+      await fits.flush();
+      expect(fits.repl.staged().map((m) => m.path)).toEqual(["/x/a.png"]);
+      file.staged = [{ path: "/x/b.mp4", kind: "video" }];
+      const clashes = answering(1);
+      await clashes.repl.resume(file);
+      await clashes.flush();
+      expect(clashes.repl.staged().map((m) => m.path)).toEqual(["/x/b.mp4"]);
+      expect(clashes.deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ text: "waiting", images: ["/x/a.png"] }));
+    });
     it("forgets it on Discard", async () => {
       const file = await queued();
       const { repl, agent, deps, flush } = answering(2);
@@ -1104,9 +1166,30 @@ describe("snapshot", () => {
     await flush();
     expect(reread(repl.snapshot(meta, composer, [])).pending).toMatchObject([{ posts: ["going"] }]);
   });
-  it("has no tokens in it", async () => {
+  it("has only the session's own fields, so no agent state can get in", async () => {
     const { repl } = setup();
-    expect(JSON.stringify(repl.snapshot(meta, composer, []))).not.toMatch(/jwt|password|token/i);
+    expect(Object.keys(repl.snapshot(meta, composer, [])).sort()).toEqual(
+      ["composer", "counters", "createdAt", "did", "handle", "history", "id", "lastThreadLetter", "mode", "pending", "posts", "settings", "staged", "thread", "updatedAt", "version", "viewed"].sort(),
+    );
+  });
+});
+
+describe("changes that aren't posts", () => {
+  it("are reported, so they get saved", async () => {
+    const { repl, deps, flush } = setup();
+    deps.onChange.mockClear();
+    repl.setAutoThread(true);
+    expect(deps.onChange).toHaveBeenCalled();
+    deps.onChange.mockClear();
+    repl.setCooldown("undo", 5);
+    expect(deps.onChange).toHaveBeenCalled();
+    repl.setCooldown("undo", 0);
+    await repl.post();
+    deps.onChange.mockClear();
+    await repl.submitText("hello");
+    await flush();
+    expect(repl.mode().kind).toBe("idle");
+    expect(deps.onChange).toHaveBeenCalled();
   });
 });
 

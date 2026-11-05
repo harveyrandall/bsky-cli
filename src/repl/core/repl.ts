@@ -228,6 +228,7 @@ export class Repl {
     // All of it first, so a save at any moment from here has the whole session.
     this.registry.restore(file.posts, file.counters);
     this.threadState = file.thread;
+    this.lastThreadLetter = file.lastThreadLetter;
     this.media = [...file.staged];
     this.unanswered = [...file.pending];
     this.current = this.resumeMode(file.mode);
@@ -308,7 +309,7 @@ export class Repl {
     // Edit first: a post in flight at a kill may already have gone.
     const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"${note}`, ["Send", "Edit", "Discard"], 1);
     if (answer === 0) {
-      const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item.target);
+      const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item);
       this.letters.set(sent.id, this.letterFor(item.intent));
       if (threadPost && this.current.kind === "idle") this.current = { kind: "thread" };
     } else if (answer !== 2 && (this.deps.composerBusy() || !this.fits(item.media ?? []))) {
@@ -316,6 +317,12 @@ export class Repl {
     } else if (answer !== 2) {
       this.restage(item.media);
       this.deps.restore(this.asResend(item));
+    }
+    // Sending deletes it on success; otherwise it's dealt with now, and sync mustn't send it too.
+    if (answer !== 0 && item.draftId) {
+      await this.deps.deleteDraft(item.draftId).catch((err: unknown) => {
+        this.deps.print(`Couldn't delete draft ${item.draftId}, so it may send again on your next run: ${err instanceof Error ? err.message : String(err)}`, "error");
+      });
     }
     // Only now: until it's somewhere else, a kill must leave it to ask about again.
     this.unanswered = this.unanswered.filter((i) => i !== saved);
@@ -339,6 +346,7 @@ export class Repl {
       posts,
       viewed: [],
       thread: this.threadState,
+      lastThreadLetter: this.lastThreadLetter,
       mode,
       composer,
       staged: this.media,
@@ -427,7 +435,10 @@ export class Repl {
   /** A once mode ends when what was typed has gone somewhere. */
   private async once(mode: { returnTo: ReturnTo }, submitted: Promise<SubmitOutcome>): Promise<SubmitOutcome> {
     const out = await submitted;
-    if (out !== "keep") this.current = { kind: mode.returnTo };
+    if (out !== "keep") {
+      this.current = { kind: mode.returnTo };
+      this.deps.onChange();
+    }
     return out;
   }
 
@@ -766,11 +777,13 @@ export class Repl {
   setAutoThread(on = !this.s.autoThread): void {
     this.s.autoThread = on;
     this.deps.print(`Auto-thread ${on ? "on" : "off"}`, "dim");
+    this.deps.onChange();
   }
 
   setCooldown(kind: "undo" | "pace", value: Cooldown): void {
     this.s[kind] = value;
     this.cooldownsSettled ||= this.s.undo !== undefined && this.s.pace !== undefined;
+    this.deps.onChange();
   }
 
   /** `/settings` with no arguments: ask for each; dismissing keeps the current value. */

@@ -103,6 +103,8 @@ const breaks: [string, (f: Mutable) => void][] = [
   ["thread.root", (f) => (f.thread.root = { uri: "x", cid: "y" })],
   ["pending[0].id", (f) => (f.pending[0].id = -1)],
   ["pending[0].createdAt", (f) => (f.pending[0].createdAt = "then")],
+  ["pending[0].draftId", (f) => (f.pending[0].draftId = 7)],
+  ["lastThreadLetter", (f) => (f.lastThreadLetter = "a")],
   ["pending[2].intent", (f) => delete f.pending[2].intent.root],
   ["viewed", (f) => (f.viewed = [{ anything: 1 }])],
 ];

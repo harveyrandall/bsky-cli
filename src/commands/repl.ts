@@ -123,6 +123,8 @@ export function registerRepl(program: Command): void {
       // Config is checked first so the smoke run catches a broken [repl] section too.
       const markers = resolveMarkers(opts);
       checkCooldowns(opts);
+      const keep = opts.keepSessions ?? 50;
+      if (!Number.isInteger(keep) || keep < 1) throw new Error(`Invalid [repl] keep-sessions = ${JSON.stringify(keep)}: must be a whole number above 0`);
       // Ink and React load only here, so other commands stay fast.
       if (process.env.BSKY_REPL_SMOKE === "1") {
         const { smokeFrame } = await import("@/repl");
@@ -135,8 +137,6 @@ export function registerRepl(program: Command): void {
         process.stderr.write("bsky repl needs an interactive terminal: stdin and stdout must both be terminals.\n");
         cmd.help({ error: true });
       }
-      const keep = opts.keepSessions ?? 50;
-      if (!Number.isInteger(keep) || keep < 1) throw new Error(`Invalid [repl] keep-sessions = ${JSON.stringify(keep)}: must be a whole number above 0`);
       const store = new SessionStore(join(bskyDir(), "repl", "sessions"));
       const resume = await chooseSession(opts, store);
       if (resume === null) return;
