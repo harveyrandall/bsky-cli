@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { canStage, type StagedMedia } from "./media";
 import type { Markers } from "./markers";
@@ -184,6 +185,8 @@ export interface SessionListing {
   updatedAt?: string;
   summary: string;
   state: "ok" | "in use" | "unreadable";
+  /** Posts still waiting to go. */
+  unsent?: number;
 }
 
 const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
@@ -209,6 +212,11 @@ function isRunning(pid: number): boolean {
     return (err as NodeJS.ErrnoException).code === "EPERM";
   }
 }
+
+/** How long a lock can stay empty before it's a crash, not a REPL about to write its PID. */
+const LOCK_GRACE_MS = 5000;
+
+const missing = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT";
 
 /** Session files: atomic writes, one REPL per session, oldest pruned first. */
 export class SessionStore {
@@ -243,17 +251,24 @@ export class SessionStore {
 
   /** Newest first; a file that won't parse sorts last, listed so it can be deleted. */
   async list(): Promise<SessionListing[]> {
-    const names = await readdir(this.dir).catch(() => [] as string[]);
+    const names = await this.files();
     const ids = names.filter((n) => n.endsWith(".json")).map((n) => n.slice(0, -".json".length));
     const listings = await Promise.all(ids.map((id) => this.listing(id)));
     return listings.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
   }
 
+  private async files(): Promise<string[]> {
+    return readdir(this.dir).catch((err: unknown) => {
+      if (missing(err)) return [];
+      throw err;
+    });
+  }
+
   private async listing(id: string): Promise<SessionListing> {
     try {
       const file = await this.load(id as SessionId);
-      const state = (await this.lockHolder(id)) === undefined ? "ok" : "in use";
-      return { id, updatedAt: file.updatedAt, summary: summaryOf(file), state };
+      const state = (await this.lockState(id)) === "held" ? "in use" : "ok";
+      return { id, updatedAt: file.updatedAt, summary: summaryOf(file), state, unsent: file.pending.length };
     } catch {
       return { id, summary: "", state: "unreadable" };
     }
@@ -265,27 +280,47 @@ export class SessionStore {
     await rm(this.path(id, "lock"), { force: true });
   }
 
-  /** The PID holding a lock, clearing it if that process has died. */
-  private async lockHolder(id: string): Promise<number | undefined> {
-    const pid = await readFile(this.path(id, "lock"), "utf-8").then(Number, () => undefined);
-    if (pid === undefined) return undefined;
-    if (isRunning(pid)) return pid;
-    await rm(this.path(id, "lock"), { force: true });
-    return undefined;
+  /** Read-only: looking at a lock must never take it from a REPL that's starting. */
+  private async lockState(id: string): Promise<"free" | "stale" | "held"> {
+    const path = this.path(id, "lock");
+    let text: string;
+    try {
+      text = await readFile(path, "utf-8");
+    } catch (err) {
+      return missing(err) ? "free" : "held"; // can't tell, so it isn't ours
+    }
+    const pid = Number(text);
+    if (text !== "") return pid > 0 && isRunning(pid) ? "held" : "stale";
+    const { mtimeMs } = await stat(path);
+    return Date.now() - mtimeMs < LOCK_GRACE_MS ? "held" : "stale";
+  }
+
+  lockPath(id: string): string {
+    return this.path(id, "lock");
   }
 
   /** False if another REPL has it. */
   async lock(id: SessionId): Promise<boolean> {
-    if ((await this.lockHolder(id)) !== undefined) return false;
+    const state = await this.lockState(id);
+    if (state === "held") return false;
+    // ponytail: two REPLs clearing one stale lock at the same moment can both win; a PID check after writing would close that.
+    if (state === "stale") await rm(this.lockPath(id), { force: true });
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
+    let file: FileHandle;
     try {
-      const file = await open(this.path(id, "lock"), "wx", 0o600);
-      await file.writeFile(String(process.pid));
-      await file.close();
-      return true;
+      file = await open(this.lockPath(id), "wx", 0o600);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
       throw err;
+    }
+    try {
+      await file.writeFile(String(process.pid));
+      return true;
+    } catch (err) {
+      await rm(this.lockPath(id), { force: true });
+      throw err;
+    } finally {
+      await file.close();
     }
   }
 
@@ -293,10 +328,23 @@ export class SessionStore {
     await rm(this.path(id, "lock"), { force: true });
   }
 
-  /** Keeps the newest `keep`, and anything in use. */
+  /** Keeps the newest `keep`, anything in use and anything with unsent posts, and never touches a file it can't read. */
   async prune(keep: number): Promise<void> {
-    const stale = (await this.list()).slice(keep).filter((l) => l.state !== "in use");
-    await Promise.all(stale.map((l) => this.delete(l.id)));
+    const readable = (await this.list()).filter((l) => l.state !== "unreadable");
+    const old = readable.slice(keep).filter((l) => l.state === "ok" && !l.unsent);
+    await Promise.all(old.map((l) => this.delete(l.id)));
+    await this.sweep();
+  }
+
+  /** What crashes leave behind: temp files, and locks with no session. */
+  private async sweep(): Promise<void> {
+    const names = await this.files();
+    for (const name of names) {
+      const tmp = /\.(\d+)\.tmp$/.exec(name);
+      if (tmp && !isRunning(Number(tmp[1]))) await rm(join(this.dir, name), { force: true });
+      const id = name.endsWith(".lock") ? name.slice(0, -".lock".length) : undefined;
+      if (id && !names.includes(`${id}.json`) && (await this.lockState(id)) === "stale") await rm(this.lockPath(id), { force: true });
+    }
   }
 }
 
@@ -304,7 +352,7 @@ export class SessionStore {
 export function resolveId(input: string, listings: readonly SessionListing[]): SessionId {
   if (input === "last") {
     const newest = listings.find((l) => l.state === "ok");
-    if (!newest) throw new Error("No saved sessions to resume");
+    if (!newest) throw new Error(listings.length > 0 ? "No saved session is free to resume" : "No saved sessions to resume");
     return newest.id as SessionId;
   }
   const matches = listings.filter((l) => l.id.startsWith(input));

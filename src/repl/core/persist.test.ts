@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { rename } from "node:fs/promises";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { open, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionStore, newSessionId, parseSessionFile, resolveId, type ReplSessionFile, type SessionListing } from "./persist";
@@ -9,7 +9,7 @@ import { isIsoUtc, isMarker, isSessionId, type SessionId } from "./types";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...fs, rename: vi.fn(fs.rename) };
+  return { ...fs, rename: vi.fn(fs.rename), open: vi.fn(fs.open) };
 });
 
 const did = "did:plc:me";
@@ -228,10 +228,81 @@ describe("SessionStore", () => {
     await expect(store.list()).resolves.toMatchObject([{ state: "ok" }]);
     await expect(store.lock(id("aaaaaa"))).resolves.toBe(true);
   });
-  it("prunes the oldest, but never one in use", async () => {
+  it("treats an empty lock as a REPL still starting, then as stale", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("aaaaaa", "lock"), "");
+    await expect(store.lock(id("aaaaaa"))).resolves.toBe(false);
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(path("aaaaaa", "lock"), old, old);
+    await expect(store.list()).resolves.toMatchObject([{ state: "ok" }]);
+    await expect(store.lock(id("aaaaaa"))).resolves.toBe(true);
+  });
+  it("only ever lets one REPL have a session", async () => {
+    await store.save(session("aaaaaa"));
+    const results = await Promise.all([store.lock(id("aaaaaa")), store.lock(id("aaaaaa")), new SessionStore(join(dir, "repl", "sessions")).lock(id("aaaaaa"))]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+  it("doesn't touch locks when listing, so it can't take one from a REPL that's starting", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("aaaaaa", "lock"), String(spawnSync("true").pid));
+    await store.list();
+    expect(existsSync(path("aaaaaa", "lock"))).toBe(true);
+  });
+  it("lets go of the lock if it can't write the PID", async () => {
+    await store.save(session("aaaaaa"));
+    const realOpen = vi.mocked(open).getMockImplementation()!;
+    vi.mocked(open).mockImplementationOnce(async (...args) => {
+      const file = await realOpen(...args);
+      file.writeFile = async () => {
+        throw new Error("ENOSPC");
+      };
+      return file;
+    });
+    await expect(store.lock(id("aaaaaa"))).rejects.toThrow("ENOSPC");
+    expect(existsSync(path("aaaaaa", "lock"))).toBe(false);
+  });
+  it("carries on saving after a save fails", async () => {
+    await store.save(session("aaaaaa"));
+    vi.mocked(rename).mockRejectedValueOnce(new Error("ENOSPC"));
+    await expect(store.save({ ...session("aaaaaa"), history: ["lost"] })).rejects.toThrow("ENOSPC");
+    await store.save({ ...session("aaaaaa"), history: ["kept"] });
+    expect((await store.load(id("aaaaaa"))).history).toEqual(["kept"]);
+  });
+  it("doesn't call a broken folder empty", async () => {
+    await store.save(session("aaaaaa"));
+    chmodSync(join(dir, "repl", "sessions"), 0o000);
+    await expect(store.list()).rejects.toThrow();
+    chmodSync(join(dir, "repl", "sessions"), 0o700);
+  });
+  it("never prunes a file it can't read, which only you should delete", async () => {
+    await store.save(session("aaaaaa"));
+    writeFileSync(path("bbbbbb"), "{ not json");
+    writeFileSync(path("cccccc"), JSON.stringify({ ...good(), version: 9 }));
+    await store.prune(1);
+    expect(existsSync(path("bbbbbb"))).toBe(true);
+    expect(existsSync(path("cccccc"))).toBe(true);
+  });
+  it("never prunes a session with unsent posts", async () => {
     await store.save(session("aaaaaa", "2026-11-01T10:00:00.000Z"));
-    await store.save(session("bbbbbb", "2026-11-02T10:00:00.000Z"));
-    await store.save(session("cccccc", "2026-11-03T10:00:00.000Z"));
+    await store.save({ ...session("bbbbbb", "2026-11-02T10:00:00.000Z"), pending: [] });
+    await store.save({ ...session("cccccc", "2026-11-03T10:00:00.000Z"), pending: [] });
+    await store.prune(1);
+    expect((await store.list()).map((l) => l.id).sort()).toEqual(["aaaaaa", "cccccc"]);
+  });
+  it("clears up after a crash: temp files and locks with no session", async () => {
+    await store.save(session("aaaaaa"));
+    const dead = spawnSync("true").pid;
+    writeFileSync(path(`aaaaaa.${dead}`, "tmp"), "{ half");
+    writeFileSync(path("bbbbbb", "lock"), String(dead));
+    writeFileSync(path(`aaaaaa.${process.pid}`, "tmp"), "{ ours");
+    await store.prune(10);
+    expect(readdirSync(join(dir, "repl", "sessions")).sort()).toEqual([`aaaaaa.${process.pid}.tmp`, "aaaaaa.json"]);
+  });
+  it("prunes the oldest, but never one in use", async () => {
+    const quiet = (s: string, at: string) => ({ ...session(s, at), pending: [] });
+    await store.save(quiet("aaaaaa", "2026-11-01T10:00:00.000Z"));
+    await store.save(quiet("bbbbbb", "2026-11-02T10:00:00.000Z"));
+    await store.save(quiet("cccccc", "2026-11-03T10:00:00.000Z"));
     await store.lock(id("aaaaaa"));
     await store.prune(1);
     expect((await store.list()).map((l) => l.id).sort()).toEqual(["aaaaaa", "cccccc"]);
@@ -253,5 +324,6 @@ describe("resolveId", () => {
     expect(() => resolveId("k3", list)).toThrow('"k3" could be k3f7xq or k3a2bc');
     expect(() => resolveId("zz", list)).toThrow('No saved session "zz"');
     expect(() => resolveId("last", [])).toThrow("No saved sessions");
+    expect(() => resolveId("last", [listing("k3f7xq", "in use")])).toThrow("No saved session is free to resume");
   });
 });

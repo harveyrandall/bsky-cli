@@ -286,9 +286,15 @@ describe("saved sessions", () => {
     await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow("Session k3f7xq is open in another REPL");
     expect(startRepl).not.toHaveBeenCalled();
   });
-  it("won't load a bad file", async () => {
+  it("says which session it can't open, and lets go of it", async () => {
     write({ did: "nope" });
-    await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow("Session file: bad did");
+    await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow("Can't open session k3f7xq: Session file: bad did");
+    expect(existsSync(join(sessions(), "k3f7xq.lock"))).toBe(false);
+  });
+  it("says how to clear a lock it can't take", async () => {
+    write();
+    writeFileSync(join(sessions(), "k3f7xq.lock"), String(process.pid));
+    await expect(makeProgram().parseAsync(["repl", "-r", "k3f7xq"], { from: "user" })).rejects.toThrow(join(sessions(), "k3f7xq.lock"));
   });
   it("uses the session's own profile", async () => {
     write({ profile: "work" });

@@ -85,9 +85,16 @@ async function chooseSession(opts: { resume?: string | boolean; resumable?: bool
     id = await pickSession(store, listings);
   }
   if (id === undefined || id === null) return id;
-  const file = await store.load(id as ReplSessionFile["id"]);
-  if (!(await store.lock(file.id))) throw new Error(`Session ${file.id} is open in another REPL`);
-  return file;
+  const session = id as ReplSessionFile["id"];
+  if (!(await store.lock(session))) {
+    throw new Error(`Session ${id} is open in another REPL. If it isn't, delete ${store.lockPath(id)}`);
+  }
+  try {
+    return await store.load(session);
+  } catch (err) {
+    await store.unlock(session);
+    throw new Error(`Can't open session ${id}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export function registerRepl(program: Command): void {
