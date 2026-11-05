@@ -157,6 +157,21 @@ describe("a session's tokens", () => {
     await expect(createClient(session)).rejects.toThrow("Session expired");
     expect(onDisk().refreshJwt).toBe("refresh-1");
   });
+  it.each([
+    ["a proxy", 403, { error: "Forbidden", message: "Blocked by a proxy" }],
+    ["a takedown", 400, { error: "AccountTakedown", message: "Account has been taken down" }],
+  ])("aren't called expired over %s, which says nothing about them", async (_, status, body) => {
+    const session = loggedIn();
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
+    await expect(createClient(session)).rejects.toThrow(`Couldn't sign in at ${HOST}: ${body.message}`);
+  });
+  it("aren't called expired over a failure this runtime words its own way", async () => {
+    const session = loggedIn();
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("Was there a typo in the url or port?"); // Bun's, which release binaries are built with
+    });
+    await expect(createClient(session)).rejects.toThrow(`Couldn't sign in at ${HOST}: Was there a typo`);
+  });
   it("stay as they were if the server can't be reached", async () => {
     const session = loggedIn();
     vi.stubGlobal("fetch", async () => {

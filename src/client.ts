@@ -66,11 +66,13 @@ export async function createClient(
     });
     return agent;
   } catch (err) {
-    // Only the server saying no means the login is bad.
+    const reason = err instanceof Error ? err.message : String(err);
     const { status } = err as { status?: number };
     if (isNetworkError(err) || (status ?? 0) >= 500 || status === 429) {
-      throw new Error(`Can't reach ${session.host}: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+      throw new Error(`Can't reach ${session.host}: ${reason}`, { cause: err });
     }
+    // The library drops the session only when the server refuses the token.
+    if (agent.hasSession) throw new Error(`Couldn't sign in at ${session.host}: ${reason}`, { cause: err });
     throw new Error(
       "Session expired. Run 'bsky login' to re-authenticate.",
     );
