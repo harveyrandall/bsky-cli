@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readdirSync } from "node:fs";
 import chalk from "chalk";
 import { replaceFile } from "@/lib/files";
@@ -224,6 +224,15 @@ export async function loadSessionConfig(
   throw new Error(
     `No session found${profile ? ` for profile ${profile}` : ""}. Run 'bsky ${profile ? `-p ${profile} ` : ""}login' or set BSKY_HANDLE and BSKY_PASSWORD.`,
   );
+}
+
+/** Who's logged in to a profile, going by its file: undefined if that can't be read. */
+export function sessionDid(profile?: string): string | undefined {
+  try {
+    return (JSON.parse(readFileSync(sessionPath(profile), "utf-8")) as Partial<SessionConfig>).did;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

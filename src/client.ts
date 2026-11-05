@@ -1,6 +1,6 @@
 import { AtpAgent } from "@atproto/api";
 import chalk from "chalk";
-import { saveSessionConfig } from "@/config";
+import { saveSessionConfig, sessionDid } from "@/config";
 import { isNetworkError } from "@/lib/errors";
 import type { SessionConfig } from "@/lib/types";
 
@@ -21,6 +21,12 @@ export async function sharedClient(profile: string | undefined, signIn: () => Pr
 
 /** A failure can't be thrown from here: the library would put the spent token back. */
 function saveRefreshed(session: SessionConfig, profile?: string): void {
+  // A session can outlive its place in the file: `bsky login` in another terminal, say.
+  const owner = sessionDid(profile);
+  if (owner && owner !== session.did) {
+    console.error(chalk.yellow("Another account has logged in to this profile, so this session's tokens weren't saved"));
+    return;
+  }
   try {
     saveSessionConfig(session, profile);
   } catch (err) {

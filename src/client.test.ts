@@ -12,6 +12,7 @@ vi.mock("@atproto/api", () => ({
 
 vi.mock("@/config", () => ({
   saveSessionConfig: vi.fn(),
+  sessionDid: vi.fn(),
 }));
 
 import type { AtpAgent } from "@atproto/api";

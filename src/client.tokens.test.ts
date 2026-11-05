@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, sharedClient } from "@/client";
@@ -107,6 +107,39 @@ describe("a session's tokens", () => {
     }
     server.at(700);
     await expect(createClient(onDisk())).resolves.toBeDefined();
+  });
+  describe("with something newer in the file", () => {
+    const signedIn = async () => {
+      const agent = await createClient(loggedIn());
+      server.at(150);
+      return agent;
+    };
+    it("leave another account's login alone, and say so", async () => {
+      const agent = await signedIn();
+      saveSessionConfig({ ...onDisk(), did: "did:plc:someoneelse", handle: "bob.test", refreshJwt: "bobs" });
+      const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+      await expect(agent.getTimeline()).resolves.toBeDefined();
+      expect(warn.mock.calls.flat().join()).toContain("Another account has logged in to this profile");
+      expect(onDisk()).toMatchObject({ handle: "bob.test", refreshJwt: "bobs" });
+    });
+    it("replace the same account's, as a command in another terminal leaves", async () => {
+      const agent = await signedIn();
+      saveSessionConfig({ ...onDisk(), refreshJwt: "from-another-terminal" });
+      await agent.getTimeline();
+      expect(onDisk().refreshJwt).toBe(agent.session?.refreshJwt);
+    });
+    it("replace a file that can't be read", async () => {
+      const agent = await signedIn();
+      writeFileSync(sessionPath(), "{ cut sho");
+      await agent.getTimeline();
+      expect(onDisk().refreshJwt).toBe(agent.session?.refreshJwt);
+    });
+    it("come back if the file has gone", async () => {
+      const agent = await signedIn();
+      rmSync(sessionPath());
+      await agent.getTimeline();
+      expect(onDisk().refreshJwt).toBe(agent.session?.refreshJwt);
+    });
   });
   it("still work if they can't be saved, and you're told", async () => {
     const session = loggedIn();
