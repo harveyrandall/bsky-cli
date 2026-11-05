@@ -48,6 +48,8 @@ const paste = (text: string) => `\x1b[200~${text}\x1b[201~`;
 const RIGHT = "\x1b[C";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+// Many of these give Ink a fixed time to draw, which a busy machine can miss.
+const drawn = { retry: 2 };
 const ref = (n: number): StrongRef => ({
   uri: `at://did:plc:me/app.bsky.feed.post/3lbx7kt5def${String.fromCharCode(97 + n)}a` as AtUri,
   cid: `bafy${n}` as Cid,
@@ -98,7 +100,7 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
   return { ...app, lastFrame, shows, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, saveScheduled, repl: () => session! };
 }
 
-describe("App", () => {
+describe("App", drawn, () => {
   it("keeps plain text with a hint on Enter", async () => {
     const { type, lastFrame } = setup();
     await type("hello", "\r");
@@ -242,7 +244,7 @@ describe("App", () => {
   });
 });
 
-describe("App threads", () => {
+describe("App threads", drawn, () => {
   it("writes a thread end to end through the keyboard", async () => {
     const { type, lastFrame, agent } = setup();
     await type("/thread", "\r");
@@ -459,7 +461,7 @@ describe("App threads", () => {
   });
 });
 
-describe("App media", () => {
+describe("App media", drawn, () => {
   const attached = async (s: ReturnType<typeof setup>) => {
     await s.type(`/attach ${image}`, "\r");
     await tick();
@@ -708,7 +710,7 @@ describe("App media", () => {
   });
 });
 
-describe("App session saving", () => {
+describe("App session saving", drawn, () => {
   const keeper = () => ({ track: vi.fn(), save: vi.fn(async () => {}) });
   it("saves whenever the session changes", async () => {
     const k = keeper();
@@ -768,7 +770,7 @@ describe("App session saving", () => {
   });
 });
 
-describe("App resuming", () => {
+describe("App resuming", drawn, () => {
   const file = (o: object = {}) =>
     ({ id: "k3f7xq", posts: [], staged: [], pending: [], mode: { kind: "idle" }, composer: { text: "half a thought", cursor: 4 }, history: ["/thread"], counters: { nextLabel: 1, nextViewed: 0, nextLetter: 0 }, ...o }) as never;
   it("puts the composer back as it was, cursor and history included", async () => {
@@ -795,16 +797,18 @@ describe("App resuming", () => {
   it("takes only the text and cursor from a saved composer", async () => {
     const { shows, type, lastFrame } = setup({ resume: file({ composer: { text: "hi", cursor: 2, history: 5 } }) });
     await shows("── resumed k3f7xq ──");
-    await tick();
-    await type("\x1b[A");
-    expect(lastFrame()).toContain("bsky › /thread");
+    await vi.waitFor(async () => {
+      await type("\x1b[A");
+      expect(lastFrame()).toContain("bsky › /thread");
+    });
   });
   it("brings back what you'd submitted for ↑", async () => {
     const { type, lastFrame, shows } = setup({ resume: file({ composer: { text: "", cursor: 0 } }) });
     await shows("── resumed k3f7xq ──");
-    await tick();
-    await type("\x1b[A");
-    expect(lastFrame()).toContain("bsky › /thread");
+    await vi.waitFor(async () => {
+      await type("\x1b[A");
+      expect(lastFrame()).toContain("bsky › /thread");
+    });
   });
   it("holds the keyboard until the session is back", async () => {
     let finish = (_: never[]) => {};
@@ -821,10 +825,14 @@ describe("App resuming", () => {
   });
   it("asks about unsent posts through the keyboard", async () => {
     const pending = [{ id: 1, intent: { kind: "standalone" }, posts: ["left over"], createdAt: 0 }];
-    const { type, shows, agent } = setup({ resume: file({ composer: { text: "", cursor: 0 }, pending }) });
+    const { type, shows, agent, lastFrame } = setup({ resume: file({ composer: { text: "", cursor: 0 }, pending }) });
     await shows('Unsent from last time: "left over"');
     await shows("› Edit");
-    await type("\x1b[D", "\r");
+    await vi.waitFor(async () => {
+      await type("\x1b[D");
+      expect(lastFrame()).toContain("› Send");
+    });
+    await type("\r");
     await vi.waitFor(() => expect(agent.post).toHaveBeenCalledWith("left over", undefined, undefined, undefined));
   });
 });

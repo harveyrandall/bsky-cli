@@ -6,6 +6,7 @@ import type { ReplSessionFile } from "@/repl/core/persist";
 import { chips, parseDroppedPaths, type StagedMedia } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
+import { copyText, openUrl } from "@/lib/desktop";
 import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings } from "@/repl/core/repl";
 import type { SessionKeeper } from "@/repl/core/session";
@@ -126,6 +127,8 @@ export function App(props: AppProps) {
         saveConfig: props.saveConfig,
         saveScheduled: props.saveScheduled,
         schedulerRunning: props.schedulerRunning,
+        openUrl,
+        copyText,
         composerBusy: () => held.current !== undefined || composerText().trim() !== "",
       }),
   );

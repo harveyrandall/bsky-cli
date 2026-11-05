@@ -60,6 +60,8 @@ function setup(settings: Partial<ReplSettings> = {}, answers: Partial<ReplAsk> =
     saveScheduled: vi.fn(async () => ({ id: "s1" })),
     composerBusy: vi.fn(() => false),
     schedulerRunning: vi.fn(() => true),
+    openUrl: vi.fn(async () => {}),
+    copyText: vi.fn(async () => {}),
     fs,
   };
   const repl = new Repl(
@@ -1194,6 +1196,38 @@ describe("changes that aren't posts", () => {
     await flush();
     expect(repl.mode().kind).toBe("idle");
     expect(deps.onChange).toHaveBeenCalled();
+  });
+});
+
+describe("/open, /copy and /view", () => {
+  const url = `https://bsky.app/profile/${me}/post/${ref(1).uri.split("/").pop()}`;
+  const withPost = async () => {
+    const s = setup();
+    await s.repl.post("first");
+    await s.flush();
+    return s;
+  };
+  it("/open opens a post in the browser", async () => {
+    const { repl, deps } = await withPost();
+    expect(await repl.openPost("1")).toBe("done");
+    expect(deps.openUrl).toHaveBeenCalledWith(url);
+  });
+  it("/copy copies a post's link, and says so", async () => {
+    const { repl, deps, printed } = await withPost();
+    expect(await repl.copyPost("1")).toBe("done");
+    expect(deps.copyText).toHaveBeenCalledWith(url);
+    expect(printed()).toContain("Copied (1)");
+  });
+  it("/view finds the post's URI", async () => {
+    const { repl } = await withPost();
+    await expect(repl.uriOf("1")).resolves.toBe(ref(1).uri);
+  });
+  it("keep the text on a bad ref", async () => {
+    const { repl, deps } = await withPost();
+    expect(await repl.openPost("9")).toBe("keep");
+    expect(await repl.copyPost("9")).toBe("keep");
+    await expect(repl.uriOf("9")).resolves.toBeUndefined();
+    expect(deps.openUrl).not.toHaveBeenCalled();
   });
 });
 

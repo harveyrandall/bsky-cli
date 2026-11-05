@@ -7,7 +7,7 @@ import { escapeMarkers, parseSubmit, type Markers, type SubmitPlan } from "./mar
 import { canStage, chips, expandHome, inspectMedia, mediaOptions, nodeMediaFs, parseDroppedPaths, type MediaFs, type StagedMedia } from "./media";
 import { Pipeline, draftOf, quoteOf, type Countdown, type Failure, type Intent, type PipelineDeps, type QueueItem, type SendTarget, type Unsent } from "./pipeline";
 import type { ReplSessionFile, SavedMode } from "./persist";
-import { Registry, looksLikeRef, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
+import { Registry, looksLikeRef, postUrl, resolveRef, type RefAgent, type RegistryEntry, type ResolvedRef } from "./refs";
 import { isAtUri, isCid, type AtUri, type Cooldown, type IsoUtc, type OwnLabel, type StrongRef, type ThreadLetter } from "./types";
 
 export const IDLE_HINT =
@@ -83,6 +83,8 @@ export interface ReplDeps {
   saveConfig(values: Record<string, string | number | boolean>): Promise<void>;
   saveScheduled(p: Omit<ScheduledPost, "id" | "createdAt">): Promise<{ id: string }>;
   schedulerRunning(): boolean;
+  openUrl(url: string): Promise<void>;
+  copyText(text: string): Promise<void>;
   timers?: Pick<PipelineDeps, "now" | "setTimer" | "clearTimer">;
   fs?: MediaFs;
 }
@@ -692,6 +694,28 @@ export class Repl {
     this.current = { kind: "quote-once", target: resolved, label: entry.label, returnTo: this.inThread() ? "thread" : "idle" };
     this.deps.onChange();
     return "done";
+  }
+
+  /** `/open`: the post in a browser. */
+  async openPost(input: string): Promise<SubmitOutcome> {
+    const resolved = await this.resolve(input);
+    if (!resolved) return "keep";
+    await this.deps.openUrl(postUrl(resolved.ref.uri));
+    return "done";
+  }
+
+  /** `/copy`: the post's link on the clipboard. */
+  async copyPost(input: string): Promise<SubmitOutcome> {
+    const resolved = await this.resolve(input);
+    if (!resolved) return "keep";
+    await this.deps.copyText(postUrl(resolved.ref.uri));
+    this.deps.print(`Copied ${resolved.entry ? `(${resolved.entry.label})` : input}`, "dim");
+    return "done";
+  }
+
+  /** A ref as a URI, or undefined having said why not. */
+  async uriOf(input: string): Promise<AtUri | undefined> {
+    return (await this.resolve(input))?.ref.uri;
   }
 
   /** `/like`, `/unlike`, `/repost` and `/unrepost`. */

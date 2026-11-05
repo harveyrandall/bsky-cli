@@ -71,6 +71,8 @@ function session(o: { settings?: Partial<ReplSettings>; resume?: ReplSessionFile
       saveConfig: async () => {},
       saveScheduled: async () => ({ id: "s1" }),
       schedulerRunning: () => true,
+      openUrl: async () => {},
+      copyText: async () => {},
       fs: { size: async () => 10, head: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]) },
     },
   );

@@ -211,7 +211,9 @@ const REF_SHAPE = /^(\d+|[A-Za-z]{1,3}\d+|#\d+|at:\/\/\S+|https:\/\/bsky\.app\/p
 /** Text that /thread reads as a ref rather than a first post. */
 export const looksLikeRef = (text: string) => REF_SHAPE.test(text.trim());
 
-const didOf = (uri: AtUri): Did => uri.slice("at://".length, uri.indexOf("/", "at://".length)) as Did;
+export const postUrl = (uri: AtUri) => `https://bsky.app/profile/${didOf(uri)}/post/${rkeyOf(uri)}`;
+
+export const didOf = (uri: AtUri): Did => uri.slice("at://".length, uri.indexOf("/", "at://".length)) as Did;
 
 const cantResolve = (input: string) =>
   new Error(`Can't resolve "${input}": use a number, #n, rkey, at:// URI or bsky.app link`);

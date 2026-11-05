@@ -166,6 +166,40 @@ export const COMMANDS: readonly ReplCommand[] = [
       ctx.repl.detach(which === "all" ? "all" : n);
     },
   },
+  {
+    name: "open",
+    aliases: [],
+    usage: "/open <ref>",
+    summary: "Open a post in your browser",
+    run([ref], ctx) {
+      if (ref === undefined) throw new Error("Usage: /open <ref>");
+      return ctx.repl.openPost(ref);
+    },
+  },
+  {
+    name: "view",
+    aliases: [],
+    usage: "/view <ref>",
+    summary: "Print a post and its replies",
+    async run([ref], ctx) {
+      if (ref === undefined) throw new Error("Usage: /view <ref>");
+      if (!ctx.passthrough) throw new Error("CLI commands aren't available here");
+      const uri = await ctx.repl.uriOf(ref);
+      if (!uri) return "keep";
+      await ctx.passthrough.run(["thread", uri]);
+      return "done";
+    },
+  },
+  {
+    name: "copy",
+    aliases: [],
+    usage: "/copy <ref>",
+    summary: "Copy a post's link",
+    run([ref], ctx) {
+      if (ref === undefined) throw new Error("Usage: /copy <ref>");
+      return ctx.repl.copyPost(ref);
+    },
+  },
   engagement("like", "Like a post"),
   engagement("unlike", "Remove your like of a post"),
   engagement("repost", "Repost a post"),

@@ -19,6 +19,9 @@ function fakeRepl() {
     quote: vi.fn(async () => "done" as const),
     newMenu: vi.fn(async () => "done" as const),
     engage: vi.fn(async () => "done" as const),
+    openPost: vi.fn(async () => "done" as const),
+    copyPost: vi.fn(async () => "done" as const),
+    uriOf: vi.fn(async (_: string): Promise<string | undefined> => "at://x"),
     settings: () => ({ verbose: false }),
     registry: { entries: () => [{ excerpt: "hello" }], format: () => "(1) 3lbx7kt5def2a" },
   };
@@ -37,6 +40,32 @@ describe("parseInput", () => {
     expect(parseInput("\\/tmp is a path")).toEqual({ kind: "text", text: "/tmp is a path" });
     expect(parseInput("  \\/tmp")).toEqual({ kind: "text", text: "  /tmp" });
     expect(parseInput("//> keep")).toEqual({ kind: "text", text: "//> keep" });
+  });
+});
+
+describe("/open, /copy and /view", () => {
+  it("take a ref", async () => {
+    const c = ctx();
+    await dispatch("/open 2", c);
+    await dispatch("/copy 2", c);
+    expect(c.fake.openPost).toHaveBeenCalledWith("2");
+    expect(c.fake.copyPost).toHaveBeenCalledWith("2");
+    expect(await dispatch("/open", c)).toBe("keep");
+    expect(await dispatch("/copy", c)).toBe("keep");
+    expect(await dispatch("/view", c)).toBe("keep");
+  });
+  it("/view prints the thread through the CLI", async () => {
+    const run = vi.fn(async () => {});
+    const c = { ...ctx(), passthrough: { names: () => [], run } };
+    expect(await dispatch("/view #2", c)).toBe("done");
+    expect(run).toHaveBeenCalledWith(["thread", "at://x"]);
+  });
+  it("/view keeps the text on a bad ref", async () => {
+    const run = vi.fn(async () => {});
+    const c = { ...ctx(), passthrough: { names: () => [], run } };
+    c.fake.uriOf.mockResolvedValueOnce(undefined);
+    expect(await dispatch("/view 9", c)).toBe("keep");
+    expect(run).not.toHaveBeenCalled();
   });
 });
 
