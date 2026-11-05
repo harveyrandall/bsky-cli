@@ -11,6 +11,7 @@ vi.mock("@atproto/api", () => ({
 }));
 
 vi.mock("@/config", () => ({
+  findProfile: vi.fn(async (name: string) => name),
   saveSessionConfig: vi.fn(),
   sessionDid: vi.fn(),
 }));

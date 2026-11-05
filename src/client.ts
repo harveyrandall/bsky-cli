@@ -1,6 +1,6 @@
 import { AtpAgent } from "@atproto/api";
 import chalk from "chalk";
-import { saveSessionConfig, sessionDid } from "@/config";
+import { findProfile, saveSessionConfig, sessionDid } from "@/config";
 import { isNetworkError } from "@/lib/errors";
 import type { SessionConfig } from "@/lib/types";
 
@@ -46,13 +46,15 @@ export async function createClient(
   session: SessionConfig,
   profile?: string,
 ): Promise<AtpAgent> {
+  // `-p <handle>` finds a session by its handle, and its tokens go back where they came from.
+  const home = profile && (await findProfile(profile));
   const agent = new AtpAgent({
     service: session.host,
     // Every refresh spends the token before it, here or hours later in a REPL.
     persistSession: (event, data) => {
       if (event !== "update" || !data) return;
       const { did, handle, accessJwt, refreshJwt } = data;
-      saveRefreshed({ ...session, did, handle, accessJwt, refreshJwt }, profile);
+      saveRefreshed({ ...session, did, handle, accessJwt, refreshJwt }, home);
     },
   });
 

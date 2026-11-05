@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createClient, sharedClient } from "@/client";
-import { saveSessionConfig, sessionPath } from "@/config";
+import { loadSessionConfig, saveSessionConfig, sessionPath } from "@/config";
 import type { SessionConfig } from "@/lib/types";
 
 const HOST = "https://pds.test.invalid";
@@ -84,6 +84,14 @@ describe("a session's tokens", () => {
   it("go to the profile's own file", async () => {
     await createClient(loggedIn("work"), "work");
     expect(onDisk("work").refreshJwt).toBe("refresh-2");
+  });
+  it.each([["work"], [undefined]])("go back to the file a handle found them in: %s", async (profile) => {
+    loggedIn(profile);
+    const dim = vi.spyOn(console, "error").mockImplementation(() => {}); // "Using session for…"
+    await createClient(await loadSessionConfig("me.test"), "me.test");
+    dim.mockRestore();
+    expect(onDisk(profile).refreshJwt).toBe("refresh-2");
+    expect(existsSync(sessionPath("me.test"))).toBe(false);
   });
   it("reach the file when one runs out while you're signed in", async () => {
     const agent = await createClient(loggedIn());
