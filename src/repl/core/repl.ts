@@ -340,10 +340,11 @@ export class Repl {
     // A thread post goes after the cursor, whatever it was when saved.
     const item = threadPost ? { ...saved, target: undefined } : saved;
     const line = stripLabel(item.posts[0]).split("\n")[0];
-    const note = orphan ? " (its thread couldn't be found, so Send starts a new one)" : "";
+    const note = orphan ? " (its thread couldn't be found)" : "";
     // Edit first: a post in flight at a kill may already have gone.
     const answer = await this.deps.ask.choose(`Unsent from last time: "${line}"${note}`, ["Send", "Edit", "Discard"], 1);
-    if (answer === 0) {
+    const send = answer === 0 && (!orphan || (await this.findThread()));
+    if (send) {
       const sent = this.pipeline.enqueue(item.intent, item.posts, item.media, item);
       this.letters.set(sent.id, this.letterFor(item.intent));
       if (threadPost && this.current.kind === "idle") this.current = { kind: "thread" };
@@ -356,7 +357,7 @@ export class Repl {
       this.deps.restore(this.asResend(item));
     }
     // It holds posts that went, so sending it would send them twice.
-    if (answer !== 0 && item.stale && item.draftId) {
+    if (!send && item.stale && item.draftId) {
       await this.deps.deleteDraft(item.draftId).catch((err: unknown) => {
         this.deps.print(`Couldn't delete draft ${item.draftId}, so it may send again on your next run: ${err instanceof Error ? err.message : String(err)}`, "error");
       });
@@ -364,6 +365,32 @@ export class Repl {
     // Only now: until it's somewhere else, a kill must leave it to ask about again.
     this.unanswered = this.unanswered.filter((i) => i !== saved);
     this.deps.onChange();
+  }
+
+  /** Where a post goes whose thread has gone: a new thread, or one that's still there. False if they back out. */
+  private async findThread(): Promise<boolean> {
+    const where = await this.deps.ask.choose("Its thread couldn't be found", ["Start a new thread", "Paste a link to it"], 0);
+    if (where === undefined) return false;
+    while (where === 1) {
+      const link = await this.deps.ask.text("Link to the post to continue from:");
+      if (!link?.trim()) return false;
+      const resolved = await this.resolve(link);
+      if (!resolved) continue;
+      const mode = this.current;
+      this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
+      this.continueThread(resolved);
+      this.current = "returnTo" in mode ? { ...mode, returnTo: "thread" } : { kind: "thread" };
+      break;
+    }
+    // Whatever's left of it follows this one.
+    this.threadLost = false;
+    return true;
+  }
+
+  private continueThread(resolved: ResolvedRef): void {
+    const entry = this.entryFor(resolved, { letter: this.threadLetter, startsThread: true });
+    this.threadState = { root: resolved.root, cursor: resolved.ref, letter: entry.letter ?? this.threadLetter, count: 0 };
+    this.deps.print(`Continuing the thread from (${entry.label})`, "dim");
   }
 
   /** The session as a file. Tokens aren't part of it: the profile's own session file has those. */
@@ -586,11 +613,7 @@ export class Repl {
     this.current = { kind: "thread" };
     this.threadState = undefined;
     this.threadLetter = this.registry.prefixed ? this.registry.newLetter() : undefined;
-    if (resolved) {
-      const entry = this.entryFor(resolved, { letter: this.threadLetter, startsThread: true });
-      this.threadState = { root: resolved.root, cursor: resolved.ref, letter: entry.letter ?? this.threadLetter, count: 0 };
-      this.deps.print(`Continuing the thread from (${entry.label})`, "dim");
-    }
+    if (resolved) this.continueThread(resolved);
     this.deps.onChange();
     return firstPost !== undefined ? this.write({ kind: "thread" }, firstPost) : "done";
   }

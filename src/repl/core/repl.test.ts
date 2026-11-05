@@ -1039,11 +1039,72 @@ describe("resume", () => {
         expect(printed()).toContain("A resumed session keeps its own settings, so these flags changed nothing. To use them now:");
         expect(printed()).toContain("--undo 10: /settings undo 10");
       });
-      it("says Send will start a new thread", async () => {
+      it("says so, leaving what Send does to the next question", async () => {
         const file = await queued();
-        const { repl, ask } = lost(0);
+        const { repl, ask } = lost(1);
         await repl.resume(file);
-        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "waiting" (its thread couldn't be found, so Send starts a new one)`);
+        expect(vi.mocked(ask.choose).mock.lastCall?.[0]).toBe(`Unsent from last time: "waiting" (its thread couldn't be found)`);
+      });
+      describe("on Send", () => {
+        const uri = "at://did:plc:alice/app.bsky.feed.post/3lbx7kt5defbb";
+        const link = "https://bsky.app/profile/did:plc:alice/post/3lbx7kt5defbb";
+        const post = { uri, cid: "bafyb", authorDid: "did:plc:alice", authorHandle: "alice.bsky.social", text: "still here" };
+        const sending = (where: number | undefined, text: ReplAsk["text"] = vi.fn(async () => link)) => {
+          const s = setup({ undo: 0 }, { choose: vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(where), text });
+          s.agent.getPosts.mockResolvedValueOnce([]);
+          s.agent.getPosts.mockResolvedValue([post] as never);
+          return s;
+        };
+        it("offers a new thread first, or a link", async () => {
+          const file = await queued();
+          const { repl, ask } = sending(0);
+          await repl.resume(file);
+          expect(ask.choose).toHaveBeenLastCalledWith("Its thread couldn't be found", ["Start a new thread", "Paste a link to it"], 0);
+        });
+        it("continues from a link, as a reply to that post", async () => {
+          const file = await queued();
+          const { repl, posted, flush, printed } = sending(1);
+          await repl.resume(file);
+          await flush();
+          expect(posted[0]).toMatchObject({ text: "waiting", reply: { parent: { uri } } });
+          expect(repl.thread()?.root.uri).toBe(uri);
+          expect(repl.mode().kind).toBe("thread");
+          expect(printed()).toContain("Continuing the thread from (");
+        });
+        it("asks again after a link it can't use", async () => {
+          const file = await queued();
+          const text = vi.fn<ReplAsk["text"]>().mockResolvedValueOnce("nonsense").mockResolvedValueOnce(link);
+          const { repl, posted, flush, printed } = sending(1, text);
+          await repl.resume(file);
+          await flush();
+          expect(printed()).toContain(`Can't resolve "nonsense"`);
+          expect(posted[0].reply?.parent.uri).toBe(uri);
+        });
+        it.each([["the second question", undefined, undefined], ["the link", 1, undefined]])("counts as Edit if you back out of %s, so nothing's lost", async (_, where, answer) => {
+          const file = await queued();
+          const { repl, deps, posted, flush } = sending(where, vi.fn(async () => answer));
+          await repl.resume(file);
+          await flush();
+          expect(posted).toEqual([]);
+          expect(deps.restore).toHaveBeenCalledWith("/thread waiting");
+        });
+        it("asks once for everything left of that thread", async () => {
+          const file = await saved({
+            settings: { undo: 0 },
+            then: async (s) => {
+              s.repl.setCooldown("undo", 5);
+              await s.repl.submitText("first");
+              await s.repl.submitText("second");
+            },
+          });
+          const s = sending(1);
+          vi.mocked(s.ask.choose).mockReset().mockResolvedValueOnce(0).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+          await s.repl.resume(file);
+          await s.flush();
+          expect(s.ask.text).toHaveBeenCalledOnce();
+          expect(s.posted.map((p) => p.text)).toEqual(["first", "second"]);
+          expect(s.posted[1].reply?.parent).toEqual(ref(1));
+        });
       });
       it("carries on as a thread after Send", async () => {
         const file = await queued();
