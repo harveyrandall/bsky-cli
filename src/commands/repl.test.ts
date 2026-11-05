@@ -316,14 +316,12 @@ describe("saved sessions", () => {
       await makeProgram().parseAsync(["repl"], { from: "user" });
       return startRepl.mock.lastCall![0].switchAccount as (name: string) => Promise<{ profile: string }>;
     };
-    let dir: string;
-    const session = (file: string, handle: string) => writeFileSync(join(dir, file), JSON.stringify({ handle }));
-    beforeEach(async () => {
+    const session = (file: string, handle: string) => writeFileSync(join(home, "bsky-cli", file), JSON.stringify({ handle }));
+    beforeEach(() => {
       home = mkdtempSync(join(tmpdir(), "bsky-switch-"));
-      vi.stubEnv("HOME", home);
-      vi.stubEnv("APPDATA", home);
-      dir = (await vi.importActual<typeof import("@/config")>("@/config")).bskyDir();
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(join(home, "bsky-cli"));
+      // It decides bskyDir on every platform: a stubbed HOME alone would write to the real folder.
+      vi.stubEnv("XDG_CONFIG_HOME", home);
     });
     afterEach(() => {
       vi.unstubAllEnvs();
