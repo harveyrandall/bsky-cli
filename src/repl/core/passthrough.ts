@@ -155,7 +155,7 @@ export function passthroughFlags(program: Command, name: string): string[] {
 export async function runPassthrough(
   program: Command,
   argv: readonly string[],
-  io: { print(text: string, style?: LineStyle): void; profile?: string },
+  io: { print(text: string, style?: LineStyle): void; profile?: string; config?: string },
 ): Promise<SubmitOutcome> {
   const refused = refusal(program, argv);
   if (refused) {
@@ -178,7 +178,8 @@ export async function runPassthrough(
   let ok = true;
   let thrown: string | undefined;
   try {
-    const args = io.profile !== undefined ? ["-p", io.profile, ...argv] : [...argv];
+    // Commander forgets what it parsed at startup, so these go round again.
+    const args = [...(io.profile !== undefined ? ["-p", io.profile] : []), ...(io.config ? ["-c", io.config] : []), ...argv];
     await output.run(sink, () => program.parseAsync(args, { from: "user" }));
     ok = !process.exitCode;
   } catch (err) {

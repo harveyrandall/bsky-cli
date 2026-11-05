@@ -182,6 +182,7 @@ async function openRepl(
   };
   const client = replAgent(agent);
   let profile: string | undefined = program.opts().profile;
+  const { config } = program.opts<{ config?: string }>();
   const { startRepl } = await import("@/repl");
   await startRepl({
     markers: resume?.settings.markers ?? flagMarkers,
@@ -195,7 +196,7 @@ async function openRepl(
       knows: (name) => passthroughKnows(program, name),
       flags: (name) => passthroughFlags(program, name),
       uriArguments: (argv) => uriArguments(program, argv),
-      run: (argv, print) => runPassthrough(program, argv, { print, profile }),
+      run: (argv, print) => runPassthrough(program, argv, { print, profile, config }),
     },
     async switchAccount(name) {
       // getClient would stay on that account, whatever the profile.

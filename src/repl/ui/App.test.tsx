@@ -28,7 +28,7 @@ const { exit, suspendTerminal, editInEditor, suspended } = vi.hoisted(() => {
 });
 vi.mock("ink", async (importOriginal) => {
   const ink = await importOriginal<typeof import("ink")>();
-  return { ...ink, useApp: () => ({ ...ink.useApp(), exit, suspendTerminal }) };
+  return { ...ink, useApp: () => ({ ...ink.useApp(), exit, suspendTerminal, waitUntilRenderFlush: async () => {} }) };
 });
 vi.mock("@/lib/editor", () => ({ editInEditor }));
 beforeEach(() => {
@@ -55,7 +55,7 @@ const ref = (n: number): StrongRef => ({
   cid: `bafy${n}` as Cid,
 });
 
-function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]> } = {}) {
+function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"]; resume?: AppProps["resume"]; hold?: () => Promise<never[]>; passthrough?: AppProps["passthrough"] } = {}) {
   let session: Repl | undefined;
   let n = 0;
   const agent = {
@@ -87,6 +87,7 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
       keeper={o.keeper}
       resume={o.resume}
       configName="config.toml"
+      passthrough={o.passthrough}
       onReady={(r) => (session = r)}
     />,
   );
@@ -870,5 +871,27 @@ describe("App Tab", drawn, () => {
     await tick();
     await type("/like ", "\t");
     await shows("/like 1");
+  });
+});
+
+describe("App running CLI commands", drawn, () => {
+  const cli = (run: NonNullable<AppProps["passthrough"]>["run"] = vi.fn(async () => "done" as const)) => ({
+    names: () => ["timeline"],
+    knows: (name: string) => name === "timeline" || name === "thread",
+    flags: () => ["--json"],
+    uriArguments: (argv: string[]) => new Set(argv[0] === "thread" ? [1] : []),
+    run,
+  });
+  it("keeps a blank line between what they print", async () => {
+    const run = vi.fn(async (_: string[], print: (text: string) => void) => {
+      print("one");
+      print("");
+      print("two");
+      return "done" as const;
+    });
+    const { type, shows, lastFrame } = setup({ passthrough: cli(run) });
+    await type("/timeline", "\r");
+    await shows("two");
+    expect(lastFrame()).toMatch(/one\n\s*\n\s*two/);
   });
 });

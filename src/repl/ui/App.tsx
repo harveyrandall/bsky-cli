@@ -71,7 +71,7 @@ type Overlay =
 
 export function App(props: AppProps) {
   const { markers, kittyHint } = props;
-  const { exit, suspendTerminal } = useApp();
+  const { exit, suspendTerminal, waitUntilRenderFlush } = useApp();
   const [log, setLog] = useState<LogLine[]>(() => [
     { id: 0, text: HEADER, style: "normal" },
     ...(kittyHint ? [{ id: 1, text: KITTY_HINT, style: "dim" as const }] : []),
@@ -209,6 +209,8 @@ export function App(props: AppProps) {
     let edited = text;
     held.current = [];
     try {
+      // Ink drops what hasn't reached the terminal when it's suspended.
+      await waitUntilRenderFlush();
       await suspendTerminal(async () => {
         edited = await editInEditor(text);
       });
@@ -388,7 +390,7 @@ export function App(props: AppProps) {
       <Static items={log}>
         {(line) => (
           <Text key={line.id} dimColor={line.style === "dim"} color={line.style === "error" ? "red" : undefined}>
-            {line.text}
+            {line.text || " "}
           </Text>
         )}
       </Static>

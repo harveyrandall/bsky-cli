@@ -185,6 +185,24 @@ describe("an unnamed profile after a /switch", () => {
   });
 });
 
+describe("a config file given at startup", () => {
+  const whichConfig = () => {
+    const p = program().option("-c, --config <path>");
+    p.command("where").action(() => console.log(p.opts().config));
+    return p;
+  };
+  it("stays, as Commander forgets it on each parse", async () => {
+    const lines: string[] = [];
+    await runPassthrough(whichConfig(), ["where"], { print: (text) => lines.push(text), config: "custom.toml" });
+    expect(lines).toEqual(["custom.toml"]);
+  });
+  it("gives way to one in the command", async () => {
+    const lines: string[] = [];
+    await runPassthrough(whichConfig(), ["-c", "other.toml", "where"], { print: (text) => lines.push(text), config: "custom.toml" });
+    expect(lines).toEqual(["other.toml"]);
+  });
+});
+
 describe("what a run comes to", () => {
   it.each([
     [["hello"], "done"],
