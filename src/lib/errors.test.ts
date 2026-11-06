@@ -76,4 +76,9 @@ describe("isNetworkError", () => {
     err.cause = err;
     expect(isNetworkError(err)).toBe(false);
   });
+
+  it("sees a request that got no response behind the sign-in error that wraps it", () => {
+    const noResponse = Object.assign(new Error("self signed certificate"), { status: 1 });
+    expect(isNetworkError(new Error("Can't reach https://pds.example", { cause: noResponse }))).toBe(true);
+  });
 });

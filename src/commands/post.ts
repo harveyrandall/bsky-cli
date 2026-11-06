@@ -15,7 +15,7 @@ import type {
 import { load as cheerioLoad } from "cheerio";
 import { getClient, isJson } from "@/index";
 import { extractLinks, extractMentions, extractTags } from "@/lib/extract";
-import { saveDraft } from "@/drafts";
+import { deleteDraft, listDrafts, saveDraft } from "@/drafts";
 import type { Draft } from "@/lib/types";
 import { isNetworkError } from "@/lib/errors";
 import { detectMimeType } from "@/lib/media";
@@ -203,9 +203,47 @@ export function isLengthError(err: unknown): boolean {
   return msg.includes("must not be longer than") || msg.includes("InvalidRecord");
 }
 
+type DraftData = Omit<Draft, "id" | "createdAt" | "reason">;
+
+/** What makes two drafts the same post. */
+const postKey = (d: DraftData) =>
+  JSON.stringify([d.type, d.text, d.replyUri, d.quoteUri, d.images, d.video, d.posts?.map((p) => p.text)]);
+
+/**
+ * Runs a step that comes before sending. With no connection the post is kept as a
+ * draft, and unlike one lost while being sent, it can't have gone. Trying again is
+ * the same post, not another: it reuses that draft, and once online it replaces it.
+ */
+export async function draftIfOffline<T>(program: Command, draftData: DraftData, step: () => Promise<T>): Promise<T> {
+  const profile = program.opts().profile;
+  const drafts = await listDrafts(profile).catch(() => []);
+  const saved = drafts.find((d) => d.reason === "network" && postKey(d) === postKey(draftData));
+
+  let result: T;
+  try {
+    result = await step();
+  } catch (err: unknown) {
+    if (!isNetworkError(err)) throw err;
+    const { id } = saved ?? (await saveDraft({ ...draftData, reason: "network" }, profile));
+    console.error(`${err instanceof Error ? err.message : String(err)}. Post saved as draft: ${id}`);
+    console.error("You'll be asked to send it next time you're online.");
+    process.exit(1);
+  }
+
+  // Signing in offers offline drafts. If this one has gone that way, it's done.
+  if (saved) {
+    await deleteDraft(saved.id, profile).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== "ENOENT") throw err;
+      console.error("This post has just gone, with your offline drafts.");
+      process.exit(0);
+    });
+  }
+  return result;
+}
+
 async function executeOrDraft(
   program: Command,
-  draftData: Omit<Draft, "id" | "createdAt" | "reason">,
+  draftData: DraftData,
   opts: { draft?: boolean },
   execute: () => Promise<{ uri: string; cid: string }>,
 ): Promise<void> {
@@ -312,7 +350,7 @@ export function registerPost(program: Command): void {
           videoAlt: opts.videoAlt,
         };
 
-        const agent = opts.draft ? undefined : await getClient(program);
+        const agent = opts.draft ? undefined : await draftIfOffline(program, draftData, () => getClient(program));
 
         await executeOrDraft(program, draftData, opts, async () => {
           return createPost(agent!, text, {
@@ -335,11 +373,12 @@ export function registerReply(program: Command): void {
     .option("--draft", "Save as draft instead of publishing")
     .action(async (uri: string, textParts: string[], opts: { draft?: boolean }) => {
       const text = textParts.join(" ");
+      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
 
-      const draftData: Omit<Draft, "id" | "createdAt" | "reason"> = {
+      const draftData: DraftData = {
         type: "reply",
         text,
-        replyUri: uri,
+        replyUri: atUri,
       };
 
       if (opts.draft) {
@@ -347,19 +386,15 @@ export function registerReply(program: Command): void {
         return;
       }
 
-      const agent = await getClient(program);
-
       // Fetch parent post
-      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
       const parts = atUri.split("/");
       const rkey = parts[parts.length - 1];
       const collection = parts[parts.length - 2];
       const did = parts[2];
 
-      const record = await agent.com.atproto.repo.getRecord({
-        repo: did,
-        collection,
-        rkey,
+      const { agent, record } = await draftIfOffline(program, draftData, async () => {
+        const agent = await getClient(program);
+        return { agent, record: await agent.com.atproto.repo.getRecord({ repo: did, collection, rkey }) };
       });
 
       const parent: ComAtprotoRepoStrongRef.Main = {
@@ -391,11 +426,12 @@ export function registerQuote(program: Command): void {
     .option("--draft", "Save as draft instead of publishing")
     .action(async (uri: string, textParts: string[], opts: { draft?: boolean }) => {
       const text = textParts.join(" ");
+      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
 
-      const draftData: Omit<Draft, "id" | "createdAt" | "reason"> = {
+      const draftData: DraftData = {
         type: "quote",
         text,
-        quoteUri: uri,
+        quoteUri: atUri,
       };
 
       if (opts.draft) {
@@ -403,18 +439,14 @@ export function registerQuote(program: Command): void {
         return;
       }
 
-      const agent = await getClient(program);
-
-      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
       const parts = atUri.split("/");
       const rkey = parts[parts.length - 1];
       const collection = parts[parts.length - 2];
       const did = parts[2];
 
-      const record = await agent.com.atproto.repo.getRecord({
-        repo: did,
-        collection,
-        rkey,
+      const { agent, record } = await draftIfOffline(program, draftData, async () => {
+        const agent = await getClient(program);
+        return { agent, record: await agent.com.atproto.repo.getRecord({ repo: did, collection, rkey }) };
       });
 
       await executeOrDraft(program, draftData, opts, async () => {

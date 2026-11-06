@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
 import { createMockAgent } from "@/test-utils";
+import { getClient } from "@/index";
 import { registerPost, registerReply, registerQuote } from "@/commands/post";
 
 const mockAgent = createMockAgent();
@@ -13,6 +14,7 @@ vi.mock("@/index", () => ({
 const mockSaveDraft = vi.fn().mockResolvedValue({ id: "1741392000000-a7f3" });
 vi.mock("@/drafts", () => ({
   saveDraft: (...args: unknown[]) => mockSaveDraft(...args),
+  listDrafts: async () => [],
 }));
 
 // Mock node:fs/promises for file read operations
@@ -547,5 +549,95 @@ describe("post --draft", () => {
     expect(mockAgent.com.atproto.repo.getRecord).not.toHaveBeenCalled();
 
     consoleSpy.mockRestore();
+  });
+});
+
+describe("with no connection", () => {
+  const offline = () => new Error("Can't reach https://bsky.social: fetch failed", { cause: new TypeError("fetch failed") });
+  const parent = "at://did:plc:them/app.bsky.feed.post/9";
+  let errors: string[];
+  let exit: ReturnType<typeof vi.spyOn>;
+
+  const run = (register: (program: Command) => void, ...argv: string[]) => {
+    const program = new Command().exitOverride().option("-p, --profile <name>");
+    register(program);
+    return program.parseAsync(argv, { from: "user" });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSaveDraft.mockResolvedValue({ id: "1741392000000-a7f3" });
+    errors = [];
+    vi.spyOn(console, "error").mockImplementation((...a) => void errors.push(a.join(" ")));
+    exit = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`);
+    }) as never);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(getClient).mockReset();
+    vi.mocked(getClient).mockResolvedValue(mockAgent as never);
+  });
+
+  it("keeps a post as a draft when it can't sign in", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run(registerPost, "post", "hello", "there", "--image", "a.png")).rejects.toThrow("exit 1");
+
+    expect(mockSaveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "post", text: "hello there", reason: "network", images: [expect.stringMatching(/a\.png$/)] }),
+      undefined,
+    );
+    expect(errors.join("\n")).toContain("Post saved as draft: 1741392000000-a7f3");
+    expect(errors.join("\n")).toContain("Can't reach https://bsky.social");
+  });
+
+  it("doesn't warn that it may have gone, as nothing was sent", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run(registerPost, "post", "hello")).rejects.toThrow("exit 1");
+    expect(errors.join("\n")).not.toContain("may already have gone");
+    expect(errors.join("\n")).toContain("next time you're online");
+  });
+
+  it("saves it for the profile in use", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run(registerPost, "-p", "work", "post", "hello")).rejects.toThrow("exit 1");
+    expect(mockSaveDraft).toHaveBeenCalledWith(expect.anything(), "work");
+  });
+
+  it("still fails as before for anything else", async () => {
+    vi.mocked(getClient).mockRejectedValue(new Error("Session expired. Run 'bsky login' to re-authenticate."));
+    await expect(run(registerPost, "post", "hello")).rejects.toThrow("Session expired");
+    expect(mockSaveDraft).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a reply, whether signing in or finding the post failed", async () => {
+    vi.mocked(getClient).mockRejectedValueOnce(offline());
+    await expect(run(registerReply, "reply", parent, "hi")).rejects.toThrow("exit 1");
+    mockAgent.com.atproto.repo.getRecord.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(run(registerReply, "reply", parent, "hi")).rejects.toThrow("exit 1");
+
+    expect(mockSaveDraft).toHaveBeenCalledTimes(2);
+    expect(mockSaveDraft).toHaveBeenCalledWith(expect.objectContaining({ type: "reply", replyUri: parent, reason: "network" }), undefined);
+  });
+
+  it("saves a short URI in full, as the draft's sender needs one", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run(registerReply, "reply", "abc/app.bsky.feed.post/xyz", "hi")).rejects.toThrow("exit 1");
+    await expect(run(registerQuote, "quote", "abc/app.bsky.feed.post/xyz", "hi")).rejects.toThrow("exit 1");
+
+    const full = "at://did:plc:abc/app.bsky.feed.post/xyz";
+    expect(mockSaveDraft.mock.calls[0][0].replyUri).toBe(full);
+    expect(mockSaveDraft.mock.calls[1][0].quoteUri).toBe(full);
+  });
+
+  it("keeps a quote, whether signing in or finding the post failed", async () => {
+    vi.mocked(getClient).mockRejectedValueOnce(offline());
+    await expect(run(registerQuote, "quote", parent, "hi")).rejects.toThrow("exit 1");
+    mockAgent.com.atproto.repo.getRecord.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(run(registerQuote, "quote", parent, "hi")).rejects.toThrow("exit 1");
+
+    expect(mockSaveDraft).toHaveBeenCalledTimes(2);
+    expect(mockSaveDraft).toHaveBeenCalledWith(expect.objectContaining({ type: "quote", quoteUri: parent, reason: "network" }), undefined);
   });
 });
