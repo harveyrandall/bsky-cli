@@ -2,6 +2,7 @@ import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { bskyDir } from "@/config";
+import { replaceFile } from "@/lib/files";
 import type { Draft } from "@/lib/types";
 
 function draftsDir(profile?: string): string {
@@ -35,6 +36,11 @@ export async function saveDraft(
     mode: 0o644,
   });
   return draft;
+}
+
+/** Replaces a draft in one step, as one left half written would lose the posts it holds. */
+export function updateDraft(draft: Draft, profile?: string): void {
+  replaceFile(draftPath(draft.id, profile), JSON.stringify(draft, null, "  ") + "\n", 0o644);
 }
 
 export async function loadDraft(

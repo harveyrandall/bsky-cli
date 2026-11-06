@@ -171,7 +171,7 @@ bsky drafts show 1741392    # unique prefix match
 
 ### `bsky drafts send`
 
-Publish a saved draft. For thread drafts, posts are sent sequentially with reply chaining. Drafts saved from partial failures resume from where they left off.
+Publish a saved draft. For thread drafts, posts are sent sequentially with reply chaining. If one fails, the draft keeps what's left, so sending it again carries on from there. If the connection drops while a post is being sent, it stays in the draft but may have gone, so check before sending it again.
 
 ```bash
 bsky drafts send <id>
