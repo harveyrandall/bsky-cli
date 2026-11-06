@@ -22,8 +22,10 @@ const SCHTASKS_NAME = "BskyCLI\\ScheduleRun";
  * its argv[1] is a path inside it, which nothing outside can run.
  */
 export function bskyCommand(): string[] {
-  const interpreted = /(^|[\\/])(node|bun)[^\\/]*$/i.test(process.execPath);
-  return interpreted ? [process.execPath, resolve(process.argv[1])] : [process.execPath];
+  // execPath has symlinks resolved, and a Homebrew upgrade removes the versioned folder they lead to
+  const runtime = process.execPath.replace(/\/Cellar\/([^/]+)\/[^/]+\//, "/opt/$1/");
+  const interpreted = /(^|[\\/])(node|bun)[^\\/]*$/i.test(runtime);
+  return interpreted ? [runtime, resolve(process.argv[1])] : [runtime];
 }
 
 const MOST_LOG_BYTES = 1_000_000;

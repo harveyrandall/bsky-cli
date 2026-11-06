@@ -68,6 +68,16 @@ describe("bskyCommand", () => {
       expect(bskyCommand()).toEqual([runtime, "/usr/local/bin/bsky"]);
     }
   });
+  it("names Homebrew's stable link, as an upgrade removes the versioned folder", () => {
+    runningAs("/opt/homebrew/Cellar/node@22/22.1.0/bin/node");
+    process.argv = ["node", "/opt/homebrew/bin/bsky"];
+    expect(bskyCommand()).toEqual(["/opt/homebrew/opt/node@22/bin/node", "/opt/homebrew/bin/bsky"]);
+  });
+  it("does the same for a compiled binary installed with Homebrew", () => {
+    runningAs("/usr/local/Cellar/bsky-cli/1.9.1/bin/bsky");
+    process.argv = ["bun", "/$bunfs/root/bsky"];
+    expect(bskyCommand()).toEqual(["/usr/local/opt/bsky-cli/bin/bsky"]);
+  });
   it("makes the script's path absolute", () => {
     runningAs("/usr/bin/node");
     process.argv = ["node", "dist/index.js"];
