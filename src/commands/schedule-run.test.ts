@@ -48,6 +48,7 @@ describe("schedule run, on real files", () => {
     home = mkdtempSync(join(tmpdir(), "bsky-run-"));
     vi.stubEnv("XDG_CONFIG_HOME", home);
     vi.resetAllMocks();
+    process.exitCode = undefined;
     vi.mocked(getClient).mockResolvedValue(agent);
     vi.mocked(createPost).mockResolvedValue({ uri: "at://ok", cid: "cid" });
     errors = [];
@@ -56,6 +57,7 @@ describe("schedule run, on real files", () => {
     vi.spyOn(console, "log").mockImplementation((line: string) => void logged.push(line));
   });
   afterEach(() => {
+    process.exitCode = undefined;
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     rmSync(home, { recursive: true, force: true });
@@ -249,10 +251,6 @@ describe("schedule run, on real files", () => {
   });
 
   describe("exit code", () => {
-    afterEach(() => {
-      process.exitCode = undefined;
-    });
-
     it("is 1 when posts were due and none went", async () => {
       await queued();
       await queued();
