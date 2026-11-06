@@ -81,7 +81,7 @@ async function sendThreadDraft(
     parentRef = sent;
     if (i === posts.length - 1) break; // Nothing left to keep: the caller removes the draft
     try {
-      updateDraft({ ...draft, replyUri: sent.uri, posts: posts.slice(i + 1) }, profile);
+      updateDraft({ ...draft, text: posts[i + 1].text, replyUri: sent.uri, posts: posts.slice(i + 1) }, profile);
     } catch (err: unknown) {
       listPosted();
       const msg = err instanceof Error ? err.message : String(err);

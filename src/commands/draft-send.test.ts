@@ -27,8 +27,13 @@ describe("sending a thread draft, on real files", () => {
     com: {
       atproto: {
         repo: {
+          // Post 1 starts the thread, and each one after replies within it
           getRecord: vi.fn(async ({ rkey }: { rkey: string }) => ({
-            data: { uri: uri(Number(rkey)), cid: `cid${rkey}`, value: {} },
+            data: {
+              uri: uri(Number(rkey)),
+              cid: `cid${rkey}`,
+              value: rkey === "1" ? {} : { reply: { root: { uri: uri(1), cid: "cid1" } } },
+            },
           })),
         },
       },
@@ -93,6 +98,27 @@ describe("sending a thread draft, on real files", () => {
     const left = await loadDraft(id);
     expect(left.posts?.map((p) => p.text)).toEqual(["two", "three"]);
     expect(left.replyUri).toBe(uri(1));
+  });
+
+  it("shows the next post as the draft's text, not one that's gone", async () => {
+    const { id } = await thread();
+    sending("two");
+    await expect(send(id)).rejects.toThrow();
+    expect((await loadDraft(id)).text).toBe("two");
+  });
+
+  it("keeps the thread's root when it carries on from a later post", async () => {
+    const { id } = await thread();
+    sending("three");
+    await expect(send(id)).rejects.toThrow();
+
+    vi.mocked(createPost).mockClear();
+    sending();
+    await send(id);
+
+    const [, , last] = vi.mocked(createPost).mock.calls[0];
+    expect(last?.reply?.uri).toBe(uri(2));
+    expect(last?.replyRoot?.uri).toBe(uri(1));
   });
 
   it("says what went and what's left", async () => {
