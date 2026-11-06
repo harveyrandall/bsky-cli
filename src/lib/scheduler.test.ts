@@ -23,7 +23,7 @@ import {
   disableScheduler,
   getSchedulerStatus,
   uninstallScheduler,
-  resolveBskyPath,
+  bskyCommand,
 } from "./scheduler";
 
 const originalPlatform = process.platform;
@@ -35,18 +35,54 @@ function setPlatform(platform: string): void {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("XDG_CONFIG_HOME", "");
   process.argv = ["node", "/usr/local/bin/bsky"];
+  Object.defineProperty(process, "execPath", { value: "/usr/bin/node", configurable: true });
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   Object.defineProperty(process, "platform", { value: originalPlatform, writable: true });
   process.argv = originalArgv;
 });
 
-describe("resolveBskyPath", () => {
-  it("resolves process.argv[1] to absolute path", () => {
+describe("bskyCommand", () => {
+  const execPath = process.execPath;
+  const runningAs = (path: string) => Object.defineProperty(process, "execPath", { value: path, configurable: true });
+  afterEach(() => runningAs(execPath));
+
+  it("names Node in full, as a job has no PATH to find it on", () => {
+    runningAs("/home/me/.nvm/versions/node/v22.22.0/bin/node");
     process.argv = ["node", "/usr/local/bin/bsky"];
-    expect(resolveBskyPath()).toBe("/usr/local/bin/bsky");
+    expect(bskyCommand()).toEqual(["/home/me/.nvm/versions/node/v22.22.0/bin/node", "/usr/local/bin/bsky"]);
+  });
+  it("names Bun the same way", () => {
+    runningAs("/opt/homebrew/bin/bun");
+    process.argv = ["bun", "/usr/local/bin/bsky"];
+    expect(bskyCommand()).toEqual(["/opt/homebrew/bin/bun", "/usr/local/bin/bsky"]);
+  });
+  it("knows Node and Bun by the other names they're installed under", () => {
+    for (const runtime of ["/usr/bin/nodejs", "/usr/local/bin/node22", "/opt/bin/bun-debug"]) {
+      runningAs(runtime);
+      process.argv = ["node", "/usr/local/bin/bsky"];
+      expect(bskyCommand()).toEqual([runtime, "/usr/local/bin/bsky"]);
+    }
+  });
+  it("makes the script's path absolute", () => {
+    runningAs("/usr/bin/node");
+    process.argv = ["node", "dist/index.js"];
+    expect(bskyCommand()[1]).toMatch(/^\/.*dist\/index\.js$/);
+  });
+  it("is just the binary when compiled, as argv[1] is a path inside it", () => {
+    runningAs("/usr/local/bin/bsky");
+    process.argv = ["bun", "/$bunfs/root/bsky"];
+    expect(bskyCommand()).toEqual(["/usr/local/bin/bsky"]);
+  });
+  it("copes with Windows", () => {
+    runningAs("C:\\Program Files\\nodejs\\node.exe");
+    process.argv = ["node", "C:\\bsky\\index.js"];
+    expect(bskyCommand()[0]).toBe("C:\\Program Files\\nodejs\\node.exe");
+    expect(bskyCommand()).toHaveLength(2);
   });
 });
 
@@ -56,6 +92,20 @@ describe("Linux (crontab)", () => {
   beforeEach(() => setPlatform("linux"));
 
   describe("enableScheduler", () => {
+    const crontabLine = () => {
+      vi.mocked(execFileSync).mockReturnValueOnce("" as never); // crontab -l
+      enableScheduler(1);
+      return (vi.mocked(execFileSync).mock.calls.at(-1)![2] as { input: string }).input;
+    };
+
+    it("passes the config folder on, as a job doesn't get the shell's environment", () => {
+      vi.stubEnv("XDG_CONFIG_HOME", "/home/me/my config");
+      expect(crontabLine()).toContain("* * * * * XDG_CONFIG_HOME='/home/me/my config' '/usr/bin/node'");
+    });
+    it("sets nothing when the folder is the default one", () => {
+      vi.stubEnv("XDG_CONFIG_HOME", "");
+      expect(crontabLine()).not.toContain("XDG_CONFIG_HOME");
+    });
     it("adds a crontab entry with the marker", () => {
       vi.mocked(execFileSync).mockReturnValueOnce("" as never); // crontab -l
 
@@ -65,7 +115,7 @@ describe("Linux (crontab)", () => {
         "crontab",
         ["-"],
         expect.objectContaining({
-          input: expect.stringContaining("* * * * * /usr/local/bin/bsky schedule run # bsky-cli-scheduler"),
+          input: expect.stringContaining("* * * * * '/usr/bin/node' '/usr/local/bin/bsky' schedule run # bsky-cli-scheduler"),
         }),
       );
     });
@@ -95,7 +145,7 @@ describe("Linux (crontab)", () => {
       const input = (call[2] as { input: string }).input;
       expect(input).not.toContain("/old/bsky");
       expect(input).toContain("other-job");
-      expect(input).toContain("/usr/local/bin/bsky schedule run # bsky-cli-scheduler");
+      expect(input).toContain("'/usr/local/bin/bsky' schedule run # bsky-cli-scheduler");
     });
 
     it("refuses a profile that would change the scheduled command", () => {
@@ -190,6 +240,25 @@ describe("macOS (launchd)", () => {
   beforeEach(() => setPlatform("darwin"));
 
   describe("enableScheduler", () => {
+    const plist = () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      enableScheduler(1);
+      return vi.mocked(writeFileSync).mock.calls[0][1] as string;
+    };
+
+    it("passes the config folder on, as launchd doesn't read the shell's environment", () => {
+      vi.stubEnv("XDG_CONFIG_HOME", "/Users/me/.config");
+      expect(plist()).toMatch(
+        /<key>EnvironmentVariables<\/key>\s*<dict>\s*<key>XDG_CONFIG_HOME<\/key>\s*<string>\/Users\/me\/\.config<\/string>/,
+      );
+    });
+    it("sets nothing when the folder is the default one", () => {
+      vi.stubEnv("XDG_CONFIG_HOME", "");
+      expect(plist()).not.toContain("EnvironmentVariables");
+    });
+    it("runs Node with the script, so the job doesn't need a PATH", () => {
+      expect(plist()).toMatch(/<string>\/usr\/bin\/node<\/string>\s*<string>\/usr\/local\/bin\/bsky<\/string>\s*<string>schedule<\/string>/);
+    });
     it("writes plist and loads with launchctl", () => {
       vi.mocked(existsSync).mockReturnValue(false);
 
@@ -303,6 +372,10 @@ describe("Windows (schtasks)", () => {
   beforeEach(() => setPlatform("win32"));
 
   describe("enableScheduler", () => {
+    it("quotes Node and the script apart", () => {
+      enableScheduler(1);
+      expect(vi.mocked(execFileSync).mock.calls[0][1]).toContain('"/usr/bin/node" "/usr/local/bin/bsky" schedule run');
+    });
     it("creates schtasks with correct args", () => {
       enableScheduler(1);
 
