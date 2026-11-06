@@ -284,6 +284,8 @@ Each post leaves the queue before it's sent, so runs that overlap, such as `sche
 
 If a run is stopped while sending, that post may or may not have gone out, so it's kept aside in the scheduled folder as `<id>.sending`. `schedule list` shows it straight away, and an hour on, runs say so too. Check your Bluesky profile, then delete the file, or rename it to `<id>.json` to send it. For a post that repeats, deleting it ends the series, and to keep the series without sending that one again, change its `scheduledAt` to the next date first.
 
+The run exits 1 if posts were due and none went out, so a script can tell. It exits 0 if at least one went, or if nothing was due.
+
 ### `bsky schedule watch`
 
 Run a foreground watcher that checks for due posts on a cron schedule. Stays open until you press Ctrl+C. If a post is being sent, it finishes first, and pressing Ctrl+C again leaves at once.

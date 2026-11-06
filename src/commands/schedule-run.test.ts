@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
@@ -245,6 +245,54 @@ describe("schedule run, on real files", () => {
       await leftBehind();
       await run(undefined, "list");
       expect(logged).toEqual([]);
+    });
+  });
+
+  describe("exit code", () => {
+    afterEach(() => {
+      process.exitCode = undefined;
+    });
+
+    it("is 1 when posts were due and none went", async () => {
+      await queued();
+      await queued();
+      vi.mocked(createPost).mockRejectedValue(new Error("server said no"));
+      await run();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it.skipIf(process.getuid?.() === 0)("is 1 when a due post couldn't be taken from the queue", async () => {
+      await queued();
+      chmodSync(scheduledDir(), 0o555);
+      try {
+        await run();
+      } finally {
+        chmodSync(scheduledDir(), 0o755);
+      }
+      expect(process.exitCode).toBe(1);
+    });
+
+    it("stays 0 when at least one went", async () => {
+      await queued();
+      await queued();
+      vi.mocked(createPost)
+        .mockRejectedValueOnce(new Error("server said no"))
+        .mockResolvedValueOnce({ uri: "at://did:plc:me/app.bsky.feed.post/1", cid: "c" });
+      await run();
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it("stays 0 when nothing was due", async () => {
+      await run();
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it("stays 0 when an overlapping run took them, as nothing failed", async () => {
+      await queued();
+      vi.mocked(createPost).mockResolvedValue({ uri: "at://did:plc:me/app.bsky.feed.post/1", cid: "c" });
+      await Promise.all([run(), run()]);
+      expect(createPost).toHaveBeenCalledTimes(1);
+      expect(process.exitCode).toBeUndefined();
     });
   });
 
