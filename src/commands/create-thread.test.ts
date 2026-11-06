@@ -622,8 +622,13 @@ describe("create-thread: with no connection", () => {
 
   it("keeps text that fits in one post as a post draft", async () => {
     vi.mocked(getClient).mockRejectedValue(offline());
-    await expect(run("short and sweet")).rejects.toThrow("exit 1");
-    expect(mockSaveDraft.mock.calls[0][0]).toMatchObject({ type: "post", text: "short and sweet", reason: "network" });
+    await expect(run("short and sweet", "--image", "a.png")).rejects.toThrow("exit 1");
+    expect(mockSaveDraft.mock.calls[0][0]).toMatchObject({
+      type: "post",
+      text: "short and sweet",
+      reason: "network",
+      images: [expect.stringMatching(/^\/.*a\.png$/)],
+    });
   });
 
   it("fails as before with a quote, which a thread draft can't hold", async () => {
