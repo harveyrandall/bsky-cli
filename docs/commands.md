@@ -151,7 +151,7 @@ An interactive composer for writing threads, posts, quotes, scheduled posts and 
 
 ## Drafts
 
-Drafts are saved locally when posting fails (network errors, edge cases), when `--draft` is used, or from the [REPL](repl.md). Network drafts are automatically offered for sending next time you run a command while online.
+Drafts are saved locally when posting fails (network errors, edge cases), including when you're offline and can't sign in, when `--draft` is used, or from the [REPL](repl.md). The exception is `create-thread --quote`, as a thread draft can't hold a quote. Network drafts are automatically offered for sending next time you run a command while online.
 
 ### `bsky drafts list` / `bsky drafts ls`
 

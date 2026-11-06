@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
 import { createMockAgent } from "@/test-utils";
 
@@ -42,7 +42,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 import { registerCreateThread } from "./create-thread";
-import { isJson } from "@/index";
+import { getClient, isJson } from "@/index";
 import { outputJson } from "@/lib/format";
 
 function createProgram() {
@@ -582,5 +582,52 @@ describe("create-thread: Ctrl+C partway", () => {
     const saved = await interrupted(0, "--reply-to", parent);
     expect(saved.replyUri).toBe(parent);
     expect(saved.posts[0].text).toBe(mockAgent.post.mock.calls[0][0].text);
+  });
+});
+
+describe("create-thread: with no connection", () => {
+  const offline = () => new Error("Can't reach https://bsky.social: fetch failed", { cause: new TypeError("fetch failed") });
+  const parent = "at://did:plc:them/app.bsky.feed.post/9";
+  const long = `${"word ".repeat(55)}one. ///${"word ".repeat(55)}two.`;
+  const run = (...argv: string[]) => createProgram().parseAsync(["node", "test", "create-thread", ...argv, "--no-preview"]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSaveDraft.mockResolvedValue({ id: "1741392000000-a7f3" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit ${code}`);
+    }) as never);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(getClient).mockReset();
+    vi.mocked(getClient).mockResolvedValue(mockAgent as never);
+  });
+
+  it("keeps a thread as a draft when it can't sign in", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run(long, "--skip-validation")).rejects.toThrow("exit 1");
+    const [saved] = mockSaveDraft.mock.calls[0];
+    expect(saved).toMatchObject({ type: "thread", reason: "network" });
+    expect(saved.posts.length).toBe(2);
+  });
+
+  it("keeps the post it replies to, when finding that post failed", async () => {
+    mockAgent.com.atproto.repo.getRecord.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(run(long, "--skip-validation", "--reply-to", parent)).rejects.toThrow("exit 1");
+    expect(mockSaveDraft.mock.calls[0][0]).toMatchObject({ type: "thread", reason: "network", replyUri: parent });
+  });
+
+  it("keeps text that fits in one post as a post draft", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run("short and sweet")).rejects.toThrow("exit 1");
+    expect(mockSaveDraft.mock.calls[0][0]).toMatchObject({ type: "post", text: "short and sweet", reason: "network" });
+  });
+
+  it("fails as before with a quote, which a thread draft can't hold", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run(long, "--skip-validation", "--quote", parent)).rejects.toThrow("Can't reach");
+    expect(mockSaveDraft).not.toHaveBeenCalled();
   });
 });

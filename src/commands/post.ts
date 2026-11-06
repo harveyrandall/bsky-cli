@@ -203,6 +203,26 @@ export function isLengthError(err: unknown): boolean {
   return msg.includes("must not be longer than") || msg.includes("InvalidRecord");
 }
 
+/**
+ * Runs a step that comes before sending. With no connection the post is kept as a
+ * draft, and unlike one lost while being sent, it can't have gone.
+ */
+export async function draftIfOffline<T>(
+  program: Command,
+  draftData: Omit<Draft, "id" | "createdAt" | "reason">,
+  step: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await step();
+  } catch (err: unknown) {
+    if (!isNetworkError(err)) throw err;
+    const draft = await saveDraft({ ...draftData, reason: "network" }, program.opts().profile);
+    console.error(`${err instanceof Error ? err.message : String(err)}. Post saved as draft: ${draft.id}`);
+    console.error("You'll be asked to send it next time you're online.");
+    process.exit(1);
+  }
+}
+
 async function executeOrDraft(
   program: Command,
   draftData: Omit<Draft, "id" | "createdAt" | "reason">,
@@ -312,7 +332,7 @@ export function registerPost(program: Command): void {
           videoAlt: opts.videoAlt,
         };
 
-        const agent = opts.draft ? undefined : await getClient(program);
+        const agent = opts.draft ? undefined : await draftIfOffline(program, draftData, () => getClient(program));
 
         await executeOrDraft(program, draftData, opts, async () => {
           return createPost(agent!, text, {
@@ -347,8 +367,6 @@ export function registerReply(program: Command): void {
         return;
       }
 
-      const agent = await getClient(program);
-
       // Fetch parent post
       const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
       const parts = atUri.split("/");
@@ -356,10 +374,9 @@ export function registerReply(program: Command): void {
       const collection = parts[parts.length - 2];
       const did = parts[2];
 
-      const record = await agent.com.atproto.repo.getRecord({
-        repo: did,
-        collection,
-        rkey,
+      const { agent, record } = await draftIfOffline(program, draftData, async () => {
+        const agent = await getClient(program);
+        return { agent, record: await agent.com.atproto.repo.getRecord({ repo: did, collection, rkey }) };
       });
 
       const parent: ComAtprotoRepoStrongRef.Main = {
@@ -403,18 +420,15 @@ export function registerQuote(program: Command): void {
         return;
       }
 
-      const agent = await getClient(program);
-
       const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
       const parts = atUri.split("/");
       const rkey = parts[parts.length - 1];
       const collection = parts[parts.length - 2];
       const did = parts[2];
 
-      const record = await agent.com.atproto.repo.getRecord({
-        repo: did,
-        collection,
-        rkey,
+      const { agent, record } = await draftIfOffline(program, draftData, async () => {
+        const agent = await getClient(program);
+        return { agent, record: await agent.com.atproto.repo.getRecord({ repo: did, collection, rkey }) };
       });
 
       await executeOrDraft(program, draftData, opts, async () => {

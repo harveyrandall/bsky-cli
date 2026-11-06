@@ -5,7 +5,7 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import type { ComAtprotoRepoStrongRef } from "@atproto/api";
 import { getClient, isJson } from "@/index";
-import { createPost, isNetworkError } from "@/commands/post";
+import { createPost, draftIfOffline, isNetworkError } from "@/commands/post";
 import {
   splitThread,
   graphemeLength,
@@ -359,7 +359,18 @@ export function registerCreateThread(program: Command): void {
             console.error(`Text fits in one post. Draft saved: ${draft.id}`);
             return;
           }
-          const agent = await getClient(program);
+          const agent = await draftIfOffline(
+            program,
+            {
+              type: "post",
+              text,
+              images: opts.image?.map((p) => resolve(p)),
+              imageAlts: opts.imageAlt,
+              video: opts.video && resolve(opts.video),
+              videoAlt: opts.videoAlt,
+            },
+            () => getClient(program),
+          );
           const result = await createPost(agent, text, {
             images: opts.image,
             imageAlts: opts.imageAlt,
@@ -538,24 +549,23 @@ export function registerCreateThread(program: Command): void {
           mediaAll: opts.mediaAll,
         });
 
+        const threadDraft = () => ({
+          type: "thread" as const,
+          text,
+          replyUri: opts.replyTo,
+          posts: postsWithMedia.map((p) => ({
+            text: p.text,
+            images: p.images,
+            imageAlts: p.imageAlts,
+            video: p.video,
+            videoAlt: p.videoAlt,
+            link: p.link,
+          })),
+        });
+
         // --draft: save and exit
         if (opts.draft) {
-          const draft = await saveDraft(
-            {
-              type: "thread",
-              text,
-              reason: "manual",
-              posts: postsWithMedia.map((p) => ({
-                text: p.text,
-                images: p.images,
-                imageAlts: p.imageAlts,
-                video: p.video,
-                videoAlt: p.videoAlt,
-                link: p.link,
-              })),
-            },
-            profile,
-          );
+          const draft = await saveDraft({ ...threadDraft(), reason: "manual" }, profile);
           console.error(`Thread draft saved: ${draft.id} (${postsWithMedia.length} posts)`);
           return;
         }
@@ -575,42 +585,51 @@ export function registerCreateThread(program: Command): void {
         }
 
         // Resolve reply-to / quote refs
-        const agent = await getClient(program);
-        let replyRef: ComAtprotoRepoStrongRef.Main | undefined;
-        let rootRef: ComAtprotoRepoStrongRef.Main | undefined;
-        let quoteRef: ComAtprotoRepoStrongRef.Main | undefined;
+        const signIn = async () => {
+          const agent = await getClient(program);
+          let replyRef: ComAtprotoRepoStrongRef.Main | undefined;
+          let rootRef: ComAtprotoRepoStrongRef.Main | undefined;
+          let quoteRef: ComAtprotoRepoStrongRef.Main | undefined;
 
-        if (opts.replyTo) {
-          const parts = opts.replyTo.split("/");
-          const rkey = parts[parts.length - 1];
-          const collection = parts[parts.length - 2];
-          const did = parts[2];
+          if (opts.replyTo) {
+            const parts = opts.replyTo.split("/");
+            const rkey = parts[parts.length - 1];
+            const collection = parts[parts.length - 2];
+            const did = parts[2];
 
-          const record = await agent.com.atproto.repo.getRecord({
-            repo: did,
-            collection,
-            rkey,
-          });
+            const record = await agent.com.atproto.repo.getRecord({
+              repo: did,
+              collection,
+              rkey,
+            });
 
-          replyRef = { uri: record.data.uri, cid: record.data.cid! };
-          const parentValue = record.data.value as { reply?: { root: ComAtprotoRepoStrongRef.Main } };
-          rootRef = parentValue.reply?.root ?? replyRef;
-        }
+            replyRef = { uri: record.data.uri, cid: record.data.cid! };
+            const parentValue = record.data.value as { reply?: { root: ComAtprotoRepoStrongRef.Main } };
+            rootRef = parentValue.reply?.root ?? replyRef;
+          }
 
-        if (opts.quote) {
-          const parts = opts.quote.split("/");
-          const rkey = parts[parts.length - 1];
-          const collection = parts[parts.length - 2];
-          const did = parts[2];
+          if (opts.quote) {
+            const parts = opts.quote.split("/");
+            const rkey = parts[parts.length - 1];
+            const collection = parts[parts.length - 2];
+            const did = parts[2];
 
-          const record = await agent.com.atproto.repo.getRecord({
-            repo: did,
-            collection,
-            rkey,
-          });
+            const record = await agent.com.atproto.repo.getRecord({
+              repo: did,
+              collection,
+              rkey,
+            });
 
-          quoteRef = { uri: record.data.uri, cid: record.data.cid! };
-        }
+            quoteRef = { uri: record.data.uri, cid: record.data.cid! };
+          }
+
+          return { agent, replyRef, rootRef, quoteRef };
+        };
+
+        // ponytail: a thread draft can't hold a quote, so one fails as it did. Add quoteUri to sendThreadDraft if that matters.
+        const { agent, replyRef, rootRef, quoteRef } = await (opts.quote
+          ? signIn()
+          : draftIfOffline(program, threadDraft(), signIn));
 
         // SIGINT trap during posting
         let sigintHandler: (() => void) | undefined;
