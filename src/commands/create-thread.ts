@@ -217,6 +217,7 @@ async function postThread(
   },
   profile: string | undefined,
   originalText: string,
+  onPosted: (sent: ComAtprotoRepoStrongRef.Main) => void,
 ): Promise<string[]> {
   const uris: string[] = [];
   let rootRef: ComAtprotoRepoStrongRef.Main | undefined = opts.replyRoot;
@@ -242,6 +243,7 @@ async function postThread(
         rootRef = { uri: result.uri, cid: result.cid };
       }
       parentRef = { uri: result.uri, cid: result.cid };
+      onPosted(parentRef);
     } catch (err: unknown) {
       // Partial failure: save remaining posts as draft
       const remaining = posts.slice(i);
@@ -612,18 +614,20 @@ export function registerCreateThread(program: Command): void {
 
         // SIGINT trap during posting
         let sigintHandler: (() => void) | undefined;
-        let postingIndex = 0;
+        let sentCount = 0;
+        let lastUri = replyRef?.uri;
 
         if (stdin.isTTY) {
           sigintHandler = () => {
             process.once("SIGINT", () => process.exit(130));
             (async () => {
-              const remaining = postsWithMedia.slice(postingIndex);
+              const remaining = postsWithMedia.slice(sentCount);
               const draft = await saveDraft(
                 {
                   type: "thread",
                   text,
                   reason: "manual",
+                  replyUri: lastUri,
                   posts: remaining.map((p) => ({
                     text: p.text,
                     images: p.images,
@@ -649,6 +653,10 @@ export function registerCreateThread(program: Command): void {
             { replyTo: replyRef, replyRoot: rootRef, quote: quoteRef },
             profile,
             text,
+            (sent) => {
+              sentCount++;
+              lastUri = sent.uri;
+            },
           );
 
           if (json) {

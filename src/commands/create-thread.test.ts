@@ -525,3 +525,62 @@ describe("create-thread: partial failure", () => {
     exitSpy.mockRestore();
   });
 });
+
+describe("create-thread: Ctrl+C partway", () => {
+  const first = "at://did:plc:me/app.bsky.feed.post/1";
+  const text = Array.from({ length: 3 }, (_, i) => `${"word ".repeat(55)}post ${i + 1}.`).join(" ");
+
+  /** Sends `going` posts, is interrupted while sending the next, and returns the draft that leaves. */
+  async function interrupted(going: number, ...flags: string[]) {
+    const tty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      if (code === 0) return undefined as never;
+      throw new Error("stopped");
+    }) as never);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const others = process.listeners("SIGINT");
+    let stop!: (reason: Error) => void;
+    mockAgent.post.mockReset();
+    if (going > 0) mockAgent.post.mockResolvedValueOnce({ uri: first, cid: "c1" });
+    mockAgent.post.mockImplementationOnce(() => {
+      const trap = process.listeners("SIGINT").find((l) => !others.includes(l));
+      (trap as () => void)();
+      return new Promise((_, reject) => (stop = reject));
+    });
+    try {
+      const running = createProgram()
+        .parseAsync(["node", "test", "create-thread", text, "--no-preview", ...flags])
+        .catch(() => {});
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+      const saved = mockSaveDraft.mock.calls[0][0];
+      stop(new Error("stopped"));
+      await running;
+      return saved;
+    } finally {
+      if (tty) Object.defineProperty(process.stdin, "isTTY", tty);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+      vi.restoreAllMocks();
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSaveDraft.mockResolvedValue({ id: "1741392000000-a7f3" });
+  });
+
+  it("saves only what's left, replying to the post that went", async () => {
+    const saved = await interrupted(1);
+    expect(saved.replyUri).toBe(first);
+    expect(saved.posts.length).toBeGreaterThan(0);
+    expect(saved.posts.map((p: { text: string }) => p.text)).not.toContain(mockAgent.post.mock.calls[0][0].text);
+  });
+
+  it("keeps the post it replies to if none has gone", async () => {
+    const parent = "at://did:plc:them/app.bsky.feed.post/9";
+    mockAgent.com.atproto.repo.getRecord.mockResolvedValue({ data: { uri: parent, cid: "c9", value: {} } });
+    const saved = await interrupted(0, "--reply-to", parent);
+    expect(saved.replyUri).toBe(parent);
+    expect(saved.posts[0].text).toBe(mockAgent.post.mock.calls[0][0].text);
+  });
+});
