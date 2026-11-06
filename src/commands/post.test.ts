@@ -14,6 +14,7 @@ vi.mock("@/index", () => ({
 const mockSaveDraft = vi.fn().mockResolvedValue({ id: "1741392000000-a7f3" });
 vi.mock("@/drafts", () => ({
   saveDraft: (...args: unknown[]) => mockSaveDraft(...args),
+  listDrafts: async () => [],
 }));
 
 // Mock node:fs/promises for file read operations

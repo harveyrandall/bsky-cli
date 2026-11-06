@@ -18,6 +18,7 @@ const mockDeleteDraft = vi.fn();
 vi.mock("@/drafts", () => ({
   saveDraft: (...args: unknown[]) => mockSaveDraft(...args),
   deleteDraft: (...args: unknown[]) => mockDeleteDraft(...args),
+  listDrafts: async () => [],
 }));
 
 // Mock node:fs/promises for file read operations
