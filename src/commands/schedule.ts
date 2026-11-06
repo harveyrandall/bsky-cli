@@ -29,6 +29,7 @@ import {
   disableScheduler,
   getSchedulerStatus,
   uninstallScheduler,
+  trimSchedulerLog,
 } from "@/lib/scheduler";
 import {
   buildRRule,
@@ -611,6 +612,7 @@ To automate posting, you can:
     .command("run")
     .description("Post all scheduled posts that are due (for use with cron)")
     .action(async () => {
+      trimSchedulerLog();
       await postDueItems(program);
     });
 

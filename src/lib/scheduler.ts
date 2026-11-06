@@ -16,8 +16,32 @@ const LAUNCHD_PLIST = join(
 );
 const SCHTASKS_NAME = "BskyCLI\\ScheduleRun";
 
-export function resolveBskyPath(): string {
-  return resolve(process.argv[1]);
+/**
+ * What runs this CLI, in full. A scheduled job has no PATH, so an npm install's
+ * `#!/usr/bin/env node` can't find Node. A compiled binary is its own runtime, and
+ * its argv[1] is a path inside it, which nothing outside can run.
+ */
+export function bskyCommand(): string[] {
+  // execPath has symlinks resolved, and a Homebrew upgrade removes the versioned folder they lead to
+  const runtime = process.execPath.replace(/\/Cellar\/([^/]+)\/[^/]+\//, "/opt/$1/");
+  const interpreted = /(^|[\\/])(node|bun)[^\\/]*$/i.test(runtime);
+  return interpreted ? [runtime, resolve(process.argv[1])] : [runtime];
+}
+
+const MOST_LOG_BYTES = 1_000_000;
+const KEPT_LOG_BYTES = 256_000;
+
+/** The job's log only ever grows, and a job that's failing grows it by the minute. */
+export function trimSchedulerLog(): void {
+  const path = join(bskyDir(), "scheduler.log");
+  try {
+    const log = readFileSync(path);
+    if (log.length <= MOST_LOG_BYTES) return;
+    // In place: this run's own output is going to this file, so replacing it would lose that
+    writeFileSync(path, log.subarray(log.indexOf("\n", log.length - KEPT_LOG_BYTES) + 1));
+  } catch {
+    // No log yet, or it can't be touched: neither matters to the job
+  }
 }
 
 // ── Linux (crontab) ──────────────────────────────────────────────────
@@ -34,7 +58,7 @@ function writeCrontab(content: string): void {
   execFileSync("crontab", ["-"], { input: content, encoding: "utf-8" });
 }
 
-function enableLinux(interval: number, bskyPath: string, profile?: string): void {
+function enableLinux(interval: number, command: string[], profile?: string): void {
   const existing = readCrontab();
   const filtered = existing
     .split("\n")
@@ -42,7 +66,9 @@ function enableLinux(interval: number, bskyPath: string, profile?: string): void
     .join("\n");
   const profileFlag = profile ? ` -p '${profile}'` : "";
   const cronExpr = interval === 1 ? "* * * * *" : `*/${interval} * * * *`;
-  const newLine = `${cronExpr} ${bskyPath} schedule run${profileFlag} ${CRONTAB_MARKER}`;
+  const quote = (text: string) => `'${text.replace(/'/g, "'\\''")}'`;
+  const configHome = process.env.XDG_CONFIG_HOME ? `XDG_CONFIG_HOME=${quote(process.env.XDG_CONFIG_HOME)} ` : "";
+  const newLine = `${cronExpr} ${configHome}${command.map(quote).join(" ")} schedule run${profileFlag} ${CRONTAB_MARKER}`;
   const updated = filtered.trimEnd() + "\n" + newLine + "\n";
   writeCrontab(updated);
 }
@@ -77,12 +103,20 @@ function uninstallLinux(): void {
 
 // ── macOS (launchd) ──────────────────────────────────────────────────
 
-function buildPlist(interval: number, bskyPath: string, profile?: string): string {
-  const args = [bskyPath, "schedule", "run"];
+function buildPlist(interval: number, command: string[], profile?: string): string {
+  const args = [...command, "schedule", "run"];
   if (profile) args.push("--profile", profile);
 
   const argsXml = args.map((a) => `        <string>${a}</string>`).join("\n");
   const logPath = join(bskyDir(), "scheduler.log");
+  const configHome = process.env.XDG_CONFIG_HOME
+    ? `    <key>EnvironmentVariables</key>
+    <dict>
+        <key>XDG_CONFIG_HOME</key>
+        <string>${process.env.XDG_CONFIG_HOME}</string>
+    </dict>
+`
+    : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -94,7 +128,7 @@ function buildPlist(interval: number, bskyPath: string, profile?: string): strin
     <array>
 ${argsXml}
     </array>
-    <key>StartInterval</key>
+${configHome}    <key>StartInterval</key>
     <integer>${interval * 60}</integer>
     <key>RunAtLoad</key>
     <true/>
@@ -107,7 +141,7 @@ ${argsXml}
 `;
 }
 
-function enableMacOS(interval: number, bskyPath: string, profile?: string): void {
+function enableMacOS(interval: number, command: string[], profile?: string): void {
   // Unload first if already loaded (ignore errors)
   if (existsSync(LAUNCHD_PLIST)) {
     try {
@@ -117,7 +151,7 @@ function enableMacOS(interval: number, bskyPath: string, profile?: string): void
     }
   }
 
-  writeFileSync(LAUNCHD_PLIST, buildPlist(interval, bskyPath, profile));
+  writeFileSync(LAUNCHD_PLIST, buildPlist(interval, command, profile));
   execFileSync("launchctl", ["load", LAUNCHD_PLIST]);
 }
 
@@ -152,9 +186,9 @@ function uninstallMacOS(): void {
 
 // ── Windows (schtasks) ───────────────────────────────────────────────
 
-function enableWindows(interval: number, bskyPath: string, profile?: string): void {
+function enableWindows(interval: number, command: string[], profile?: string): void {
   const profileFlag = profile ? ` -p "${profile}"` : "";
-  const cmd = `"${bskyPath}" schedule run${profileFlag}`;
+  const cmd = `${command.map((part) => `"${part}"`).join(" ")} schedule run${profileFlag}`;
   execFileSync("schtasks", [
     "/create",
     "/tn",
@@ -203,14 +237,15 @@ export function enableScheduler(interval: number, profile?: string): void {
   if (profile && !/^[\w.-]+$/.test(profile)) {
     throw new Error(`Can't schedule for profile "${profile}": use letters, digits, ".", "_" and "-"`);
   }
-  const bskyPath = resolveBskyPath();
+  const command = bskyCommand();
+  trimSchedulerLog();
   switch (process.platform) {
     case "linux":
-      return enableLinux(interval, bskyPath, profile);
+      return enableLinux(interval, command, profile);
     case "darwin":
-      return enableMacOS(interval, bskyPath, profile);
+      return enableMacOS(interval, command, profile);
     case "win32":
-      return enableWindows(interval, bskyPath, profile);
+      return enableWindows(interval, command, profile);
     default:
       unsupported();
   }
