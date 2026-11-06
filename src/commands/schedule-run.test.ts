@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
 import { getClient } from "@/index";
 import { createPost } from "@/commands/post";
 import { registerSchedule } from "@/commands/schedule";
+import { bskyDir } from "@/config";
 import { saveScheduledPost, scheduledDir } from "@/scheduled";
 import type { ScheduledPost } from "@/lib/types";
 
@@ -245,6 +246,16 @@ describe("schedule run, on real files", () => {
       await run(undefined, "list");
       expect(logged).toEqual([]);
     });
+  });
+
+  it("cuts the job's log first, so a run that fails still does", async () => {
+    await queued();
+    const log = join(bskyDir(), "scheduler.log");
+    writeFileSync(log, "a line from the job\n".repeat(100_000));
+    rmSync(scheduledDir(), { recursive: true });
+    writeFileSync(scheduledDir(), "a file where the folder should be");
+    await expect(run()).rejects.toThrow();
+    expect(statSync(log).size).toBeLessThan(300_000);
   });
 
   it("fails rather than call an unreadable queue empty", async () => {

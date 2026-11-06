@@ -109,8 +109,8 @@ describe("Linux (crontab)", () => {
     };
 
     it("passes the config folder on, as a job doesn't get the shell's environment", () => {
-      vi.stubEnv("XDG_CONFIG_HOME", "/home/me/my config");
-      expect(crontabLine()).toContain("* * * * * XDG_CONFIG_HOME='/home/me/my config' '/usr/bin/node'");
+      vi.stubEnv("XDG_CONFIG_HOME", "/home/o'brien/my config");
+      expect(crontabLine()).toContain("* * * * * XDG_CONFIG_HOME='/home/o'\\''brien/my config' '/usr/bin/node'");
     });
     it("sets nothing when the folder is the default one", () => {
       vi.stubEnv("XDG_CONFIG_HOME", "");
@@ -265,6 +265,11 @@ describe("macOS (launchd)", () => {
     it("sets nothing when the folder is the default one", () => {
       vi.stubEnv("XDG_CONFIG_HOME", "");
       expect(plist()).not.toContain("EnvironmentVariables");
+    });
+    it("cuts the log, as a job that can't start never gets to", () => {
+      vi.mocked(readFileSync).mockReturnValue(Buffer.from("a line from the job\n".repeat(100_000)) as never);
+      plist();
+      expect(writeFileSync).toHaveBeenCalledWith(expect.stringContaining("scheduler.log"), expect.anything());
     });
     it("runs Node with the script, so the job doesn't need a PATH", () => {
       expect(plist()).toMatch(/<string>\/usr\/bin\/node<\/string>\s*<string>\/usr\/local\/bin\/bsky<\/string>\s*<string>schedule<\/string>/);
