@@ -69,16 +69,17 @@ function warnAboutClaim({ id, path, text, rrule }: ClaimedPost): void {
   if (rrule) console.error("It repeats: deleting it ends the series. To keep the series without sending this one again, change its scheduledAt to the next date first.");
 }
 
-async function postDueItems(program: Command): Promise<number> {
+async function postDueItems(program: Command): Promise<{ posted: number; failed: number }> {
   const profile = program.opts().profile;
   for (const claim of await claimedPosts(profile)) if (claim.stale) warnAboutClaim(claim);
   const posts = await listScheduledPosts(profile);
   const due = posts.filter((p) => new Date(p.scheduledAt) <= new Date());
 
-  if (due.length === 0) return 0;
+  if (due.length === 0) return { posted: 0, failed: 0 };
 
   const agent = await getClient(program);
   let posted = 0;
+  let failed = 0;
 
   for (const listed of due) {
     let post: ScheduledPost | undefined;
@@ -87,6 +88,7 @@ async function postDueItems(program: Command): Promise<number> {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Couldn't take ${listed.id} from the queue, so it wasn't sent: ${msg}`);
+      failed++;
       continue;
     }
     if (!post) continue;
@@ -102,6 +104,7 @@ async function postDueItems(program: Command): Promise<number> {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Failed to post ${post.id}: ${msg}`);
+      failed++;
       const { id } = post;
       await releaseScheduledPost(id, profile).catch((back: unknown) => {
         const reason = back instanceof Error ? back.message : String(back);
@@ -126,7 +129,7 @@ async function postDueItems(program: Command): Promise<number> {
     }
   }
 
-  return posted;
+  return { posted, failed };
 }
 
 /**
@@ -613,7 +616,9 @@ To automate posting, you can:
     .description("Post all scheduled posts that are due (for use with cron)")
     .action(async () => {
       trimSchedulerLog();
-      await postDueItems(program);
+      const { posted, failed } = await postDueItems(program);
+      // Posts taken by an overlapping run aren't failures
+      if (posted === 0 && failed > 0) process.exitCode = 1;
     });
 
   // ── schedule watch ────────────────────────────────────────────
@@ -633,9 +638,9 @@ To automate posting, you can:
           protect: true,
         },
         async () => {
-          const count = await postDueItems(program);
-          if (count > 0) {
-            console.error(`Posted ${count} item(s).`);
+          const { posted } = await postDueItems(program);
+          if (posted > 0) {
+            console.error(`Posted ${posted} item(s).`);
           }
         },
       );
