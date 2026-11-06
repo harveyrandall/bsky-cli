@@ -313,7 +313,7 @@ bsky schedule enable --interval 5     # every 5 minutes
 |------|-------------|
 | `--interval <minutes>` | Check interval in minutes (default: 1) |
 
-The job names the Node (or Bun) and the script you enabled it with in full, and keeps your `XDG_CONFIG_HOME`, as a scheduled job gets neither your `PATH` nor your shell's variables. Run `bsky schedule enable` again after changing any of them, such as moving to another Node version with nvm, and to repair a job set up by version 1.9.1 or earlier.
+A scheduled job gets neither your `PATH` nor your shell's variables, so it names the Node (or Bun) and the script you enabled it with in full. On Linux and macOS it also keeps your `XDG_CONFIG_HOME`. A Windows task only sees variables you've saved, such as with `setx`. Run `bsky schedule enable` again after changing any of these, such as moving to another Node version with nvm, and to repair a job set up by version 1.9.1 or earlier.
 
 On macOS the job writes to `scheduler.log` in the config folder, which is cut down to its newest 256 KB once it passes 1 MB.
 
