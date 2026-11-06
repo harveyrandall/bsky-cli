@@ -21,6 +21,7 @@ vi.mock("@/drafts", () => ({
   listDrafts: (...args: unknown[]) => mockListDrafts(...args),
   loadDraft: (...args: unknown[]) => mockLoadDraft(...args),
   deleteDraft: (...args: unknown[]) => mockDeleteDraft(...args),
+  updateDraft: vi.fn(),
   resolveDraftId: (...args: unknown[]) => mockResolveDraftId(...args),
 }));
 

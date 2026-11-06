@@ -11,16 +11,79 @@ import {
   listDrafts,
   loadDraft,
   deleteDraft,
+  updateDraft,
   resolveDraftId,
 } from "@/drafts";
 import { createPost, isNetworkError } from "@/commands/post";
 import { graphemeLength } from "@/lib/split-thread";
 import { outputJson } from "@/lib/format";
+import type { Draft } from "@/lib/types";
 
 function reasonTag(reason: string): string {
   if (reason === "network") return ` ${chalk.yellow("[offline]")}`;
   if (reason === "length") return ` ${chalk.red("[too long]")}`;
   return "";
+}
+
+/**
+ * Sends a thread draft in order. After each post the draft holds only what's left,
+ * replying to that post, so sending it again carries on rather than repeating any.
+ */
+async function sendThreadDraft(
+  agent: Awaited<ReturnType<typeof getClient>>,
+  draft: Draft,
+  profile?: string,
+): Promise<string[]> {
+  let rootRef: ComAtprotoRepoStrongRef.Main | undefined;
+  let parentRef: ComAtprotoRepoStrongRef.Main | undefined;
+
+  if (draft.replyUri) {
+    const replyParts = draft.replyUri.split("/");
+    const replyRecord = await agent.com.atproto.repo.getRecord({
+      repo: replyParts[2],
+      collection: replyParts[replyParts.length - 2],
+      rkey: replyParts[replyParts.length - 1],
+    });
+
+    parentRef = { uri: replyRecord.data.uri, cid: replyRecord.data.cid! };
+    const parentValue = replyRecord.data.value as AppBskyFeedPost.Record;
+    rootRef = (parentValue.reply?.root ?? parentRef) as ComAtprotoRepoStrongRef.Main;
+  }
+
+  const posts = draft.posts ?? [];
+  const uris: string[] = [];
+  for (const [i, post] of posts.entries()) {
+    let sent: ComAtprotoRepoStrongRef.Main;
+    try {
+      sent = await createPost(agent, post.text, {
+        reply: parentRef,
+        replyRoot: rootRef,
+        images: post.images,
+        imageAlts: post.imageAlts,
+        video: post.video,
+        videoAlt: post.videoAlt,
+      });
+    } catch (err: unknown) {
+      if (uris.length > 0) {
+        console.error(`Posted ${uris.length}/${posts.length} before failing:`);
+        for (const uri of uris) console.error(`  ${uri}`);
+        console.error(`Draft ${draft.id} now holds the other ${posts.length - uris.length}, and sending it carries on from there.`);
+      }
+      if (isNetworkError(err)) console.error("The next post may already have gone, so check before sending it.");
+      throw err;
+    }
+
+    uris.push(sent.uri);
+    rootRef ??= sent;
+    parentRef = sent;
+    try {
+      updateDraft({ ...draft, replyUri: sent.uri, posts: posts.slice(i + 1) }, profile);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Posted ${uris.length}/${posts.length}, but couldn't update draft ${draft.id}, so sending it again would repeat them: ${msg}`);
+    }
+  }
+  return uris;
 }
 
 export async function syncNetworkDrafts(
@@ -47,47 +110,10 @@ export async function syncNetworkDrafts(
 
   for (const draft of pending) {
     try {
-      // Thread draft: post each split post sequentially
       if (draft.type === "thread" && draft.posts) {
-        let rootRef: ComAtprotoRepoStrongRef.Main | undefined;
-        let parentRef: ComAtprotoRepoStrongRef.Main | undefined;
-
-        if (draft.replyUri) {
-          const replyParts = draft.replyUri.split("/");
-          const replyRkey = replyParts[replyParts.length - 1];
-          const replyCollection = replyParts[replyParts.length - 2];
-          const replyDid = replyParts[2];
-
-          const replyRecord = await agent.com.atproto.repo.getRecord({
-            repo: replyDid,
-            collection: replyCollection,
-            rkey: replyRkey,
-          });
-
-          parentRef = { uri: replyRecord.data.uri, cid: replyRecord.data.cid! };
-          const parentValue = replyRecord.data.value as AppBskyFeedPost.Record;
-          rootRef = (parentValue.reply?.root ?? parentRef) as ComAtprotoRepoStrongRef.Main;
-        }
-
-        for (let i = 0; i < draft.posts.length; i++) {
-          const post = draft.posts[i];
-          const result = await createPost(agent, post.text, {
-            reply: parentRef,
-            replyRoot: rootRef,
-            images: post.images,
-            imageAlts: post.imageAlts,
-            video: post.video,
-            videoAlt: post.videoAlt,
-          });
-
-          if (i === 0 && !rootRef) {
-            rootRef = { uri: result.uri, cid: result.cid };
-          }
-          parentRef = { uri: result.uri, cid: result.cid };
-        }
-
+        const uris = await sendThreadDraft(agent, draft, profile);
         await deleteDraft(draft.id, profile);
-        console.error(`  Sent thread: ${draft.posts.length} posts (${draft.id})`);
+        console.error(`  Sent thread: ${uris.length} posts (${draft.id})`);
         continue;
       }
 
@@ -318,50 +344,8 @@ export function registerDrafts(program: Command): void {
         };
       }
 
-      // Thread draft: post each split post sequentially
       if (draft.type === "thread" && draft.posts) {
-        let rootRef: ComAtprotoRepoStrongRef.Main | undefined;
-        let parentRef: ComAtprotoRepoStrongRef.Main | undefined;
-
-        // Resume from replyUri if set (partial failure recovery)
-        if (draft.replyUri) {
-          const replyParts = draft.replyUri.split("/");
-          const replyRkey = replyParts[replyParts.length - 1];
-          const replyCollection = replyParts[replyParts.length - 2];
-          const replyDid = replyParts[2];
-
-          const replyRecord = await agent.com.atproto.repo.getRecord({
-            repo: replyDid,
-            collection: replyCollection,
-            rkey: replyRkey,
-          });
-
-          parentRef = { uri: replyRecord.data.uri, cid: replyRecord.data.cid! };
-          const parentValue = replyRecord.data.value as AppBskyFeedPost.Record;
-          rootRef = (parentValue.reply?.root ?? parentRef) as ComAtprotoRepoStrongRef.Main;
-        }
-
-        const uris: string[] = [];
-        for (let i = 0; i < draft.posts.length; i++) {
-          const post = draft.posts[i];
-          const postOpts: Parameters<typeof createPost>[2] = {
-            reply: parentRef,
-            replyRoot: rootRef,
-            images: post.images,
-            imageAlts: post.imageAlts,
-            video: post.video,
-            videoAlt: post.videoAlt,
-          };
-
-          const result = await createPost(agent, post.text, postOpts);
-          uris.push(result.uri);
-
-          if (i === 0 && !rootRef) {
-            rootRef = { uri: result.uri, cid: result.cid };
-          }
-          parentRef = { uri: result.uri, cid: result.cid };
-        }
-
+        const uris = await sendThreadDraft(agent, draft, profile);
         for (const uri of uris) console.log(uri);
         await deleteDraft(id, profile);
         console.error(`Thread draft ${id} published (${uris.length} posts) and removed.`);
