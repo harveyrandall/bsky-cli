@@ -29,6 +29,7 @@ const mockCreatePost = vi.fn();
 vi.mock("@/commands/post", () => ({
   createPost: (...args: unknown[]) => mockCreatePost(...args),
   isNetworkError: vi.fn(() => false),
+  isLengthError: vi.fn(() => false),
 }));
 
 import { registerDrafts, syncNetworkDrafts } from "./draft";

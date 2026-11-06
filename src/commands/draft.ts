@@ -14,7 +14,7 @@ import {
   updateDraft,
   resolveDraftId,
 } from "@/drafts";
-import { createPost, isNetworkError } from "@/commands/post";
+import { createPost, isLengthError, isNetworkError } from "@/commands/post";
 import { graphemeLength } from "@/lib/split-thread";
 import { outputJson } from "@/lib/format";
 import type { Draft } from "@/lib/types";
@@ -89,6 +89,15 @@ async function sendThreadDraft(
     }
   }
   return uris;
+}
+
+/** A draft that's too long won't go however often it's tried, so it stops being offered. */
+async function stopOffering(id: string, profile?: string): Promise<void> {
+  try {
+    updateDraft({ ...(await loadDraft(id, profile)), reason: "length" }, profile);
+  } catch {
+    // It's offered again next time, and nothing else depends on this
+  }
 }
 
 export async function syncNetworkDrafts(
@@ -179,6 +188,7 @@ export async function syncNetworkDrafts(
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  Failed (${draft.id}): ${msg}`);
+      if (isLengthError(err)) await stopOffering(draft.id, profile);
     }
   }
 }

@@ -216,6 +216,33 @@ describe("sending a thread draft, on real files", () => {
       expect(await listDrafts()).toEqual([]);
     }));
 
+  it("stops offering a draft the server says is too long", () =>
+    inTerminal(async () => {
+      const { id } = await saveDraft({ type: "post", reason: "network", text: "far too long" });
+      vi.mocked(createPost).mockRejectedValue(new Error("Record/text must not be longer than 300 graphemes"));
+
+      await syncNetworkDrafts(agent);
+      expect((await loadDraft(id)).reason).toBe("length");
+
+      vi.mocked(createPost).mockClear();
+      await syncNetworkDrafts(agent);
+      expect(createPost).not.toHaveBeenCalled();
+    }));
+
+  it("doesn't undo a partial send when a later post of a thread is too long", () =>
+    inTerminal(async () => {
+      const { id } = await thread("network");
+      vi.mocked(createPost)
+        .mockResolvedValueOnce({ uri: uri(1), cid: "c" })
+        .mockRejectedValueOnce(new Error("Record/text must not be longer than 300 graphemes"));
+
+      await syncNetworkDrafts(agent);
+
+      const left = await loadDraft(id);
+      expect(left.reason).toBe("length");
+      expect(left.posts?.map((p) => p.text)).toEqual(["two", "three"]);
+    }));
+
   it("doesn't send a draft again that signing in has just sent", () =>
     inTerminal(async () => {
       const { id } = await thread("network");
