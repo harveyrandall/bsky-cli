@@ -22,10 +22,10 @@ const TRANSPORT_WORDS = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/;
 
 /** True for transport failures (offline, DNS, refused, cut off, timed out); the request may or may not have arrived. */
 export function isNetworkError(err: unknown): boolean {
-  if ((err as { status?: unknown } | null | undefined)?.status === NO_RESPONSE) return true;
   const seen = new Set<unknown>();
   for (let e = err; e instanceof Error && !seen.has(e); e = e.cause) {
     seen.add(e);
+    if ((e as { status?: unknown }).status === NO_RESPONSE) return true;
     if (TRANSPORT_WORDS.test(e.message) || TRANSPORT_CODES.has((e as NodeJS.ErrnoException).code ?? "")) return true;
   }
   return false;
