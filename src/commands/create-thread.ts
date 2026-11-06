@@ -279,7 +279,7 @@ async function postThread(
       console.error(`Remaining ${remaining.length} post(s) saved as draft: ${draft.id}`);
 
       if (reason === "network") {
-        console.error("They will be sent automatically next time you're online.");
+        console.error("The first may already have gone, so check before sending them. You'll be asked next time you're online.");
       }
 
       process.exit(1);

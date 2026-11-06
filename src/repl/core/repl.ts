@@ -1258,7 +1258,8 @@ export class Repl {
     if ((f.kind === "network" || f.kind === "limited") && f.draftId === undefined) {
       this.deps.print(`${why} (${f.message}). It's still queued: /retry to send it, Esc to cancel.`, "error");
     } else if (f.kind === "network" || f.kind === "limited") {
-      this.deps.print(`${why}; saved as draft ${f.draftId}. /retry to send it ${f.kind === "limited" ? "later" : "now"}.`, "error");
+      const check = f.kind === "limited" ? "" : " It may already have gone, so check first.";
+      this.deps.print(`${why}; saved as draft ${f.draftId}.${check} /retry to send it ${f.kind === "limited" ? "later" : "now"}.`, "error");
     } else if (f.kind === "expired") {
       this.deps.print("Session expired — exit and reopen the REPL, or run `bsky login` if that fails", "error");
       if (f.draftId) this.deps.print(`Unsent posts are saved as draft ${f.draftId}.`, "dim");

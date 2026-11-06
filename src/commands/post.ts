@@ -258,8 +258,8 @@ async function executeOrDraft(
 
     if (isNetworkError(err)) {
       const draft = await saveDraft({ ...draftData, reason: "network" }, profile);
-      console.error(`Network error. Post saved as draft: ${draft.id}`);
-      console.error("It will be sent automatically next time you're online.");
+      console.error(`Network error (${err instanceof Error ? err.message : String(err)}). Post saved as draft: ${draft.id}`);
+      console.error("It may already have gone, so check before sending it. You'll be asked next time you're online.");
       process.exit(1);
     }
 

@@ -289,7 +289,7 @@ describe("a session's tokens", () => {
     vi.stubGlobal("fetch", async () => {
       throw new Error("Was there a typo in the url or port?"); // Bun's, which release binaries are built with
     });
-    await expect(createClient(session)).rejects.toThrow(`Couldn't sign in at ${HOST}: Was there a typo`);
+    await expect(createClient(session)).rejects.toThrow(`Can't reach ${HOST}: Was there a typo`);
   });
   it("stay as they were if the server can't be reached, even if the file has moved on", async () => {
     const session = loggedIn();

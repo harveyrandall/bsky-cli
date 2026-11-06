@@ -517,7 +517,7 @@ describe("create-thread: partial failure", () => {
     );
 
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining("automatically next time"),
+      expect.stringContaining("may already have gone"),
     );
 
     logSpy.mockRestore();
