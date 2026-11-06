@@ -373,11 +373,12 @@ export function registerReply(program: Command): void {
     .option("--draft", "Save as draft instead of publishing")
     .action(async (uri: string, textParts: string[], opts: { draft?: boolean }) => {
       const text = textParts.join(" ");
+      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
 
-      const draftData: Omit<Draft, "id" | "createdAt" | "reason"> = {
+      const draftData: DraftData = {
         type: "reply",
         text,
-        replyUri: uri,
+        replyUri: atUri,
       };
 
       if (opts.draft) {
@@ -386,7 +387,6 @@ export function registerReply(program: Command): void {
       }
 
       // Fetch parent post
-      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
       const parts = atUri.split("/");
       const rkey = parts[parts.length - 1];
       const collection = parts[parts.length - 2];
@@ -426,11 +426,12 @@ export function registerQuote(program: Command): void {
     .option("--draft", "Save as draft instead of publishing")
     .action(async (uri: string, textParts: string[], opts: { draft?: boolean }) => {
       const text = textParts.join(" ");
+      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
 
-      const draftData: Omit<Draft, "id" | "createdAt" | "reason"> = {
+      const draftData: DraftData = {
         type: "quote",
         text,
-        quoteUri: uri,
+        quoteUri: atUri,
       };
 
       if (opts.draft) {
@@ -438,7 +439,6 @@ export function registerQuote(program: Command): void {
         return;
       }
 
-      const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
       const parts = atUri.split("/");
       const rkey = parts[parts.length - 1];
       const collection = parts[parts.length - 2];

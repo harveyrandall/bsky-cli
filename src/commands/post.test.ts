@@ -621,6 +621,16 @@ describe("with no connection", () => {
     expect(mockSaveDraft).toHaveBeenCalledWith(expect.objectContaining({ type: "reply", replyUri: parent, reason: "network" }), undefined);
   });
 
+  it("saves a short URI in full, as the draft's sender needs one", async () => {
+    vi.mocked(getClient).mockRejectedValue(offline());
+    await expect(run(registerReply, "reply", "abc/app.bsky.feed.post/xyz", "hi")).rejects.toThrow("exit 1");
+    await expect(run(registerQuote, "quote", "abc/app.bsky.feed.post/xyz", "hi")).rejects.toThrow("exit 1");
+
+    const full = "at://did:plc:abc/app.bsky.feed.post/xyz";
+    expect(mockSaveDraft.mock.calls[0][0].replyUri).toBe(full);
+    expect(mockSaveDraft.mock.calls[1][0].quoteUri).toBe(full);
+  });
+
   it("keeps a quote, whether signing in or finding the post failed", async () => {
     vi.mocked(getClient).mockRejectedValueOnce(offline());
     await expect(run(registerQuote, "quote", parent, "hi")).rejects.toThrow("exit 1");
