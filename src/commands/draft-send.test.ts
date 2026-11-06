@@ -52,6 +52,23 @@ describe("sending a thread draft, on real files", () => {
     });
   };
   const sent = () => vi.mocked(createPost).mock.calls.map(([, text]) => text);
+  /** As in a terminal, where the sync asks before sending and is answered yes. */
+  const inTerminal = async (run: () => Promise<void>) => {
+    const stdin = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    try {
+      await run();
+    } finally {
+      if (stdin) Object.defineProperty(process.stdin, "isTTY", stdin);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
+  };
+  /** Signing in sends offline drafts first, as the real one does. */
+  const signingInSyncs = () =>
+    vi.mocked(getClient).mockImplementationOnce(async () => {
+      await syncNetworkDrafts(agent);
+      return agent;
+    });
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "bsky-draft-"));
@@ -152,10 +169,8 @@ describe("sending a thread draft, on real files", () => {
     expect(sent()).toEqual(["one"]);
   });
 
-  it("does the same when offline drafts are sent", async () => {
-    const stdin = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
-    try {
+  it("does the same when offline drafts are sent", () =>
+    inTerminal(async () => {
       const { id } = await thread("network");
       sending("two");
       await syncNetworkDrafts(agent);
@@ -167,9 +182,29 @@ describe("sending a thread draft, on real files", () => {
       await syncNetworkDrafts(agent);
       expect(sent()).toEqual(["two", "three"]);
       expect(await listDrafts()).toEqual([]);
-    } finally {
-      if (stdin) Object.defineProperty(process.stdin, "isTTY", stdin);
-      else delete (process.stdin as { isTTY?: boolean }).isTTY;
-    }
-  });
+    }));
+
+  it("doesn't send a draft again that signing in has just sent", () =>
+    inTerminal(async () => {
+      const { id } = await thread("network");
+      sending();
+      signingInSyncs();
+      await send(id);
+      expect(sent()).toEqual(["one", "two", "three"]);
+      expect(await listDrafts()).toEqual([]);
+      expect(errors.join("\n")).toContain(`Draft ${id} has already gone`);
+    }));
+
+  it("carries on from what signing in got through", () =>
+    inTerminal(async () => {
+      const { id } = await thread("network");
+      vi.mocked(createPost)
+        .mockResolvedValueOnce({ uri: uri(1), cid: "c" })
+        .mockRejectedValueOnce(new Error("server said no"))
+        .mockResolvedValue({ uri: uri(2), cid: "c" });
+      signingInSyncs();
+      await send(id);
+      expect(sent()).toEqual(["one", "two", "two", "three"]);
+      expect(await listDrafts()).toEqual([]);
+    }));
 });

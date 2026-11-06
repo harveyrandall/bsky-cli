@@ -290,8 +290,16 @@ export function registerDrafts(program: Command): void {
     .action(async (partialId: string) => {
       const profile = program.opts().profile;
       const id = await resolveDraftId(partialId, profile);
-      const draft = await loadDraft(id, profile);
+      // Signing in can send offline drafts, this one among them, so read it afterwards
       const agent = await getClient(program);
+      const draft = await loadDraft(id, profile).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === "ENOENT") return undefined;
+        throw err;
+      });
+      if (!draft) {
+        console.error(`Draft ${id} has already gone.`);
+        return;
+      }
 
       const opts: Parameters<typeof createPost>[2] = {
         images: draft.images,
