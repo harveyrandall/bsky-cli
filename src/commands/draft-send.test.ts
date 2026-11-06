@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
@@ -154,19 +154,25 @@ describe("sending a thread draft, on real files", () => {
     expect(errors.join("\n")).toContain("may already have gone");
   });
 
-  it("stops, and says not to send it again, if the draft can't be updated", async () => {
+  /** Something in the temp file's place: the update fails while deleting still works, as on a full disk. */
+  const blockUpdates = (id: string) => mkdirSync(join(bskyDir(), "drafts", `${id}.json.${process.pid}.tmp`));
+
+  it("stops if the draft can't be updated, listing what went", async () => {
     const { id } = await thread();
-    const folder = join(bskyDir(), "drafts");
-    vi.mocked(createPost).mockImplementation(async () => {
-      chmodSync(folder, 0o555);
-      return { uri: uri(1), cid: "c" };
-    });
-    try {
-      await expect(send(id)).rejects.toThrow(/Posted 1\/3.*couldn't update draft/);
-    } finally {
-      chmodSync(folder, 0o755);
-    }
+    blockUpdates(id);
+    sending();
+    await expect(send(id)).rejects.toThrow(`Couldn't update draft ${id}, so sending it again would repeat the last post above`);
     expect(sent()).toEqual(["one"]);
+    expect(errors.join("\n")).toContain("Posted 1/3");
+    expect(errors.join("\n")).toContain(uri(1));
+  });
+
+  it("finishes a thread when only the last update would fail, as that needs none", async () => {
+    const { id } = await saveDraft({ type: "thread", reason: "manual", text: "one", posts: [{ text: "one" }] });
+    blockUpdates(id);
+    sending();
+    await send(id);
+    expect(await listDrafts()).toEqual([]);
   });
 
   it("does the same when offline drafts are sent", () =>

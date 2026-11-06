@@ -52,6 +52,10 @@ async function sendThreadDraft(
 
   const posts = draft.posts ?? [];
   const uris: string[] = [];
+  const listPosted = () => {
+    console.error(`Posted ${uris.length}/${posts.length} before failing:`);
+    for (const uri of uris) console.error(`  ${uri}`);
+  };
   for (const [i, post] of posts.entries()) {
     let sent: ComAtprotoRepoStrongRef.Main;
     try {
@@ -65,8 +69,7 @@ async function sendThreadDraft(
       });
     } catch (err: unknown) {
       if (uris.length > 0) {
-        console.error(`Posted ${uris.length}/${posts.length} before failing:`);
-        for (const uri of uris) console.error(`  ${uri}`);
+        listPosted();
         console.error(`Draft ${draft.id} now holds the other ${posts.length - uris.length}, and sending it carries on from there.`);
       }
       if (isNetworkError(err)) console.error("The next post may already have gone, so check before sending it.");
@@ -76,11 +79,13 @@ async function sendThreadDraft(
     uris.push(sent.uri);
     rootRef ??= sent;
     parentRef = sent;
+    if (i === posts.length - 1) break; // Nothing left to keep: the caller removes the draft
     try {
       updateDraft({ ...draft, replyUri: sent.uri, posts: posts.slice(i + 1) }, profile);
     } catch (err: unknown) {
+      listPosted();
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Posted ${uris.length}/${posts.length}, but couldn't update draft ${draft.id}, so sending it again would repeat them: ${msg}`);
+      throw new Error(`Couldn't update draft ${draft.id}, so sending it again would repeat the last post above: ${msg}`);
     }
   }
   return uris;
