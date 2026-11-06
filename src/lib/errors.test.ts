@@ -10,7 +10,7 @@ describe("isNetworkError", () => {
   // Each of these is what the runtime really produced against a loopback server.
   describe("through the API client", () => {
     it.each([
-      ["Node, refused", failure("fetch failed", { cause: new Error("bad port") })],
+      ["Node, refused", failure("fetch failed", { cause: failure("connect ECONNREFUSED 127.0.0.1:49152", { code: "ECONNREFUSED" }) })],
       ["Node, reset", failure("fetch failed", { cause: failure("read ECONNRESET", { code: "ECONNRESET" }) })],
       ["Node, cut off mid-response", failure("terminated", { cause: failure("other side closed", { code: "UND_ERR_SOCKET" }) })],
       ["Bun, refused", failure("Unable to connect. Is the computer able to access the url?", { code: "ConnectionRefused" })],
@@ -21,7 +21,7 @@ describe("isNetworkError", () => {
   });
   describe("from a plain fetch", () => {
     it.each([
-      ["Node, refused", failure("fetch failed", { cause: failure("connect ECONNREFUSED 127.0.0.1:9", { code: "ECONNREFUSED" }) })],
+      ["Node, refused", failure("fetch failed", { cause: failure("connect ECONNREFUSED 127.0.0.1:49152", { code: "ECONNREFUSED" }) })],
       ["Node, cut off", failure("terminated", { cause: failure("other side closed", { code: "UND_ERR_SOCKET" }) })],
       ["Bun, refused", failure("Unable to connect.", { code: "ConnectionRefused" })],
       ["Bun, closed", failure("The socket connection was closed unexpectedly.", { code: "ECONNRESET" })],

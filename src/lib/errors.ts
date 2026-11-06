@@ -1,7 +1,7 @@
-/** `status` on an API client error when the request threw, with no response from the server. */
+/** `status` on an API client error that threw without an HTTP status, which can be after a response began. */
 const NO_RESPONSE = 1;
 
-/** Each runtime words these its own way, and a plain fetch has nothing else to go by. */
+/** Each runtime words these its own way. A safety net: everything today goes through the API client. */
 const TRANSPORT_CODES = new Set([
   "ECONNREFUSED",
   "ECONNRESET",

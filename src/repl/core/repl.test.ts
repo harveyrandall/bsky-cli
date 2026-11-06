@@ -2567,7 +2567,7 @@ describe("failures", () => {
     agent.post.mockRejectedValueOnce(new Error("fetch failed"));
     await repl.post("hello");
     await flush();
-    expect(printed()).toContain("Couldn't reach Bluesky; saved as draft d1. /retry to send it now.");
+    expect(printed()).toContain("Couldn't reach Bluesky; saved as draft d1. It may already have gone, so check first. /retry to send it now.");
     await repl.retry();
     await flush();
     expect(posted.map((p) => p.text)).toEqual(["hello"]);
