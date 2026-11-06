@@ -26,6 +26,22 @@ export function bskyCommand(): string[] {
   return interpreted ? [process.execPath, resolve(process.argv[1])] : [process.execPath];
 }
 
+const MOST_LOG_BYTES = 1_000_000;
+const KEPT_LOG_BYTES = 256_000;
+
+/** The job's log only ever grows, and a job that's failing grows it by the minute. */
+export function trimSchedulerLog(): void {
+  const path = join(bskyDir(), "scheduler.log");
+  try {
+    const log = readFileSync(path);
+    if (log.length <= MOST_LOG_BYTES) return;
+    // In place: this run's own output is going to this file, so replacing it would lose that
+    writeFileSync(path, log.subarray(log.indexOf("\n", log.length - KEPT_LOG_BYTES) + 1));
+  } catch {
+    // No log yet, or it can't be touched: neither matters to the job
+  }
+}
+
 // ── Linux (crontab) ──────────────────────────────────────────────────
 
 function readCrontab(): string {
@@ -220,6 +236,7 @@ export function enableScheduler(interval: number, profile?: string): void {
     throw new Error(`Can't schedule for profile "${profile}": use letters, digits, ".", "_" and "-"`);
   }
   const command = bskyCommand();
+  trimSchedulerLog();
   switch (process.platform) {
     case "linux":
       return enableLinux(interval, command, profile);

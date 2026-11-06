@@ -315,6 +315,8 @@ bsky schedule enable --interval 5     # every 5 minutes
 
 The job names the Node (or Bun) and the script you enabled it with in full, and keeps your `XDG_CONFIG_HOME`, as a scheduled job gets neither your `PATH` nor your shell's variables. Run `bsky schedule enable` again after changing any of them, such as moving to another Node version with nvm, and to repair a job set up by version 1.9.1 or earlier.
 
+On macOS the job writes to `scheduler.log` in the config folder, which is cut down to its newest 256 KB once it passes 1 MB.
+
 ### `bsky schedule disable`
 
 Pause the background scheduler without removing its configuration. The crontab entry, launchd plist, or scheduled task is preserved but deactivated.

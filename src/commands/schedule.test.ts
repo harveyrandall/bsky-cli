@@ -59,6 +59,7 @@ vi.mock("@/lib/scheduler", () => ({
   disableScheduler: vi.fn(),
   getSchedulerStatus: vi.fn(() => "not installed"),
   uninstallScheduler: vi.fn(),
+  trimSchedulerLog: vi.fn(),
 }));
 
 vi.mock("@/lib/recurrence", () => ({
