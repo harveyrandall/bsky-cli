@@ -137,6 +137,12 @@ describe("promptDateTime", () => {
     await expect(promptDateTime(rl)).resolves.toBe(toUtcIso(15, 6, year, 15, 30));
   });
 
+  it("asks whether to use the date, and says n asks for it again", async () => {
+    const { rl, question } = asking(`15-06-${year}`, "15:30", "");
+    await promptDateTime(rl);
+    expect(question).toHaveBeenLastCalledWith("Use this date and time? (Y/n, n to enter it again) ");
+  });
+
   it.each(["n", "no", " No "])("asks for the date again on %j", async (answer) => {
     const { rl, question } = asking(`15-06-${year}`, "15:30", answer, `16-06-${year}`, "16:45", "");
     await expect(promptDateTime(rl)).resolves.toBe(toUtcIso(16, 6, year, 16, 45));

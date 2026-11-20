@@ -128,7 +128,7 @@ export async function promptDateTime(rl: ReadlineInterface): Promise<string> {
     // --- Confirm ---
     const display = formatLocalDateTime(iso);
     console.error(`Scheduled for: ${display}`);
-    const confirm = await rl.question("Save the new scheduled date (Y/n) ");
+    const confirm = await rl.question("Use this date and time? (Y/n, n to enter it again) ");
     if (saidNo(confirm)) continue;
 
     return iso;
