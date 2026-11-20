@@ -73,7 +73,7 @@ Posts that `timeline`, `thread`, `search`, `bookmarks get` and `/view` print get
 
 In a CLI command's arguments, a `#n` becomes its post's `at://` URI only where the command takes a post, as in `/run thread #1`. Anywhere else it stays as you typed it, so `/run post we are #1` posts those words, and a bare number is left alone.
 
-Commands that need the terminal to themselves refuse, with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and `schedule post`, `edit`, `delete`, `uninstall` and `watch`. So does `--stdin` on any command. The hint says what to use instead, usually another terminal. `/login` and `/run login` always clear the composer and stay out of ↑ history, even with an unclosed quote, as they may hold a password.
+Commands that need the terminal to themselves refuse, with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and `schedule post`, `edit`, `delete`, `uninstall` and `watch`. So does `--stdin` on any command. The hint says what to use instead, usually another terminal. `/login` and `/run login` always clear the composer and stay out of ↑ history, even with an unclosed quote, as they may hold a password. They're never saved with the session either, even while you type them.
 
 ## Switching account
 
@@ -217,7 +217,7 @@ Enter on `+ new` starts afresh, as does Esc; Ctrl+C quits. A session open in ano
 
 `Edit` is selected first, because an unsent post can be one that was sending when the terminal closed, which may already have gone: check before choosing `Send`. `Send` starts its undo window again. `Edit` or Esc puts it back in the composer, or saves it as a draft if there's text there already or its media won't fit. If its thread couldn't be found, the question says so, and `Send` then asks whether to start a new thread, which is selected first, or paste a link to a post to continue from. The post has to still be there, and Esc or an empty link counts as `Edit`. Once you've answered, the rest of that thread's unsent posts that you send follow it, without asking again.
 
-A session opens under the profile it was started with, whatever `-p` you give, and is refused if that profile is logged in to another account. Text you were typing is saved after a second's pause. Sessions are kept in `repl/sessions/` in the [config folder](configuration.md), readable only by you, with no tokens in them. Empty sessions aren't kept. When a REPL exits, sessions beyond the newest `keep-sessions` (50 by default) are removed, unless they have unsent posts or can't be read. `-R` saves nothing and leaves the resume hint out of the exit summary. Unless you also use `-r`, it skips the list; a session you resume keeps saving, so your answers aren't asked again.
+A session opens under the profile it was started with, whatever `-p` you give, and is refused if that profile is logged in to another account. Text you were typing is saved after a second's pause, unless it's a login. Sessions are kept in `repl/sessions/` in the [config folder](configuration.md), readable only by you, with no tokens in them. Empty sessions aren't kept. When a REPL exits, sessions beyond the newest `keep-sessions` (50 by default) are removed, unless they have unsent posts or can't be read. `-R` saves nothing and leaves the resume hint out of the exit summary. Unless you also use `-r`, it skips the list; a session you resume keeps saving, so your answers aren't asked again.
 
 ## Options
 

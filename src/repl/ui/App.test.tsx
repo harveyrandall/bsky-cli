@@ -48,6 +48,12 @@ const notes = join(dir, "notes.txt");
 for (const file of [image, photo]) writeFileSync(file, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
 writeFileSync(notes, "plain text");
 const paste = (text: string) => `\x1b[200~${text}\x1b[201~`;
+// A session keeper that records what each save would write: the last draft tracked before it.
+const recorder = () => {
+  let draft = { text: "" };
+  const saved: string[] = [];
+  return { saved, track: vi.fn((d: { text: string }) => void (draft = d)), save: vi.fn(async () => void saved.push(draft.text)) };
+};
 const RIGHT = "\x1b[C";
 
 const PROMPT = /^(?:bsky|thread|post|reply|quote|scheduled|draft)\b[^›\n]*›/;
@@ -319,12 +325,14 @@ describe("App scrollback", drawn, () => {
     expect(lastFrame()).not.toContain("hunter2");
   });
   it.each(['/login me "hunter2', '/run login me "hunter2'])("clears a login it can't read, keeping it out of ↑ history and the saved session: %s", async (input) => {
-    const keeper = { track: vi.fn(), save: vi.fn(async () => {}) };
+    const keeper = recorder();
     const { type, lastFrame, composer } = setup({ keeper, passthrough: cli("login", vi.fn(async () => "clear" as const)) });
     await type(input, "\r");
     await tick();
     expect(lastFrame()).toContain("bsky login can't run inside the REPL");
     expect(composer()).not.toContain("hunter2");
+    expect(keeper.save).toHaveBeenCalled();
+    expect(keeper.saved.join("\n")).not.toContain("hunter2");
     expect(keeper.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "", history: [] }));
     await type("\x1b[A");
     expect(lastFrame()).not.toContain("hunter2");
@@ -866,6 +874,31 @@ describe("App session saving", drawn, () => {
     const { type } = setup({ keeper: k });
     await type("x", paste("a longer paste"));
     expect(k.save).toHaveBeenCalled();
+  });
+  it("never saves a typed login, even when typing pauses", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const k = recorder();
+      const { stdin, lastFrame } = setup({ keeper: k });
+      for (const key of "/login me hunter2") {
+        stdin.write(key);
+        await vi.advanceTimersByTimeAsync(20);
+      }
+      expect(lastFrame()).toContain("bsky › /login me hunter2");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(k.save).toHaveBeenCalled();
+      expect(k.saved.join("\n")).not.toContain("hunter2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("never saves a pasted login", async () => {
+    const k = recorder();
+    const { type, lastFrame } = setup({ keeper: k });
+    await type(paste("/login me hunter2"));
+    expect(lastFrame()).toContain("bsky › /login me hunter2");
+    expect(k.save).toHaveBeenCalled();
+    expect(k.saved.join("\n")).not.toContain("hunter2");
   });
   it("says if saving fails, once, and says when it's back", async () => {
     const k = keeper();

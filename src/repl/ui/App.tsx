@@ -6,7 +6,7 @@ import type { ReplSessionFile } from "@/repl/core/persist";
 import { chips, parseDroppedPaths, type StagedMedia, pathMatches } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
-import { echoLine } from "@/repl/core/echo";
+import { echoLine, isLogin } from "@/repl/core/echo";
 import { copyText, openUrl } from "@/lib/desktop";
 import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings, type SubmitOutcome } from "@/repl/core/repl";
@@ -173,12 +173,13 @@ export function App(props: AppProps) {
   };
   changed.current = save;
   // Typing is saved once it pauses. A submit, a paste or text coming back is saved at
-  // once, so a post is never in the file for long as both text and queued.
+  // once, so a post is never in the file for long as both text and queued. A login is
+  // saved as an empty composer, as it may hold a password.
   const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onEditor = (state: EditorState) => {
     const jumped = state.text === "" || Math.abs(state.text.length - composer.current.text.length) > 1;
     composer.current = state;
-    props.keeper?.track(state);
+    props.keeper?.track(isLogin(state.text) ? { ...state, text: "", cursor: 0 } : state);
     clearTimeout(typing.current);
     if (jumped) save();
     else typing.current = setTimeout(save, 1000);
