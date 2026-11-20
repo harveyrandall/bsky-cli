@@ -113,6 +113,16 @@ describe("complete", () => {
     });
     expect(tab("/like ").more).toBeUndefined();
   });
+  it.each([
+    [8, undefined],
+    [9, 1],
+  ])("offers eight of %i labels, and counts any left out", (n, more) => {
+    // #1 to #9: no prefix beyond # for Tab to fill in.
+    const labels = () => Array.from({ length: n }, (_, i) => `#${i + 1}`);
+    const offered = tab("/like #", { ...sources, labels });
+    expect(offered.candidates).toHaveLength(8);
+    expect(offered.more).toBe(more);
+  });
   it("leaves the words of a post alone", () => {
     for (const text of ["/reply 3 A", "/post A", "hello w", "/nope x"]) expect(tab(text).text).toBe(text);
   });

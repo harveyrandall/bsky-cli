@@ -64,6 +64,14 @@ describe("Composer", () => {
     expect(props.onEcho).toHaveBeenCalledWith("");
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
+  it("says a file needs text when you press Enter on spaces, and empties the composer", async () => {
+    const { type, props } = setup({ chips: "📎 chart.png" });
+    await type("  ", "\r");
+    expect(props.onEcho).toHaveBeenCalledWith("  ");
+    expect(props.onHint).toHaveBeenCalledWith("Type some text to go with it: posts need text");
+    expect(props.onEditor).toHaveBeenLastCalledWith(expect.objectContaining({ text: "" }));
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
   it("offers a paste into an empty composer, and inserts it if it isn't taken", async () => {
     const { type, props, lastFrame } = setup();
     await type("\x1b[200~/a.png\x1b[201~");

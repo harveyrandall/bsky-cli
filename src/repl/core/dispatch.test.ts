@@ -385,6 +385,12 @@ describe("dispatch", () => {
     expect(await dispatch("hello\nworld", c)).toBe("keep");
     expect(c.fake.submitText).toHaveBeenCalledWith("hello\nworld");
   });
+  it("keeps plain text that fails, and shows the error", async () => {
+    const c = ctx();
+    c.fake.submitText.mockRejectedValueOnce(new Error("ENOSPC"));
+    expect(await dispatch("hello", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith("ENOSPC", "error");
+  });
 });
 
 describe("writing commands", () => {

@@ -1060,7 +1060,7 @@ describe("App running CLI commands", drawn, () => {
     await tick();
     expect(vi.mocked(run).mock.calls.map(([argv]) => argv)).toEqual([["thread", read.uri], ["timeline", "#1"]]);
   });
-  it("clears one that fails, and ↑ brings it back", async () => {
+  it("clears a CLI command whose run returns done, and ↑ brings it back", async () => {
     const { type, composer } = typing({ run: vi.fn(async () => "done" as const) });
     await type("/timeline --nope", "\r");
     await tick();
