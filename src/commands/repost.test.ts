@@ -67,7 +67,8 @@ describe("remove-repost command", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockAgent.com.atproto.repo.deleteRecord.mockResolvedValue({});
+    // What the PDS sends when it deleted something. With nothing there, it leaves `commit` out.
+    mockAgent.com.atproto.repo.deleteRecord.mockResolvedValue({ data: { commit: { cid: "bafycommit", rev: "rev1" } } });
   });
 
   it("calls deleteRecord with correct repo, collection, and rkey", async () => {
@@ -128,6 +129,42 @@ describe("remove-repost command", () => {
 
     expect(logSpy).not.toHaveBeenCalled();
     logSpy.mockRestore();
+  });
+
+  it("refuses another account's repost", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const program = new Command();
+    registerRemoveRepost(program);
+
+    try {
+      await program.parseAsync(["node", "test", "remove-repost", "at://did:plc:abc/app.bsky.feed.repost/456"]);
+
+      expect(errSpy).toHaveBeenCalledWith("That isn't yours: at://did:plc:abc/app.bsky.feed.repost/456");
+      expect(mockAgent.com.atproto.repo.deleteRecord).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = undefined;
+      errSpy.mockRestore();
+    }
+  });
+
+  it("says when there was no repost to remove, printing no URI", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockAgent.com.atproto.repo.deleteRecord.mockResolvedValueOnce({ data: {} });
+    const program = new Command();
+    registerRemoveRepost(program);
+
+    try {
+      await program.parseAsync(["node", "test", "remove-repost", "at://did:plc:test123/app.bsky.feed.repost/456"]);
+
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(errSpy).toHaveBeenCalledWith("Nothing to delete at at://did:plc:test123/app.bsky.feed.repost/456");
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 
   it("refuses anything but a repost, so a post's URI doesn't delete the post", async () => {
