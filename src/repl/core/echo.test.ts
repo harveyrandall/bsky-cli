@@ -33,10 +33,32 @@ describe("echoLine", () => {
     "/run -p work login me hunter2",
     '/run login me "hunter 2',
     '/run "login" me hunter2',
+    "/run --json login me hunter2",
+    "/run -v --profile work login me hunter2",
+    "/run --profile=work -c ./bsky.toml login me hunter2",
+    "/run -pwork login me hunter2",
+    "/run -vp work login me hunter2",
+    "/run -- login me hunter2",
+    "/run LOGIN me hunter2",
+    "/run lo''gin me hunter2",
+    "/run log\\in me hunter2",
+    '/run -p work login me "hunter2',
+    '/run -p "my work" login me "hunter2',
   ])("leaves out what follows /run … login: %j", (input) => {
     expect(echoLine("bsky ›", input)).toBe("bsky › /run login …");
   });
-  it.each(["/run timeline", "/running login me", "/loginx", "login me hunter2", "\\/login me hunter2"])(
+  it.each([
+    "/run timeline",
+    "/running login me",
+    "/loginx",
+    "login me hunter2",
+    "\\/login me hunter2",
+    "/run search login tips",
+    `/run post "can't login"`,
+    "/run -p login search tips",
+    '/run search "login',
+    '/run -p work post "login',
+  ])(
     "shows anything else as typed: %j",
     (input) => {
       expect(echoLine("bsky ›", input)).toBe(`bsky › ${input}`);

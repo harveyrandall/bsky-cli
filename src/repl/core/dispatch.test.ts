@@ -196,15 +196,38 @@ describe("CLI commands", () => {
     await dispatch("/tl -n 5", c);
     expect(run.mock.calls.map(([argv]) => argv)).toEqual([["stream"], ["tl", "-n", "5"]]);
   });
-  it.each(["/login me hunter2", '/login me "hunter2', '/run login me "hunter2', "/run --bogus login me hunter2", "/LOGIN me hunter2"])(
-    "refuse a login before reading it, and clear it, as it may hold a password: %s",
-    async (input) => {
-      const { c, run } = withCli();
-      expect(await dispatch(input, c)).toBe("clear");
-      expect(run).not.toHaveBeenCalled();
-      expect(c.print.mock.calls).toEqual([["bsky login can't run inside the REPL: run it in another terminal", "error"]]);
-    },
-  );
+  it.each([
+    "/login me hunter2",
+    '/login me "hunter2',
+    '/run login me "hunter2',
+    "/run --bogus login me hunter2",
+    "/LOGIN me hunter2",
+    "/run -p work login me hunter2",
+    "/run --json login me hunter2",
+    "/run lo''gin me hunter2",
+    '/run -p work login me "hunter2',
+  ])("refuse a login before reading it, and clear it, as it may hold a password: %s", async (input) => {
+    const { c, run } = withCli();
+    expect(await dispatch(input, c)).toBe("clear");
+    expect(run).not.toHaveBeenCalled();
+    expect(c.print.mock.calls).toEqual([["bsky login can't run inside the REPL: run it in another terminal", "error"]]);
+  });
+  it.each([
+    ["/run search login tips", ["search", "login", "tips"]],
+    [`/run post "can't login"`, ["post", "can't login"]],
+  ])("run a /run line that only mentions login: %s", async (input, argv) => {
+    const { c, run } = withCli();
+    expect(await dispatch(input, c)).toBe("done");
+    expect(run).toHaveBeenCalledWith(argv);
+    expect(printed(c)).not.toContain("login can't run");
+  });
+  it("read a /run line with an unclosed quote as a login only when login is its command", async () => {
+    const { c, run } = withCli();
+    expect(await dispatch('/run search "login', c)).toBe("done");
+    expect(run).not.toHaveBeenCalled();
+    expect(printed(c)).toContain("Unclosed");
+    expect(printed(c)).not.toContain("login can't run");
+  });
   it("/help on a blocked command says why", async () => {
     const { c, run } = withCli();
     await dispatch("/help login", c);
