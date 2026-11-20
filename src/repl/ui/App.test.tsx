@@ -1017,11 +1017,23 @@ describe("App running CLI commands", drawn, () => {
     await tick();
     expect(vi.mocked(run).mock.calls.map(([argv]) => argv)).toEqual([["thread", read.uri], ["timeline", "#1"]]);
   });
-  it("keeps the text of one that fails", async () => {
-    const { type, composer } = typing({ run: vi.fn(async () => "keep" as const) });
+  it("clears one that fails, and ↑ brings it back", async () => {
+    const { type, composer } = typing({ run: vi.fn(async () => "done" as const) });
     await type("/timeline --nope", "\r");
     await tick();
-    expect(composer()).toContain("/timeline --nope");
+    expect(composer()).not.toContain("/timeline --nope");
+    await type("\x1b[A");
+    expect(composer()).toMatch(/^bsky › \/timeline --nope\s*$/m);
+  });
+  it("clears one whose arguments don't parse, and ↑ brings it back", async () => {
+    const { type, composer, lastFrame, run } = typing();
+    await type('/timeline "open', "\r");
+    await tick();
+    expect(lastFrame()).toContain('/timeline: Unclosed " quote');
+    expect(run).not.toHaveBeenCalled();
+    expect(composer()).not.toContain("open");
+    await type("\x1b[A");
+    expect(composer()).toMatch(/^bsky › \/timeline "open\s*$/m);
   });
   it("completes a CLI command and its flags with Tab", async () => {
     const { type, shows } = typing();

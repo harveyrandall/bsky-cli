@@ -233,7 +233,7 @@ export const COMMANDS: readonly ReplCommand[] = [
       if (ref === undefined) throw new Error("Usage: /view <ref>");
       if (!ctx.passthrough) throw new Error("CLI commands aren't available here");
       const uri = await ctx.repl.uriOf(ref);
-      if (!uri) return "keep";
+      if (!uri) return "done";
       return ctx.passthrough.run(["thread", uri]);
     },
   },

@@ -155,7 +155,10 @@ export function passthroughFlags(program: Command, name: string): string[] {
   return command ? [...help.visibleOptions(command), ...help.visibleOptions(program)].flatMap((o) => o.long ?? []) : [];
 }
 
-/** Runs a CLI command in this process, its output going to `print`. A failure keeps the text. */
+/**
+ * Runs a CLI command in this process, its output going to `print`. Failed or
+ * refused, the text still goes to ↑ history, as in Node's REPL; a login only clears.
+ */
 export async function runPassthrough(
   program: Command,
   argv: readonly string[],
@@ -165,7 +168,7 @@ export async function runPassthrough(
   if (refused) {
     io.print(refused, "error");
     // `/login me hunter2` is the CLI's form: the password can't stay in the composer or history.
-    return commandPath(program, argv)[0] === "login" ? "clear" : "keep";
+    return commandPath(program, argv)[0] === "login" ? "clear" : "done";
   }
   // Outside the command's context, so that drawing the line isn't caught as more output.
   const print = (text: string, style?: LineStyle) => output.exit(() => io.print(text, style));
@@ -179,26 +182,19 @@ export async function runPassthrough(
   process.exitCode = undefined;
   for (const c of allCommands(program)) c.exitOverride();
   const restore = redirect();
-  let ok = true;
   let thrown: string | undefined;
   try {
     // Commander forgets what it parsed at startup, so these go round again.
     const args = [...(io.profile !== undefined ? ["-p", io.profile] : []), ...(io.config ? ["-c", io.config] : []), ...argv];
     await output.run(sink, () => program.parseAsync(args, { from: "user" }));
-    ok = !process.exitCode;
   } catch (err) {
     // Commander has already written its own errors, and a command that exits has said why.
-    if (err instanceof Exited) ok = err.code === 0;
-    else if (err instanceof CommanderError) ok = err.exitCode === 0;
-    else {
-      ok = false;
-      thrown = err instanceof Error ? err.message : String(err);
-    }
+    if (!(err instanceof Exited || err instanceof CommanderError)) thrown = err instanceof Error ? err.message : String(err);
   } finally {
     restore();
     process.exitCode = exitCode;
   }
   if (line) print(line);
   if (thrown !== undefined) print(thrown, "error");
-  return ok ? "done" : "keep";
+  return "done";
 }

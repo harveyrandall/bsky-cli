@@ -31,7 +31,7 @@ export async function dispatch(input: string, ctx: CommandContext): Promise<Subm
     ctx.print(blockedMessage("login"), "error");
     return "clear";
   }
-  // The REPL never exits on an error: report it and keep the text.
+  // The REPL never exits on an error: report it. A command goes to ↑ history; a post keeps its text.
   try {
     if (parsed.kind === "text") return await ctx.repl.submitText(parsed.text);
     const cmd = findCommand(parsed.name);
@@ -46,6 +46,6 @@ export async function dispatch(input: string, ctx: CommandContext): Promise<Subm
   } catch (err) {
     const message = err instanceof Error ? err.message || err.name : String(err);
     ctx.print(parsed.kind === "command" ? `/${parsed.name}: ${message}` : message, "error");
-    return "keep";
+    return parsed.kind === "command" ? "done" : "keep";
   }
 }

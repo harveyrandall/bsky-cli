@@ -55,11 +55,11 @@ Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it re
 
 **Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), a `#n` label from something you've read, its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
 
-A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command.
+A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command. A usage mistake, such as `/like` with no ref or a quote left open, shows its error and goes to ↑ history, as in Node's REPL.
 
 ## Reading and CLI commands
 
-Most CLI commands run from the prompt, without the `bsky`: `/timeline -n 5`, `/tl`, `/notifs`, `/search cats`. `/help` lists them on its `↗ From the CLI` line. A REPL command of the same name goes first, so use `/run drafts list` for the CLI's `drafts`. The current profile and any `-c` you started with are used, and a command that fails never ends the REPL: its error is shown and its text stays in the composer.
+Most CLI commands run from the prompt, without the `bsky`: `/timeline -n 5`, `/tl`, `/notifs`, `/search cats`. `/help` lists them on its `↗ From the CLI` line. A REPL command of the same name goes first, so use `/run drafts list` for the CLI's `drafts`. The current profile and any `-c` you started with are used, and a command that fails never ends the REPL: its error is shown, and its text goes to ↑ history.
 
 Posts that `timeline`, `thread`, `search`, `bookmarks get` and `/view` print get a `#n` label, or their `(n)` if they're already in the session. It works as a ref and lasts for the session, including when you resume it. `/notifs` and `--json` output have no labels.
 

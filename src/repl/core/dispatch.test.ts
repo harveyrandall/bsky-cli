@@ -64,18 +64,18 @@ describe("/settings", () => {
   });
   it.each(["/settings force-alt maybe", "/settings verbose", "/settings thread-label sideways", "/settings nonsense"])("refuses %s", async (input) => {
     const c = ctx();
-    expect(await dispatch(input, c)).toBe("keep");
+    expect(await dispatch(input, c)).toBe("done");
     expect(c.fake.setSetting).not.toHaveBeenCalled();
     expect(c.print).toHaveBeenCalledWith(expect.stringContaining("Usage: /settings"), "error");
   });
   it("takes one setting at a time, rather than quietly dropping the rest", async () => {
     const c = ctx();
-    expect(await dispatch("/settings undo 10 pace 5", c)).toBe("keep");
+    expect(await dispatch("/settings undo 10 pace 5", c)).toBe("done");
     expect(c.fake.setCooldown).not.toHaveBeenCalled();
   });
   it("points auto-thread at its own command", async () => {
     const c = ctx();
-    expect(await dispatch("/settings auto-thread on", c)).toBe("keep");
+    expect(await dispatch("/settings auto-thread on", c)).toBe("done");
     expect(c.print).toHaveBeenCalledWith(expect.stringContaining("/auto-thread on|off"), "error");
   });
 });
@@ -115,7 +115,7 @@ describe("managing posts", () => {
     await dispatch("/undo", c);
     expect(c.fake.deletePost).toHaveBeenCalledWith("2");
     expect(c.fake.undo).toHaveBeenCalledOnce();
-    expect(await dispatch("/delete", c)).toBe("keep");
+    expect(await dispatch("/delete", c)).toBe("done");
   });
   it("/drafts lists, or loads one", async () => {
     const c = ctx();
@@ -140,9 +140,9 @@ describe("/open, /copy and /view", () => {
     await dispatch("/copy 2", c);
     expect(c.fake.openPost).toHaveBeenCalledWith("2");
     expect(c.fake.copyPost).toHaveBeenCalledWith("2");
-    expect(await dispatch("/open", c)).toBe("keep");
-    expect(await dispatch("/copy", c)).toBe("keep");
-    expect(await dispatch("/view", c)).toBe("keep");
+    expect(await dispatch("/open", c)).toBe("done");
+    expect(await dispatch("/copy", c)).toBe("done");
+    expect(await dispatch("/view", c)).toBe("done");
   });
   it("/view prints the thread through the CLI", async () => {
     const run = vi.fn(async (_: string[]) => "done" as const);
@@ -150,20 +150,20 @@ describe("/open, /copy and /view", () => {
     expect(await dispatch("/view #2", c)).toBe("done");
     expect(run).toHaveBeenCalledWith(["thread", "at://x"]);
   });
-  it("/view keeps the text on a bad ref", async () => {
+  it("/view with a bad ref goes to ↑ history", async () => {
     const run = vi.fn(async (_: string[]) => "done" as const);
     const c = { ...ctx(), passthrough: { names: () => [], knows: () => false, run } };
     c.fake.uriOf.mockResolvedValueOnce(undefined);
-    expect(await dispatch("/view 9", c)).toBe("keep");
+    expect(await dispatch("/view 9", c)).toBe("done");
     expect(run).not.toHaveBeenCalled();
   });
 });
 
 describe("/open failing", () => {
-  it("keeps the REPL and the text", async () => {
+  it("keeps the REPL, and the text in ↑ history", async () => {
     const c = ctx();
     c.fake.openPost.mockRejectedValueOnce(new Error("no browser"));
-    expect(await dispatch("/open 1", c)).toBe("keep");
+    expect(await dispatch("/open 1", c)).toBe("done");
     expect(c.print).toHaveBeenCalledWith("/open: no browser", "error");
   });
 });
@@ -173,7 +173,7 @@ describe("likes and reposts", () => {
     const c = ctx();
     await dispatch(`/${name} #2`, c);
     expect(c.fake.engage).toHaveBeenLastCalledWith(name, "#2");
-    expect(await dispatch(`/${name}`, c)).toBe("keep");
+    expect(await dispatch(`/${name}`, c)).toBe("done");
   });
 });
 
@@ -185,10 +185,10 @@ describe("CLI commands", () => {
   };
   it("say what became of the text", async () => {
     const { c, run } = withCli();
-    run.mockResolvedValueOnce("keep" as never);
-    expect(await dispatch("/timeline --nope", c)).toBe("keep");
-    run.mockResolvedValueOnce("keep" as never);
-    expect(await dispatch("/run timeline --nope", c)).toBe("keep");
+    run.mockResolvedValueOnce("clear" as never);
+    expect(await dispatch("/timeline --nope", c)).toBe("clear");
+    run.mockResolvedValueOnce("clear" as never);
+    expect(await dispatch("/run timeline --nope", c)).toBe("clear");
   });
   it("reach blocked commands and aliases, which aren't offered but can say why", async () => {
     const { c, run } = withCli();
@@ -228,10 +228,10 @@ describe("CLI commands", () => {
   });
   it("say so if /run has nothing to run", async () => {
     const { c } = withCli();
-    expect(await dispatch("/run", c)).toBe("keep");
+    expect(await dispatch("/run", c)).toBe("done");
     expect(printed(c)).toContain("Usage: /run");
     const none = ctx();
-    expect(await dispatch("/run timeline", none)).toBe("keep");
+    expect(await dispatch("/run timeline", none)).toBe("done");
     expect(printed(none)).toContain("aren't available");
   });
   it("are suggested for a typo", async () => {
@@ -246,9 +246,9 @@ describe("CLI commands", () => {
     await dispatch("/help timeline", c);
     expect(run).toHaveBeenCalledWith(["timeline", "--help"]);
   });
-  it("keep the text if the arguments don't parse", async () => {
+  it("go to ↑ history if the arguments don't parse", async () => {
     const { c, run } = withCli();
-    expect(await dispatch(`/search "open`, c)).toBe("keep");
+    expect(await dispatch(`/search "open`, c)).toBe("done");
     expect(run).not.toHaveBeenCalled();
   });
 });
@@ -265,9 +265,9 @@ describe("media commands", () => {
   });
   it("/attach needs a path, and --alt its text", async () => {
     const c = ctx();
-    expect(await dispatch("/attach", c)).toBe("keep");
+    expect(await dispatch("/attach", c)).toBe("done");
     expect(printed(c)).toContain("Usage: /attach");
-    expect(await dispatch("/attach /a.png --alt", c)).toBe("keep");
+    expect(await dispatch("/attach /a.png --alt", c)).toBe("done");
     expect(c.fake.attach).not.toHaveBeenCalled();
   });
   it("/detach takes a number or all, and defaults to all", async () => {
@@ -278,8 +278,8 @@ describe("media commands", () => {
     expect(c.fake.detach).toHaveBeenLastCalledWith("all");
     await dispatch("/detach", c);
     expect(c.fake.detach).toHaveBeenLastCalledWith("all");
-    expect(await dispatch("/detach 0", c)).toBe("keep");
-    expect(await dispatch("/detach x", c)).toBe("keep");
+    expect(await dispatch("/detach 0", c)).toBe("done");
+    expect(await dispatch("/detach x", c)).toBe("done");
     expect(c.fake.detach).toHaveBeenCalledTimes(3);
   });
   it("/quote takes a ref and optional text", async () => {
@@ -288,7 +288,7 @@ describe("media commands", () => {
     expect(c.fake.quote).toHaveBeenLastCalledWith("2", "look at\nthis");
     await dispatch("/quote 2", c);
     expect(c.fake.quote).toHaveBeenLastCalledWith("2", undefined);
-    expect(await dispatch("/quote", c)).toBe("keep");
+    expect(await dispatch("/quote", c)).toBe("done");
   });
   it("/new opens the menu", async () => {
     const c = ctx();
@@ -346,9 +346,9 @@ describe("dispatch", () => {
   it.each([
     ['/help "exit', '/help: Unclosed " quote'],
     ["/help 'exit", "/help: Unclosed ' quote"],
-  ])("reports %s as one error line naming the command, and keeps the text", async (input, message) => {
+  ])("reports %s as one error line naming the command, and sends it to ↑ history", async (input, message) => {
     const c = ctx();
-    expect(await dispatch(input, c)).toBe("keep");
+    expect(await dispatch(input, c)).toBe("done");
     expect(c.print.mock.calls).toEqual([[message, "error"]]);
   });
   it("hands plain text to the session and returns what it says", async () => {
@@ -372,7 +372,7 @@ describe("writing commands", () => {
   });
   it("rejects a cooldown other than 0, 5, 10 or 15", async () => {
     const c = ctx();
-    expect(await dispatch("/thread --undo 7 hi", c)).toBe("keep");
+    expect(await dispatch("/thread --undo 7 hi", c)).toBe("done");
     expect(c.print).toHaveBeenCalledWith("/thread: --undo must be 0, 5, 10 or 15", "error");
   });
   it.each([
