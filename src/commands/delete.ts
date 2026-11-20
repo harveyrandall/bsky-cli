@@ -38,7 +38,7 @@ export async function deleteRecords(
     const { data } = await agent.com.atproto.repo.deleteRecord({ repo: did, collection, rkey });
     // The PDS sends a commit only when it deleted something. One that never sends it would always say nothing was deleted.
     if (data.commit) console.log(`at://${did}/${collection}/${rkey}`);
-    else console.error(`Nothing to delete at at://${did}/${collection}/${rkey}`);
+    else console.error(`Nothing to delete: at://${did}/${collection}/${rkey}`);
   }
 }
 

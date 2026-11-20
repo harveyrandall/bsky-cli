@@ -159,7 +159,7 @@ describe("remove-repost command", () => {
       await program.parseAsync(["node", "test", "remove-repost", "at://did:plc:test123/app.bsky.feed.repost/456"]);
 
       expect(logSpy).not.toHaveBeenCalled();
-      expect(errSpy).toHaveBeenCalledWith("Nothing to delete at at://did:plc:test123/app.bsky.feed.repost/456");
+      expect(errSpy).toHaveBeenCalledWith("Nothing to delete: at://did:plc:test123/app.bsky.feed.repost/456");
       expect(process.exitCode).toBeUndefined();
     } finally {
       errSpy.mockRestore();

@@ -101,7 +101,7 @@ describe("delete command", () => {
     await run("at://did:plc:test123/app.bsky.feed.post/111");
 
     expect(logSpy).not.toHaveBeenCalled();
-    expect(errSpy).toHaveBeenCalledWith("Nothing to delete at at://did:plc:test123/app.bsky.feed.post/111");
+    expect(errSpy).toHaveBeenCalledWith("Nothing to delete: at://did:plc:test123/app.bsky.feed.post/111");
     expect(process.exitCode).toBeUndefined();
   });
 

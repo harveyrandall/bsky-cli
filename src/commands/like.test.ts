@@ -155,7 +155,7 @@ describe("unlike command", () => {
       await program.parseAsync(["node", "test", "unlike", "at://did:plc:test123/app.bsky.feed.like/456"]);
 
       expect(logSpy).not.toHaveBeenCalled();
-      expect(errSpy).toHaveBeenCalledWith("Nothing to delete at at://did:plc:test123/app.bsky.feed.like/456");
+      expect(errSpy).toHaveBeenCalledWith("Nothing to delete: at://did:plc:test123/app.bsky.feed.like/456");
       expect(process.exitCode).toBeUndefined();
     } finally {
       errSpy.mockRestore();
