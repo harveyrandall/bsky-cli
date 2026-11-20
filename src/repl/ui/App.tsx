@@ -172,12 +172,15 @@ export function App(props: AppProps) {
     );
   };
   changed.current = save;
-  // Typing is saved once it pauses. A submit, a paste or text coming back is saved at
-  // once, so a post is never in the file for long as both text and queued. A login is
-  // saved as an empty composer, as it may hold a password.
+  // Typing is saved once it pauses. A submit, a paste, a step through ↑ history or text
+  // coming back is saved at once, so a post is never in the file for long as both text and
+  // queued. A login is saved as an empty composer, as it may hold a password.
   const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onEditor = (state: EditorState) => {
-    const jumped = state.text === "" || Math.abs(state.text.length - composer.current.text.length) > 1;
+    const jumped =
+      state.text === "" ||
+      Math.abs(state.text.length - composer.current.text.length) > 1 ||
+      state.historyIndex !== composer.current.historyIndex;
     composer.current = state;
     props.keeper?.track(isLogin(state.text) ? { ...state, text: "", cursor: 0 } : state);
     clearTimeout(typing.current);

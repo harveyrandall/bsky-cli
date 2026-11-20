@@ -141,7 +141,7 @@ The REPL never exits on an error.
 | Ctrl+J | Newline |
 | `\` then Enter, at the end of a line | Newline (the `\` is removed). Works in every terminal |
 | Shift+Enter, Alt+Enter | Newline, where the terminal sends them apart from Enter (see below) |
-| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've submitted this session, keeping your draft |
+| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've submitted this session, keeping your draft. Run a line from there and your draft comes back |
 | Ctrl+A / Ctrl+E, Home / End | Line start / end |
 | Alt+←/→ (Alt+B/F) | Word left / right |
 | Ctrl+W, Ctrl+U | Delete word, delete to line start |

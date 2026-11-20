@@ -76,6 +76,14 @@ describe("editorReducer", () => {
       history: ["/timeline -n 5"],
     });
   });
+  it("brings back the unsent draft after a line run from ↑ history", () => {
+    let s = { ...emptyEditor(["/timeline"]), text: "long post", cursor: 4 };
+    s = r(s, { type: "up" });
+    s = r(s, { type: "insert", text: " -n 5" });
+    s = r(s, { type: "submitted", text: "/timeline -n 5" });
+    expect(s).toMatchObject({ text: "long post", cursor: 9, history: ["/timeline", "/timeline -n 5"], historyIndex: null, scratch: [] });
+    expect(r(s, { type: "up" }).text).toBe("/timeline -n 5");
+  });
   it("drops a lone control byte that isn't part of an escape sequence", () => {
     expect(r(at(""), { type: "insert", text: "a\x07b" })).toMatchObject({ text: "ab" });
   });

@@ -869,6 +869,16 @@ describe("App session saving", drawn, () => {
     expect(k.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "" }));
     expect(k.save).toHaveBeenCalled();
   });
+  it("saves at once when a line run from ↑ history brings the draft back", async () => {
+    const k = keeper();
+    const { type } = setup({ keeper: k });
+    await type("/help", "\r", "hello", "\x1b[A");
+    k.save.mockClear();
+    await type("\r");
+    await tick();
+    expect(k.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "hello", history: ["/help"] }));
+    expect(k.save).toHaveBeenCalled();
+  });
   it("saves at once on a paste", async () => {
     const k = keeper();
     const { type } = setup({ keeper: k });
