@@ -903,11 +903,12 @@ describe("schedule post onboarding", () => {
     expect(enableScheduler).not.toHaveBeenCalled();
   });
 
-  it("doesn't offer where the scheduler can't run", async () => {
+  it("doesn't offer where the scheduler can't run, and points to schedule watch", async () => {
     vi.mocked(schedulerSupported).mockReturnValue(false);
     await post();
     expect(offered()).toBe(false);
     expect(enableScheduler).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith("Nothing sends it automatically on this system: run bsky schedule watch to send it.");
   });
 
   it("doesn't look at the scheduler when stdin isn't a terminal", async () => {

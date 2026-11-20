@@ -300,7 +300,10 @@ export function schedulerSupported(): boolean {
   return ["linux", "darwin", "win32"].includes(process.platform);
 }
 
-/** There's one job per machine, and it only sends one profile's posts. */
+/**
+ * Whether the installed job is enabled and sends `profile`'s posts. There's one job per
+ * machine, and it only sends one profile's posts. False where no job can run, or it can't be read.
+ */
 export function schedulerRunning(profile?: string): boolean {
   if (!schedulerSupported()) return false;
   try {

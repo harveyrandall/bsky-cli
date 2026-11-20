@@ -340,7 +340,9 @@ export function registerSchedule(program: Command): void {
           }
 
           // First-use onboarding: offer to set up the scheduler
-          if (wasEmpty && stdin.isTTY && schedulerSupported() && !schedulerRunning(profile)) {
+          if (wasEmpty && stdin.isTTY && !schedulerSupported()) {
+            console.error(`Nothing sends it automatically on this system: run ${chalk.blue("bsky schedule watch")} to send it.`);
+          } else if (wasEmpty && stdin.isTTY && !schedulerRunning(profile)) {
             console.error(`
 To automate posting, you can:
 
