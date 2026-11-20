@@ -100,6 +100,31 @@ describe("unlike command", () => {
 
     expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledTimes(2);
   });
+
+  it("prints each like it removed", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const program = new Command();
+    registerUnlike(program);
+
+    await program.parseAsync(["node", "test", "unlike", "at://did:plc:test123/app.bsky.feed.like/456"]);
+
+    expect(logSpy.mock.calls).toEqual([["at://did:plc:test123/app.bsky.feed.like/456"]]);
+    logSpy.mockRestore();
+  });
+
+  it("prints nothing for a like it couldn't remove", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockAgent.com.atproto.repo.deleteRecord.mockRejectedValue(new Error("offline"));
+    const program = new Command();
+    registerUnlike(program);
+
+    await expect(
+      program.parseAsync(["node", "test", "unlike", "at://did:plc:test123/app.bsky.feed.like/456"]),
+    ).rejects.toThrow("offline");
+
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
 });
 
 describe("likes command", () => {

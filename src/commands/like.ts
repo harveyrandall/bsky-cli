@@ -68,6 +68,7 @@ export function registerUnlike(program: Command): void {
           collection,
           rkey,
         });
+        console.log(`at://${agent.session!.did}/${collection}/${rkey}`);
       }
     });
 }

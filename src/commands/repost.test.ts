@@ -104,6 +104,31 @@ describe("remove-repost command", () => {
 
     expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledTimes(2);
   });
+
+  it("prints each repost it removed", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const program = new Command();
+    registerRemoveRepost(program);
+
+    await program.parseAsync(["node", "test", "remove-repost", "at://did:plc:test123/app.bsky.feed.repost/789"]);
+
+    expect(logSpy.mock.calls).toEqual([["at://did:plc:test123/app.bsky.feed.repost/789"]]);
+    logSpy.mockRestore();
+  });
+
+  it("prints nothing for a repost it couldn't remove", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockAgent.com.atproto.repo.deleteRecord.mockRejectedValue(new Error("offline"));
+    const program = new Command();
+    registerRemoveRepost(program);
+
+    await expect(
+      program.parseAsync(["node", "test", "remove-repost", "at://did:plc:test123/app.bsky.feed.repost/789"]),
+    ).rejects.toThrow("offline");
+
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
 });
 
 describe("reposts command", () => {

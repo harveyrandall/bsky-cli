@@ -24,6 +24,8 @@ export function registerDelete(program: Command): void {
           collection,
           rkey,
         });
+        // Not the URI as given: only your own repo's record is deleted, whatever DID it names.
+        console.log(`at://${agent.session!.did}/${collection}/${rkey}`);
       }
     });
 }

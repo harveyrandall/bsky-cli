@@ -62,4 +62,38 @@ describe("delete command", () => {
       rkey: "222",
     });
   });
+
+  it("prints each post it deleted, which is always in your own repo", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const program = new Command();
+    registerDelete(program);
+
+    await program.parseAsync([
+      "node",
+      "test",
+      "delete",
+      "at://did:plc:abc/app.bsky.feed.post/111",
+      "at://did:plc:test123/app.bsky.feed.post/222",
+    ]);
+
+    expect(logSpy.mock.calls).toEqual([
+      ["at://did:plc:test123/app.bsky.feed.post/111"],
+      ["at://did:plc:test123/app.bsky.feed.post/222"],
+    ]);
+    logSpy.mockRestore();
+  });
+
+  it("prints nothing for a post it couldn't delete", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockAgent.com.atproto.repo.deleteRecord.mockRejectedValue(new Error("offline"));
+    const program = new Command();
+    registerDelete(program);
+
+    await expect(
+      program.parseAsync(["node", "test", "delete", "at://did:plc:test123/app.bsky.feed.post/111"]),
+    ).rejects.toThrow("offline");
+
+    expect(logSpy).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
 });
