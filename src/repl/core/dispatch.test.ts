@@ -181,7 +181,7 @@ describe("CLI commands", () => {
   const withCli = () => {
     const c = ctx();
     const run = vi.fn(async (_: string[]) => "done" as const);
-    return { c: { ...c, passthrough: { names: () => ["timeline", "search", "post"], knows: (n: string) => ["timeline", "search", "post", "login", "tl"].includes(n), run } }, run };
+    return { c: { ...c, passthrough: { names: () => ["timeline", "search", "post"], knows: (n: string) => ["timeline", "search", "post", "login", "stream", "tl"].includes(n), run } }, run };
   };
   it("say what became of the text", async () => {
     const { c, run } = withCli();
@@ -192,10 +192,19 @@ describe("CLI commands", () => {
   });
   it("reach blocked commands and aliases, which aren't offered but can say why", async () => {
     const { c, run } = withCli();
-    await dispatch("/login me", c);
+    await dispatch("/stream", c);
     await dispatch("/tl -n 5", c);
-    expect(run.mock.calls.map(([argv]) => argv)).toEqual([["login", "me"], ["tl", "-n", "5"]]);
+    expect(run.mock.calls.map(([argv]) => argv)).toEqual([["stream"], ["tl", "-n", "5"]]);
   });
+  it.each(["/login me hunter2", '/login me "hunter2', '/run login me "hunter2', "/run --bogus login me hunter2", "/LOGIN me hunter2"])(
+    "refuse a login before reading it, and clear it, as it may hold a password: %s",
+    async (input) => {
+      const { c, run } = withCli();
+      expect(await dispatch(input, c)).toBe("clear");
+      expect(run).not.toHaveBeenCalled();
+      expect(c.print.mock.calls).toEqual([["bsky login can't run inside the REPL: run it in another terminal", "error"]]);
+    },
+  );
   it("/help on a blocked command says why", async () => {
     const { c, run } = withCli();
     await dispatch("/help login", c);

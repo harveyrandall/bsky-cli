@@ -1,4 +1,6 @@
 import { findCommand, tokenize, unknownMessage, type CommandContext } from "./commands";
+import { isLogin } from "./echo";
+import { blockedMessage } from "./passthrough";
 import type { SubmitOutcome } from "./repl";
 
 export type Parsed =
@@ -24,6 +26,11 @@ export function parseInput(input: string): Parsed {
 export async function dispatch(input: string, ctx: CommandContext): Promise<SubmitOutcome> {
   const parsed = parseInput(input);
   if (parsed.kind === "empty") return "done";
+  // Before tokenize can throw on it: a password can't stay in the composer, or go to ↑ history.
+  if (isLogin(input)) {
+    ctx.print(blockedMessage("login"), "error");
+    return "clear";
+  }
   // The REPL never exits on an error: report it and keep the text.
   try {
     if (parsed.kind === "text") return await ctx.repl.submitText(parsed.text);

@@ -318,6 +318,17 @@ describe("App scrollback", drawn, () => {
     expect(lastFrame()).toContain("bsky › /run login …");
     expect(lastFrame()).not.toContain("hunter2");
   });
+  it.each(['/login me "hunter2', '/run login me "hunter2'])("clears a login it can't read, keeping it out of ↑ history and the saved session: %s", async (input) => {
+    const keeper = { track: vi.fn(), save: vi.fn(async () => {}) };
+    const { type, lastFrame, composer } = setup({ keeper, passthrough: cli("login", vi.fn(async () => "clear" as const)) });
+    await type(input, "\r");
+    await tick();
+    expect(lastFrame()).toContain("bsky login can't run inside the REPL");
+    expect(composer()).not.toContain("hunter2");
+    expect(keeper.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "", history: [] }));
+    await type("\x1b[A");
+    expect(lastFrame()).not.toContain("hunter2");
+  });
   it("doesn't echo Enter in the undo window, which only sends the post now", async () => {
     const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });
     await type("/post hello", "\r");

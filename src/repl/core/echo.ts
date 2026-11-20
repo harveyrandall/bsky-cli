@@ -1,6 +1,9 @@
 // A password can follow a login in any form, an unclosed quote included, which
-// tokenize would throw on. Leaving out too much is safe.
+// tokenize would throw on. Too wide is safe: such a line is hidden and refused.
 const LOGIN = /^\s*\/(login|run\b[\s\S]*?\blogin)\b/i;
+
+/** Whether a line is `/login` or `/run … login`, read without tokenizing it. */
+export const isLogin = (input: string) => LOGIN.test(input);
 
 const segmenter = new Intl.Segmenter();
 

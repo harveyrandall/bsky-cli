@@ -73,7 +73,7 @@ Posts that `timeline`, `thread`, `search`, `bookmarks get` and `/view` print get
 
 In a CLI command's arguments, a `#n` becomes its post's `at://` URI only where the command takes a post, as in `/run thread #1`. Anywhere else it stays as you typed it, so `/run post we are #1` posts those words, and a bare number is left alone.
 
-Commands that need the terminal to themselves refuse, with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and `schedule post`, `edit`, `delete`, `uninstall` and `watch`. So does `--stdin` on any command. The hint says what to use instead, usually another terminal. A refused `/login` also clears the composer and stays out of ↑ history, as it may hold a password.
+Commands that need the terminal to themselves refuse, with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and `schedule post`, `edit`, `delete`, `uninstall` and `watch`. So does `--stdin` on any command. The hint says what to use instead, usually another terminal. `/login` and `/run login` always clear the composer and stay out of ↑ history, even with an unclosed quote, as they may hold a password.
 
 ## Switching account
 

@@ -20,6 +20,9 @@ export const BLOCKED = new Map<string, string>([
   ["schedule watch", "it runs until stopped: run it in another terminal"],
 ]);
 
+/** Why `bsky <key>`, a key of BLOCKED, can't run here. */
+export const blockedMessage = (key: string) => `bsky ${key} can't run inside the REPL: ${BLOCKED.get(key)}`;
+
 class Exited extends Error {
   constructor(readonly code: number) {
     super();
@@ -131,8 +134,7 @@ function refusal(program: Command, argv: readonly string[]): string | undefined 
   // Anything else would fall through to the default command: this REPL.
   if (path.length === 0) return `No such command: ${argv[0]}`;
   for (const key of [path.join(" "), path[0]]) {
-    const why = BLOCKED.get(key);
-    if (why) return `bsky ${key} can't run inside the REPL: ${why}`;
+    if (BLOCKED.has(key)) return blockedMessage(key);
   }
   if (argv.includes("--stdin")) return `bsky ${path[0]} can't read from stdin inside the REPL`;
   return undefined;
