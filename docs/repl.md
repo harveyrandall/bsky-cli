@@ -138,8 +138,9 @@ The REPL never exits on an error.
 | Key | Action |
 |---|---|
 | Enter | Submit. The line stays in the scrollback after its prompt; on an empty composer, just the prompt |
-| Shift+Enter, Alt+Enter, Ctrl+J | Newline |
-| `\` then Enter, at the end of a line | Newline (the `\` is removed) |
+| Ctrl+J | Newline |
+| `\` then Enter, at the end of a line | Newline (the `\` is removed). Works in every terminal |
+| Shift+Enter, Alt+Enter | Newline, where the terminal sends them apart from Enter (see below) |
 | ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've submitted this session, keeping your draft |
 | Ctrl+A / Ctrl+E, Home / End | Line start / end |
 | Alt+←/→ (Alt+B/F) | Word left / right |
@@ -166,8 +167,12 @@ Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
 
 Pasted text is inserted with its newlines; escape sequences and other control characters are dropped. In terminals with bracketed paste (almost all of them), a paste never submits. Without it, a one-line paste that ends in a newline submits, as it would in a shell.
 
-!!! note "Shift+Enter"
-    Shift+Enter needs a terminal that speaks the kitty keyboard protocol, such as iTerm2, Ghostty, kitty or WezTerm (with `enable_kitty_keyboard = true` in its config). Elsewhere the REPL says so once at start; use Alt+Enter or Ctrl+J instead. In macOS Terminal.app, Alt+Enter needs **Use Option as Meta key** (Settings → Profiles → Keyboard).
+!!! note "New lines"
+    A `\` at the end of the line, then Enter, makes a new line in every terminal.
+
+    - **Shift+Enter** needs a terminal that speaks the kitty keyboard protocol, such as Ghostty, kitty, or WezTerm with `enable_kitty_keyboard = true` in its config. Elsewhere the REPL says so once at start. macOS Terminal.app sends a plain Enter for Shift+Enter and Option+Enter, so both submit.
+    - **Ctrl+J** works without setup in most terminals. VS Code on Windows and Linux takes it to show or hide its panel, so use the `\` there.
+    - **Alt+Enter** on macOS needs Option to act as Meta: **Use Option as Meta key** in Terminal.app (Settings → Profiles → Keyboard), or Option set to Esc+ in iTerm2. Windows Terminal and WezTerm use Alt+Enter for fullscreen by default.
 
 ## Character ring
 

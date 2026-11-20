@@ -15,4 +15,9 @@ describe("App shell", () => {
     // renderToString wraps at 80 columns; the hint is longer.
     expect(renderToString(<App markers={DEFAULT_MARKERS} kittyHint {...offlineProps} />, { columns: 120 })).toContain(KITTY_HINT);
   });
+  it("names only newline keys that every terminal sends", () => {
+    expect(KITTY_HINT).toContain("Ctrl+J");
+    expect(KITTY_HINT).toContain("end the line with \\ and press Enter");
+    expect(KITTY_HINT).not.toContain("Alt+Enter");
+  });
 });

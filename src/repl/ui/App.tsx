@@ -18,7 +18,7 @@ import { Choice, Countdown, ExitPrompt, SplitPreview, TextPrompt, YesNo, type Ex
 
 export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
 export const KITTY_HINT =
-  "This terminal can't tell Shift+Enter from Enter — use Alt+Enter or Ctrl+J for new lines.";
+  "This terminal can't tell Shift+Enter from Enter: for a new line, press Ctrl+J, or end the line with \\ and press Enter.";
 
 /** What waitUntilExit resolves with when the user leaves, rather than Ink stopping. */
 export const LEFT = Symbol("left");
