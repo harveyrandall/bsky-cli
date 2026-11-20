@@ -176,12 +176,28 @@ describe("Enter", () => {
     await type("\r");
     expect(props.onHint).toHaveBeenLastCalledWith("Still working — wait for it to finish.");
     vi.mocked(props.onHint).mockClear();
-    await type("\x03", "\r");
-    expect(props.onHint).not.toHaveBeenCalled();
+    await type("\x03");
+    expect(props.onHint).toHaveBeenCalledWith("Still working — wait for it to finish.");
+    expect(props.onInterrupt).not.toHaveBeenCalled();
     expect(props.onEcho).toHaveBeenCalledOnce();
     finish("done");
     await tick();
     expect(lastFrame()).toContain("bsky › \x1b[7m \x1b[27m");
+  });
+  it("leaves the hidden text alone while it runs: Esc, Ctrl+C, ↑, ↓ and Ctrl+G only say it's still working", async () => {
+    let finish = (_: "keep") => {};
+    const { type, props, lastFrame } = setup({
+      onSubmit: vi.fn(async (text: string) => (text === "/help" ? "done" : new Promise<"keep">((resolve) => (finish = resolve)))),
+    });
+    await type("/help", "\r", "/reply 1", "\r");
+    for (const key of ["\x1b", "\x03", "\x1b[A", "\x1b[B", "\x07"]) await type(key);
+    expect(vi.mocked(props.onHint).mock.calls).toEqual(Array(5).fill(["Still working — wait for it to finish."]));
+    expect(props.onEscape).not.toHaveBeenCalled();
+    expect(props.onInterrupt).not.toHaveBeenCalled();
+    expect(props.onEdit).not.toHaveBeenCalled();
+    finish("keep");
+    await tick();
+    expect(lastFrame()).toContain("bsky › /reply 1");
   });
   it("shows the text again when it comes back", async () => {
     let finish = (_: "keep") => {};

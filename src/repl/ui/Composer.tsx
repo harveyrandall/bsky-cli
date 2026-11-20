@@ -8,6 +8,7 @@ import { chunkKeys, keyToAction } from "@/repl/ui/keys";
 import { Ring } from "@/repl/ui/Ring";
 
 const STILL_WORKING = "Still working — wait for it to finish.";
+const WAITS_FOR_RUN = new Set(["escape", "interrupt", "eof", "up", "down", "edit"]);
 
 const segmenter = new Intl.Segmenter();
 const cells = (text: string) => [...segmenter.segment(text)].length;
@@ -154,13 +155,15 @@ export function Composer(props: ComposerProps) {
   const handle = (input: string, key: Partial<Key>) => {
     const action = keyToAction(input, key, editor.current);
     const { text, cursor } = editor.current;
+    // The text is hidden while it runs, so keys that act on all of it wait, as Enter does.
+    if (submitting.current && WAITS_FOR_RUN.has(action.type)) return props.onHint(STILL_WORKING);
     switch (action.type) {
       case "escape":
         return outcome(text, props.onEscape(text));
       case "interrupt":
         return outcome(text, props.onInterrupt(text));
       case "eof":
-        return submitting.current ? props.onHint(STILL_WORKING) : props.onEof(text);
+        return props.onEof(text);
     }
     // While a post waits out its undo window the composer only sends it now.
     if (pending !== undefined) {
