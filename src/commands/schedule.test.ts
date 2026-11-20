@@ -960,6 +960,18 @@ describe("schedule edit with recurrence", () => {
     expect(errorSpy).toHaveBeenCalledWith("That post is being sent, or has gone, so it wasn't deleted. If sending fails, it goes back in the queue.");
   });
 
+  it("doesn't save a deleted post as a draft when told no", async () => {
+    vi.mocked(listScheduledPosts).mockResolvedValue([mockPost()]);
+    vi.mocked(saveDraft).mockResolvedValue({ id: "d1" } as Awaited<ReturnType<typeof saveDraft>>);
+    mockQuestion.mockResolvedValueOnce("y").mockResolvedValueOnce("no");
+
+    await program.parseAsync(["node", "bsky", "schedule", "delete", "1"]);
+
+    expect(mockQuestion).toHaveBeenCalledWith("Would you like to save the post as a draft? (Y/n) ");
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(deleteScheduledPost).toHaveBeenCalledWith("test-id", undefined);
+  });
+
   it("displays recurrence info for recurring posts", async () => {
     vi.mocked(listScheduledPosts).mockResolvedValue([
       mockPost({

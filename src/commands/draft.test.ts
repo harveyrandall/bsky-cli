@@ -32,6 +32,11 @@ vi.mock("@/commands/post", () => ({
   isLengthError: vi.fn(() => false),
 }));
 
+const answer = vi.hoisted(() => ({ value: "" }));
+vi.mock("node:readline/promises", () => ({
+  createInterface: () => ({ question: async () => answer.value, close() {} }),
+}));
+
 import { registerDrafts, syncNetworkDrafts } from "./draft";
 import { isJson } from "@/index";
 import { outputJson } from "@/lib/format";
@@ -363,6 +368,23 @@ describe("syncNetworkDrafts", () => {
 
     errSpy.mockRestore();
     Object.defineProperty(process.stdin, "isTTY", { value: originalIsTTY, configurable: true });
+  });
+
+  it.each(["no", "nope"])("sends nothing when asked in a terminal and told %j", async (no) => {
+    const tty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockListDrafts.mockResolvedValue([{ ...sampleDraft, reason: "network" }]);
+    answer.value = no;
+    try {
+      await syncNetworkDrafts(mockAgent as any);
+      expect(mockCreatePost).not.toHaveBeenCalled();
+    } finally {
+      answer.value = "";
+      errSpy.mockRestore();
+      if (tty) Object.defineProperty(process.stdin, "isTTY", tty);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
   });
 });
 

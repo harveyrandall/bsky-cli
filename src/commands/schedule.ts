@@ -584,7 +584,7 @@ To automate posting, you can:
         const saveDraftAnswer = await rl.question(
           "Would you like to save the post as a draft? (Y/n) ",
         );
-        if (saveDraftAnswer.trim().toLowerCase() !== "n") {
+        if (!saidNo(saveDraftAnswer)) {
           const draft = await saveDraft(
             {
               type: "post",

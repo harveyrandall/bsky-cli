@@ -17,6 +17,7 @@ import {
 import { createPost, isLengthError, isNetworkError } from "@/commands/post";
 import { graphemeLength } from "@/lib/split-thread";
 import { outputJson } from "@/lib/format";
+import { saidNo } from "@/lib/confirm";
 import type { Draft } from "@/lib/types";
 
 function reasonTag(reason: string): string {
@@ -120,7 +121,7 @@ export async function syncNetworkDrafts(
   const rl = createInterface({ input: stdin, output: stderr });
   const answer = await rl.question("Send them now? [Y/n] ");
   rl.close();
-  if (answer.trim().toLowerCase() === "n") return;
+  if (saidNo(answer)) return;
 
   for (const draft of pending) {
     try {

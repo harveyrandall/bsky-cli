@@ -18,6 +18,7 @@ import { extractLinks, extractMentions, extractTags } from "@/lib/extract";
 import { deleteDraft, listDrafts, saveDraft } from "@/drafts";
 import type { Draft } from "@/lib/types";
 import { isNetworkError } from "@/lib/errors";
+import { saidNo } from "@/lib/confirm";
 import { detectMimeType } from "@/lib/media";
 
 export { isNetworkError };
@@ -268,7 +269,7 @@ async function executeOrDraft(
         try {
           const answer = await rl.question("\nSave as draft? [Y/n] ");
           rl.close();
-          if (answer.trim().toLowerCase() !== "n") {
+          if (!saidNo(answer)) {
             const draft = await saveDraft(
               { ...draftData, reason: "manual" },
               profile,

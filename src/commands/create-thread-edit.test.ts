@@ -12,6 +12,7 @@ vi.mock("node:readline/promises", () => ({
 }));
 
 import { registerCreateThread } from "./create-thread";
+import { saveDraft } from "@/drafts";
 
 describe("create-thread preview", () => {
   const tty = process.stdin.isTTY;
@@ -27,6 +28,19 @@ describe("create-thread preview", () => {
     await program.parseAsync(["node", "test", "create-thread", "one /// two"]);
     expect(err).toHaveBeenCalledWith(expect.stringContaining("Couldn't open nano"));
     expect(answers).toEqual([]);
+    err.mockRestore();
+  });
+
+  it("doesn't save a draft on quitting when told no", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(saveDraft).mockResolvedValue({ id: "d1" } as Awaited<ReturnType<typeof saveDraft>>);
+    answers.push("q", "no");
+    const program = new Command().exitOverride().option("--json").option("-p, --profile <name>");
+    registerCreateThread(program);
+    await program.parseAsync(["node", "test", "create-thread", "one /// two"]);
+    expect(answers).toEqual([]);
+    expect(saveDraft).not.toHaveBeenCalled();
     err.mockRestore();
   });
 });
