@@ -58,6 +58,8 @@ vi.mock("@/lib/scheduler", () => ({
   enableScheduler: vi.fn(),
   disableScheduler: vi.fn(),
   getSchedulerStatus: vi.fn(() => "not installed"),
+  schedulerRunning: vi.fn(() => false),
+  schedulerSupported: vi.fn(() => true),
   uninstallScheduler: vi.fn(),
   trimSchedulerLog: vi.fn(),
 }));
@@ -108,6 +110,8 @@ import {
   enableScheduler,
   disableScheduler,
   getSchedulerStatus,
+  schedulerRunning,
+  schedulerSupported,
   uninstallScheduler,
 } from "@/lib/scheduler";
 import { buildRRule, nextOccurrence, parseCount } from "@/lib/recurrence";
@@ -845,6 +849,66 @@ describe("schedule post with --repeat", () => {
 
     expect(errorSpy).toHaveBeenCalledWith("Error: --times requires --repeat");
     exitSpy.mockRestore();
+  });
+});
+
+describe("schedule post onboarding", () => {
+  let program: Command;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let tty: PropertyDescriptor | undefined;
+  const offered = () => mockQuestion.mock.calls.some(([q]) => String(q).includes("enable the scheduler"));
+  const post = () => program.parseAsync(["node", "bsky", "-p", "work", "schedule", "post", "Hello"]);
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(isJson).mockReturnValue(false);
+    vi.mocked(isScheduledDirEmpty).mockResolvedValue(true);
+    vi.mocked(schedulerSupported).mockReturnValue(true);
+    vi.mocked(schedulerRunning).mockReturnValue(false);
+    vi.mocked(promptDateTime).mockResolvedValue("2026-04-01T14:00:00.000Z");
+    vi.mocked(saveScheduledPost).mockResolvedValue(mockPost());
+    tty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    program = new Command();
+    program.option("-p, --profile <name>").option("--json");
+    registerSchedule(program);
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    if (tty) Object.defineProperty(process.stdin, "isTTY", tty);
+    else delete (process.stdin as { isTTY?: boolean }).isTTY;
+    errorSpy.mockRestore();
+  });
+
+  it("offers to enable the scheduler when nothing was scheduled", async () => {
+    mockQuestion.mockResolvedValueOnce("");
+    await post();
+    expect(offered()).toBe(true);
+    expect(enableScheduler).toHaveBeenCalledWith(1, "work");
+  });
+
+  it("doesn't offer when the scheduler already sends this profile's posts", async () => {
+    vi.mocked(schedulerRunning).mockReturnValue(true);
+    await post();
+    expect(schedulerRunning).toHaveBeenCalledWith("work");
+    expect(offered()).toBe(false);
+    expect(enableScheduler).not.toHaveBeenCalled();
+  });
+
+  it("doesn't offer where the scheduler can't run", async () => {
+    vi.mocked(schedulerSupported).mockReturnValue(false);
+    await post();
+    expect(offered()).toBe(false);
+    expect(enableScheduler).not.toHaveBeenCalled();
+  });
+
+  it("doesn't look at the scheduler when stdin isn't a terminal", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    await post();
+    expect(schedulerSupported).not.toHaveBeenCalled();
+    expect(schedulerRunning).not.toHaveBeenCalled();
+    expect(offered()).toBe(false);
   });
 });
 

@@ -233,7 +233,7 @@ When `--times` is omitted, the post repeats indefinitely until manually deleted.
     Each recurring post is a single file that gets updated in place. After publishing, the scheduled date advances to the next occurrence and the remaining count decrements. On the last occurrence, the file is deleted. Recurrence rules are stored as RFC 5545 RRULE strings.
 
 !!! tip "First-use onboarding"
-    When `bsky schedule post` finds nothing scheduled, it offers to enable the background scheduler. Posts scheduled from the REPL don't get this offer, but the REPL says if the scheduler isn't enabled. You can also set it up later with `bsky schedule enable`.
+    When `bsky schedule post` finds nothing scheduled, it offers to enable the background scheduler, unless it's already sending this profile's posts. Posts scheduled from the REPL don't get this offer, but the REPL says if the scheduler isn't enabled. You can also set it up later with `bsky schedule enable`.
 
 ### `bsky schedule list` / `bsky schedule ls`
 

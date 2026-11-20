@@ -28,6 +28,8 @@ import {
   enableScheduler,
   disableScheduler,
   getSchedulerStatus,
+  schedulerRunning,
+  schedulerSupported,
   uninstallScheduler,
   trimSchedulerLog,
 } from "@/lib/scheduler";
@@ -337,7 +339,7 @@ export function registerSchedule(program: Command): void {
           }
 
           // First-use onboarding: offer to set up the scheduler
-          if (wasEmpty && stdin.isTTY) {
+          if (wasEmpty && stdin.isTTY && schedulerSupported() && !schedulerRunning(profile)) {
             console.error(`
 To automate posting, you can:
 
