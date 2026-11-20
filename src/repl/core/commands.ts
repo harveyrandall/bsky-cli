@@ -411,6 +411,8 @@ interface Completed {
   text: string;
   cursor: number;
   candidates: string[];
+  /** How many candidates a long list left out. */
+  more?: number;
 }
 
 /** What Tab can offer beyond the REPL's own command names. */
@@ -479,7 +481,8 @@ export function complete(text: string, cursor: number, sources: Completions): Co
   if (native?.name === "attach") return completePath(before, token, sources);
   if (native?.usage.includes("<ref>") && words.length === 1) {
     const done = extend(before, token, starting(sources.labels()));
-    return { ...done, candidates: done.candidates.slice(0, MOST_LABELS) };
+    const more = done.candidates.length - MOST_LABELS;
+    return more > 0 ? { ...done, candidates: done.candidates.slice(0, MOST_LABELS), more } : done;
   }
   return unchanged;
 }

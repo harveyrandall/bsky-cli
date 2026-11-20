@@ -179,7 +179,10 @@ export function Composer(props: ComposerProps) {
       case "complete": {
         const completed = complete(text, cursor, props.completions);
         if (completed.text !== text) apply({ type: "set", text: completed.text });
-        else if (completed.candidates.length > 1) props.onHint(completed.candidates.join("  "));
+        else if (completed.candidates.length > 1) {
+          const more = completed.more ? [`… ${completed.more} more`] : [];
+          props.onHint([...completed.candidates, ...more].join("  "));
+        }
         return;
       }
       default:

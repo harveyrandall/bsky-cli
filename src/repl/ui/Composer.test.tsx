@@ -205,6 +205,15 @@ describe("Tab", () => {
     await type("/like ", "\t");
     expect(onHint).toHaveBeenCalledWith("4  #2");
   });
+  it("says how many labels it left out, without typing that in", async () => {
+    const onHint = vi.fn();
+    const labels = () => Array.from({ length: 10 }, (_, i) => `${10 - i}`);
+    const { type, lastFrame } = setup({ onHint, completions: { cliNames: [], flags: () => [], labels, paths: () => [] } });
+    await type("/like ", "\t");
+    expect(onHint).toHaveBeenCalledWith("10  9  8  7  6  5  4  3  … 2 more");
+    expect(lastFrame()).toContain("bsky › /like");
+    expect(lastFrame()).not.toContain("more");
+  });
 });
 
 describe("a submit that clears", () => {

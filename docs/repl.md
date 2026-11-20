@@ -146,7 +146,7 @@ The REPL never exits on an error.
 | Alt+←/→ (Alt+B/F) | Word left / right |
 | Ctrl+W, Ctrl+U | Delete word, delete to line start |
 | Backspace, Delete | Delete one character |
-| Tab | Complete command names, then long flags, `/attach` paths (`~/` works, and spaces are escaped for you) and recent labels after commands that take a `<ref>`. Inside an open quote it does nothing |
+| Tab | Complete command names, then long flags, `/attach` paths (`~/` works, and spaces are escaped for you) and recent labels after commands that take a `<ref>`. It offers the 8 most recent labels, your own posts first, each newest first, and says how many more there are (`… 2 more`); type more of a label to narrow them. Inside an open quote it does nothing |
 | Ctrl+G | Open the draft in `$EDITOR` (or `vi`); what you save comes back to the composer. Use a waiting form for a GUI editor (`code --wait`). If the editor fails, your text stays as it was. Nothing is sent until it closes |
 
 Each line you submit stays in the scrollback, as in Node's REPL: `thread (2) › next`. A login shows as `/login …` or `/run login …`, so its password stays out of the scrollback. While a command runs, the composer shows only its prompt, dimmed. Keys you type meanwhile still count, and show once it's done.
