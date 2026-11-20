@@ -888,6 +888,13 @@ describe("schedule post onboarding", () => {
     expect(enableScheduler).toHaveBeenCalledWith(1, "work");
   });
 
+  it.each(["n", "no", " No "])("leaves the scheduler off on %j", async (answer) => {
+    mockQuestion.mockResolvedValueOnce(answer);
+    await post();
+    expect(offered()).toBe(true);
+    expect(enableScheduler).not.toHaveBeenCalled();
+  });
+
   it("doesn't offer when the scheduler already sends this profile's posts", async () => {
     vi.mocked(schedulerRunning).mockReturnValue(true);
     await post();

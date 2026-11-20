@@ -1,4 +1,5 @@
 import type { Interface as ReadlineInterface } from "node:readline/promises";
+import { saidNo } from "@/lib/confirm";
 
 /**
  * Parse a date string in DD-MM or DD-MM-YYYY format.
@@ -128,7 +129,7 @@ export async function promptDateTime(rl: ReadlineInterface): Promise<string> {
     const display = formatLocalDateTime(iso);
     console.error(`Scheduled for: ${display}`);
     const confirm = await rl.question("Save the new scheduled date (Y/n) ");
-    if (confirm.trim().toLowerCase() === "n") continue;
+    if (saidNo(confirm)) continue;
 
     return iso;
   }

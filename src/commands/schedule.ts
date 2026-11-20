@@ -23,6 +23,7 @@ import { saveDraft } from "@/drafts";
 import { createPost } from "@/commands/post";
 import { graphemeLength } from "@/lib/split-thread";
 import { promptDateTime, formatLocalDateTime } from "@/lib/date-prompt";
+import { saidNo } from "@/lib/confirm";
 import { outputJson } from "@/lib/format";
 import {
   enableScheduler,
@@ -354,7 +355,7 @@ To automate posting, you can:
             const answer = await rl.question(
               "Would you like to enable the scheduler now? (Y/n) ",
             );
-            if (answer.trim().toLowerCase() !== "n") {
+            if (!saidNo(answer)) {
               enableScheduler(1, profile);
               console.error("Scheduler enabled (every 1 minute).");
             } else {
