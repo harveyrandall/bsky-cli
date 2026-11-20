@@ -1152,6 +1152,7 @@ export class Repl {
       return "handled";
     }
     this.restage(media);
+    this.deps.print("Not sent: back in the composer", "dim");
     return { restore: items.length === 1 ? this.asResend(items[0]) : typed(this.join(items.flatMap((i) => i.posts))) };
   }
 

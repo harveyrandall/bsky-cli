@@ -1,4 +1,6 @@
 import { findCommand, tokenize, unknownMessage, type CommandContext } from "./commands";
+import { isLogin } from "./echo";
+import { blockedMessage } from "./passthrough";
 import type { SubmitOutcome } from "./repl";
 
 export type Parsed =
@@ -24,7 +26,13 @@ export function parseInput(input: string): Parsed {
 export async function dispatch(input: string, ctx: CommandContext): Promise<SubmitOutcome> {
   const parsed = parseInput(input);
   if (parsed.kind === "empty") return "done";
-  // The REPL never exits on an error: report it and keep the text.
+  // Before tokenize can throw on it: a password can't stay in the composer, or go to ↑ history.
+  if (isLogin(input)) {
+    ctx.print(blockedMessage("login"), "error");
+    return "clear";
+  }
+  // The REPL never exits on an error: report it. A usage mistake or a failed command clears into
+  // ↑ history; plain text and a failed /edit keep their text, as a ref that isn't found does.
   try {
     if (parsed.kind === "text") return await ctx.repl.submitText(parsed.text);
     const cmd = findCommand(parsed.name);
@@ -39,6 +47,6 @@ export async function dispatch(input: string, ctx: CommandContext): Promise<Subm
   } catch (err) {
     const message = err instanceof Error ? err.message || err.name : String(err);
     ctx.print(parsed.kind === "command" ? `/${parsed.name}: ${message}` : message, "error");
-    return "keep";
+    return parsed.kind === "text" || parsed.name === "edit" ? "keep" : "done";
   }
 }

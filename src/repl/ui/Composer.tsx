@@ -8,6 +8,7 @@ import { chunkKeys, keyToAction } from "@/repl/ui/keys";
 import { Ring } from "@/repl/ui/Ring";
 
 const STILL_WORKING = "Still working — wait for it to finish.";
+const WAITS_FOR_RUN = new Set(["escape", "interrupt", "eof", "up", "down", "edit"]);
 
 const segmenter = new Intl.Segmenter();
 const cells = (text: string) => [...segmenter.segment(text)].length;
@@ -82,6 +83,8 @@ export interface ComposerProps {
   initial?: EditorState;
   /** What Tab offers beyond the REPL's own command names. */
   completions: Completions;
+  /** What Enter submits, before it runs, to stay in the scrollback. */
+  onEcho(text: string): void;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -127,34 +130,40 @@ export function Composer(props: ComposerProps) {
 
   const submitting = useRef(false);
   const submit = async (text: string) => {
-    if (text.trim() === "") {
-      if (chips) props.onHint("Type some text to go with it: posts need text");
+    if (submitting.current) {
+      if (text.trim() !== "") props.onHint(STILL_WORKING);
       return;
     }
-    if (submitting.current) {
-      props.onHint(STILL_WORKING);
+    props.onEcho(text);
+    if (text.trim() === "") {
+      if (chips) props.onHint("Type some text to go with it: posts need text");
+      if (text !== "") apply({ type: "submitted", text });
       return;
     }
     submitting.current = true;
+    rerender();
     try {
       outcome(text, await props.onSubmit(text));
     } catch (err) {
       report(err);
     } finally {
       submitting.current = false;
+      rerender();
     }
   };
 
   const handle = (input: string, key: Partial<Key>) => {
     const action = keyToAction(input, key, editor.current);
     const { text, cursor } = editor.current;
+    // The text is hidden while it runs, so keys that act on all of it wait, as Enter does.
+    if (submitting.current && WAITS_FOR_RUN.has(action.type)) return props.onHint(STILL_WORKING);
     switch (action.type) {
       case "escape":
         return outcome(text, props.onEscape(text));
       case "interrupt":
         return outcome(text, props.onInterrupt(text));
       case "eof":
-        return submitting.current ? props.onHint(STILL_WORKING) : props.onEof(text);
+        return props.onEof(text);
     }
     // While a post waits out its undo window the composer only sends it now.
     if (pending !== undefined) {
@@ -173,7 +182,10 @@ export function Composer(props: ComposerProps) {
       case "complete": {
         const completed = complete(text, cursor, props.completions);
         if (completed.text !== text) apply({ type: "set", text: completed.text });
-        else if (completed.candidates.length > 1) props.onHint(completed.candidates.join("  "));
+        else if (completed.candidates.length > 1) {
+          const more = completed.more ? [`… ${completed.more} more`] : [];
+          props.onHint([...completed.candidates, ...more].join("  "));
+        }
         return;
       }
       default:
@@ -217,6 +229,8 @@ export function Composer(props: ComposerProps) {
       </Text>
     );
   }
+  // The text is in the scrollback while it runs. Keys typed meanwhile still count.
+  if (submitting.current) return <Text dimColor>{prompt}</Text>;
 
   const { text, cursor } = editor.current;
   // One cell stays free at the end of each row for the cursor.

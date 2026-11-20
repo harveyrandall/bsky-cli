@@ -19,6 +19,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import {
   schedulerProfile,
+  schedulerRunning,
+  schedulerSupported,
   enableScheduler,
   disableScheduler,
   getSchedulerStatus,
@@ -489,5 +491,50 @@ describe("schedulerProfile", () => {
     setPlatform("win32");
     vi.mocked(execFileSync).mockReturnValue('Task To Run:   "C:\\bsky.exe" schedule run -p "work"\n');
     expect(schedulerProfile()).toBe("work");
+  });
+});
+
+describe("schedulerRunning", () => {
+  it("counts only a job that sends this profile's posts", () => {
+    setPlatform("darwin");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue("<string>--profile</string>\n  <string>work</string>");
+    expect(schedulerRunning("work")).toBe(true);
+    expect(schedulerRunning()).toBe(false);
+    expect(schedulerRunning("home")).toBe(false);
+  });
+  it("counts the unnamed profile's job", () => {
+    setPlatform("linux");
+    vi.mocked(execFileSync).mockReturnValue("* * * * * '/bin/bsky' schedule run # bsky-cli-scheduler\n");
+    expect(schedulerRunning()).toBe(true);
+  });
+  it("doesn't count a job that's turned off", () => {
+    setPlatform("linux");
+    vi.mocked(execFileSync).mockReturnValue("# DISABLED * * * * * '/bin/bsky' schedule run # bsky-cli-scheduler\n");
+    expect(schedulerRunning()).toBe(false);
+  });
+  it("treats a job it can't read as not running", () => {
+    setPlatform("darwin");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockImplementation(() => {
+      throw new Error("EACCES");
+    });
+    expect(schedulerRunning()).toBe(false);
+  });
+  it("says no job runs where there can't be one, without ending the process", () => {
+    setPlatform("freebsd");
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit");
+    });
+    expect(schedulerSupported()).toBe(false);
+    expect(schedulerRunning()).toBe(false);
+    expect(exit).not.toHaveBeenCalled();
+    exit.mockRestore();
+  });
+  it("knows where there can be one", () => {
+    for (const platform of ["linux", "darwin", "win32"]) {
+      setPlatform(platform);
+      expect(schedulerSupported()).toBe(true);
+    }
   });
 });

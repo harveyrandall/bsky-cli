@@ -23,11 +23,14 @@ import { saveDraft } from "@/drafts";
 import { createPost } from "@/commands/post";
 import { graphemeLength } from "@/lib/split-thread";
 import { promptDateTime, formatLocalDateTime } from "@/lib/date-prompt";
+import { saidNo } from "@/lib/confirm";
 import { outputJson } from "@/lib/format";
 import {
   enableScheduler,
   disableScheduler,
   getSchedulerStatus,
+  schedulerRunning,
+  schedulerSupported,
   uninstallScheduler,
   trimSchedulerLog,
 } from "@/lib/scheduler";
@@ -337,7 +340,9 @@ export function registerSchedule(program: Command): void {
           }
 
           // First-use onboarding: offer to set up the scheduler
-          if (wasEmpty && stdin.isTTY) {
+          if (wasEmpty && stdin.isTTY && !schedulerSupported()) {
+            console.error(`Nothing sends it automatically on this system: run ${chalk.blue("bsky schedule watch")} to send it.`);
+          } else if (wasEmpty && stdin.isTTY && !schedulerRunning(profile)) {
             console.error(`
 To automate posting, you can:
 
@@ -352,7 +357,7 @@ To automate posting, you can:
             const answer = await rl.question(
               "Would you like to enable the scheduler now? (Y/n) ",
             );
-            if (answer.trim().toLowerCase() !== "n") {
+            if (!saidNo(answer)) {
               enableScheduler(1, profile);
               console.error("Scheduler enabled (every 1 minute).");
             } else {
@@ -581,7 +586,7 @@ To automate posting, you can:
         const saveDraftAnswer = await rl.question(
           "Would you like to save the post as a draft? (Y/n) ",
         );
-        if (saveDraftAnswer.trim().toLowerCase() !== "n") {
+        if (!saidNo(saveDraftAnswer)) {
           const draft = await saveDraft(
             {
               type: "post",

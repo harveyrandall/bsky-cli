@@ -16,6 +16,7 @@ import type { ThreadPost } from "@/lib/split-thread";
 import { saveDraft } from "@/drafts";
 import { editInEditor } from "@/lib/editor";
 import { outputJson } from "@/lib/format";
+import { saidNo } from "@/lib/confirm";
 import type { Draft, ThreadDraftPost } from "@/lib/types";
 
 async function readStdin(): Promise<string> {
@@ -145,7 +146,7 @@ async function interactivePreview(
 
     if (cmd === "q" || cmd === "quit") {
       const save = await rl.question("Save as draft? [Y/n] ");
-      if (save.trim().toLowerCase() !== "n") {
+      if (!saidNo(save)) {
         const draft = await saveDraft(
           {
             type: "thread",

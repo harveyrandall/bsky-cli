@@ -295,6 +295,24 @@ export function schedulerProfile(): string | undefined {
   return /(?:\s-p ['"]|--profile<\/string>\s*<string>)([\w.-]+)/.exec(installedJob())?.[1];
 }
 
+/** Whether this platform can run the job at all. The others end the process if asked about it. */
+export function schedulerSupported(): boolean {
+  return ["linux", "darwin", "win32"].includes(process.platform);
+}
+
+/**
+ * Whether the installed job is enabled and sends `profile`'s posts. There's one job per
+ * machine, and it only sends one profile's posts. False where no job can run, or it can't be read.
+ */
+export function schedulerRunning(profile?: string): boolean {
+  if (!schedulerSupported()) return false;
+  try {
+    return getSchedulerStatus() === "enabled" && (schedulerProfile() ?? "") === (profile ?? "");
+  } catch {
+    return false; // a job it can't read
+  }
+}
+
 export function uninstallScheduler(): void {
   switch (process.platform) {
     case "linux":

@@ -61,6 +61,14 @@ describe("runPassthrough", () => {
     expect(process.stdout.write).toBe(write);
     expect(console.log).toBe(log);
   });
+  it("names an error that has no message, rather than showing a blank line", async () => {
+    const { lines, io, p } = setup();
+    p.command("blank").action(async () => {
+      throw new TypeError("");
+    });
+    await runPassthrough(p, ["blank"], io);
+    expect(lines).toEqual(["TypeError"]);
+  });
   it("reports a mistake in the command's own arguments", async () => {
     const { lines, io, p } = setup();
     await runPassthrough(p, ["hello", "--nope"], io);
@@ -149,7 +157,7 @@ describe("what a run would really reach", () => {
   };
   it.each([[["-p", "hello"]], [["-c", "hello"]], [["--", "-p", "hello"]], [["-V"]], [["-p"]]])("%j runs nothing, not even the default command", async (argv) => {
     const { p, repl, lines } = withDefault();
-    expect(await runPassthrough(p, argv, { print: (text) => lines.push(text) })).toBe("keep");
+    expect(await runPassthrough(p, argv, { print: (text) => lines.push(text) })).toBe("done");
     expect(repl).not.toHaveBeenCalled();
     expect(lines.join()).toContain("No such command");
   });
@@ -234,12 +242,12 @@ describe("what a run comes to", () => {
     [["hello"], "done"],
     [["hello", "--help"], "done"],
     [["quits"], "done"],
-    [["hello", "--nope"], "keep"],
-    [["bye"], "keep"],
-    [["boom"], "keep"],
-    [["failing"], "keep"],
-    [["hello", "--stdin"], "keep"],
-    [["nonsense"], "keep"],
+    [["hello", "--nope"], "done"],
+    [["bye"], "done"],
+    [["boom"], "done"],
+    [["failing"], "done"],
+    [["hello", "--stdin"], "done"],
+    [["nonsense"], "done"],
   ])("%j is %s", async (argv, outcome) => {
     const p = program();
     p.command("quits").action(() => process.exit(0));

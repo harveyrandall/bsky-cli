@@ -257,19 +257,21 @@ describe("puts text back", () => {
     expect(deps.restore).toHaveBeenCalledWith("bad /// three");
   });
   it("joined with the split marker when several thread posts are cancelled", async () => {
-    const { repl } = setup({ undo: 5 });
+    const { repl, printed } = setup({ undo: 5 });
     await repl.startThread();
     await repl.submitText("a");
     await repl.submitText("b");
     expect(repl.escape("")).toEqual({ restore: "a /// b" });
+    expect(printed()).toContain("Not sent: back in the composer");
   });
   it("as drafts when cancelled items are going to different places", async () => {
-    const { repl, deps, flush } = setup({ undo: 5 });
+    const { repl, deps, flush, printed } = setup({ undo: 5 });
     await repl.post("a");
     await repl.post("b");
     expect(repl.escape("")).toBe("handled");
     await flush();
     expect(deps.saveDraft).toHaveBeenCalledTimes(2);
+    expect(printed()).not.toContain("Not sent");
   });
   it("as drafts when one of several cancelled items has media, which would move to the first post", async () => {
     const { repl, deps, flush } = setup({ undo: 5 });
@@ -283,9 +285,16 @@ describe("puts text back", () => {
     expect(repl.staged()).toEqual([]);
   });
   it("as what you typed when pending posts are cancelled with an empty composer", async () => {
-    const { repl } = setup({ undo: 5 });
+    const { repl, printed } = setup({ undo: 5 });
     await repl.post("waiting");
     expect(repl.escape("")).toEqual({ restore: "/post waiting" });
+    expect(printed()).toContain("Not sent: back in the composer");
+  });
+  it("as what you typed when Ctrl+C cancels pending posts", async () => {
+    const { repl, printed } = setup({ undo: 5 });
+    await repl.post("waiting");
+    expect(repl.interrupt("")).toEqual({ restore: "/post waiting" });
+    expect(printed()).toContain("Not sent: back in the composer");
   });
   it("saves cancelled posts as a draft when the composer has text", async () => {
     const { repl, deps, flush, printed } = setup({ undo: 5 });
@@ -294,6 +303,7 @@ describe("puts text back", () => {
     await flush();
     expect(deps.saveDraft).toHaveBeenCalledWith(expect.objectContaining({ reason: "manual", text: "waiting" }));
     expect(printed()).toContain("Saved as draft d1");
+    expect(printed()).not.toContain("Not sent");
   });
 });
 

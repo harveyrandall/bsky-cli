@@ -55,11 +55,11 @@ Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it re
 
 **Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), a `#n` label from something you've read, its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
 
-A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command.
+A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command. A usage mistake, such as `/like` with no ref or a quote left open, shows its error and goes to ↑ history, as in Node's REPL, and so does a CLI command that fails. A ref that isn't found keeps your text so you can fix it, and so does `/edit` when the editor fails.
 
 ## Reading and CLI commands
 
-Most CLI commands run from the prompt, without the `bsky`: `/timeline -n 5`, `/tl`, `/notifs`, `/search cats`. `/help` lists them on its `↗ From the CLI` line. A REPL command of the same name goes first, so use `/run drafts list` for the CLI's `drafts`. The current profile and any `-c` you started with are used, and a command that fails never ends the REPL: its error is shown and its text stays in the composer.
+Most CLI commands run from the prompt, without the `bsky`: `/timeline -n 5`, `/tl`, `/notifs`, `/search cats`. `/help` lists them on its `↗ From the CLI` line. A REPL command of the same name goes first, so use `/run drafts list` for the CLI's `drafts`. The current profile and any `-c` you started with are used, and a command that fails never ends the REPL: its error is shown, and its text goes to ↑ history.
 
 Posts that `timeline`, `thread`, `search`, `bookmarks get` and `/view` print get a `#n` label, or their `(n)` if they're already in the session. It works as a ref and lasts for the session, including when you resume it. `/notifs` and `--json` output have no labels.
 
@@ -73,7 +73,7 @@ Posts that `timeline`, `thread`, `search`, `bookmarks get` and `/view` print get
 
 In a CLI command's arguments, a `#n` becomes its post's `at://` URI only where the command takes a post, as in `/run thread #1`. Anywhere else it stays as you typed it, so `/run post we are #1` posts those words, and a bare number is left alone.
 
-Commands that need the terminal to themselves refuse, with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and `schedule post`, `edit`, `delete`, `uninstall` and `watch`. So does `--stdin` on any command. The hint says what to use instead, usually another terminal. A refused `/login` also clears the composer and stays out of ↑ history, as it may hold a password.
+Commands that need the terminal to themselves refuse, with a hint: `repl`, `login`, `stream`, `create-thread`, `config edit`, and `schedule post`, `edit`, `delete`, `uninstall` and `watch`. So does `--stdin` on any command. The hint says what to use instead, usually another terminal. `/login` and `/run login` always clear the composer and stay out of ↑ history, even with an unclosed quote, as they may hold a password. They're never saved with the session either, even while you type them.
 
 ## Switching account
 
@@ -94,7 +94,7 @@ One post within the limit (300, or 298 with the thread label), with no markers, 
 
 ## Undo window and pacing
 
-- **Undo window:** what you submit waits this long before its first post is sent. Meanwhile the composer shows it dimmed and read-only, with `Sending in 7s… [Esc] cancel  [Enter] send now`. Esc returns it, with any media, to the composer as you typed it, or saves it as a draft if the composer already had text.
+- **Undo window:** what you submit waits this long before its first post is sent. Meanwhile the composer shows it dimmed and read-only, with `Sending in 7s… [Esc] cancel  [Enter] send now`. Esc returns it, with any media, to the composer as you typed it and says `Not sent: back in the composer`, or saves it as a draft if the composer already had text.
 - **Pace:** the minimum time between posts, so a thread doesn't arrive all at once.
 
 Each is none, 5, 10 or 15 seconds. If you haven't set them (`--undo`, `--pace` or the config file), the first thread of a session asks for each, then offers to save your answers: `Yes`, `No`, or `No, don't ask again`.
@@ -105,7 +105,7 @@ With `--thread-label` (or `thread-label = true`), every post in the active threa
 
 ## Media
 
-`/attach` checks each file, asks for its alt text and stages it. `/new` → **Image post** or **Video post** does the same from a path, then opens a `post ›` prompt. Staged files show above the composer (`📎 chart.png · photo.jpg`) and go on the first post of the next batch, wherever it's going. The exception is a quote, which can't carry media: it goes without, and the files stay staged for the next post. Posts need text, so Enter with only a file staged does nothing but say so.
+`/attach` checks each file, asks for its alt text and stages it. `/new` → **Image post** or **Video post** does the same from a path, then opens a `post ›` prompt. Staged files show above the composer (`📎 chart.png · photo.jpg`) and go on the first post of the next batch, wherever it's going. The exception is a quote, which can't carry media: it goes without, and the files stay staged for the next post. Posts need text, so Enter with only a file staged sends nothing and says so.
 
 A post can have up to 4 JPEG, PNG, GIF or WebP images of 1 MB each, or one MP4 video of up to 100 MB, never both. These limits come from the `@atproto/api` lexicons, so they rise when it does. Paths are stored in full, but the file must still be there when a draft or scheduled post goes out.
 
@@ -137,16 +137,19 @@ The REPL never exits on an error.
 
 | Key | Action |
 |---|---|
-| Enter | Submit |
-| Shift+Enter, Alt+Enter, Ctrl+J | Newline |
-| `\` then Enter, at the end of a line | Newline (the `\` is removed) |
-| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've submitted this session, keeping your draft |
+| Enter | Submit. The line stays in the scrollback after its prompt; on an empty composer, just the prompt |
+| Ctrl+J | Newline |
+| `\` then Enter, at the end of a line | Newline (the `\` is removed). Works in every terminal |
+| Shift+Enter, Alt+Enter | Newline, where the terminal sends them apart from Enter (see below) |
+| ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've submitted this session, keeping your draft. Run a line from there and your draft comes back |
 | Ctrl+A / Ctrl+E, Home / End | Line start / end |
 | Alt+←/→ (Alt+B/F) | Word left / right |
 | Ctrl+W, Ctrl+U | Delete word, delete to line start |
 | Backspace, Delete | Delete one character |
-| Tab | Complete command names, then long flags, `/attach` paths (`~/` works, and spaces are escaped for you) and recent labels after commands that take a `<ref>`. Inside an open quote it does nothing |
+| Tab | Complete command names, then long flags, `/attach` paths (`~/` works, and spaces are escaped for you) and recent labels after commands that take a `<ref>`. It offers the 8 most recent labels, your own posts first, each newest first, and says how many more there are (`… 2 more`); type more of a label to narrow them. Inside an open quote it does nothing |
 | Ctrl+G | Open the draft in `$EDITOR` (or `vi`); what you save comes back to the composer. Use a waiting form for a GUI editor (`code --wait`). If the editor fails, your text stays as it was. Nothing is sent until it closes |
+
+Each line you submit stays in the scrollback, as in Node's REPL: `thread (2) › next`. A login shows as `/login …` or `/run login …`, so its password stays out of the scrollback. While what you submitted is being handled (a command, or a post waiting on its preview or a question), the composer shows only its prompt, dimmed. Text you type meanwhile still counts, and shows once it's done. Esc, Ctrl+C, Ctrl+D, ↑, ↓ and Ctrl+G just say it's still working, but an open preview or question takes its keys as usual.
 
 Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
 
@@ -164,8 +167,12 @@ Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
 
 Pasted text is inserted with its newlines; escape sequences and other control characters are dropped. In terminals with bracketed paste (almost all of them), a paste never submits. Without it, a one-line paste that ends in a newline submits, as it would in a shell.
 
-!!! note "Shift+Enter"
-    Shift+Enter needs a terminal that speaks the kitty keyboard protocol, such as iTerm2, Ghostty, kitty or WezTerm (with `enable_kitty_keyboard = true` in its config). Elsewhere the REPL says so once at start; use Alt+Enter or Ctrl+J instead. In macOS Terminal.app, Alt+Enter needs **Use Option as Meta key** (Settings → Profiles → Keyboard).
+!!! note "New lines"
+    A `\` at the end of the line, then Enter, makes a new line in every terminal.
+
+    - **Shift+Enter** needs a terminal that speaks the kitty keyboard protocol, such as Ghostty, kitty, or WezTerm with `enable_kitty_keyboard = true` in its config. Elsewhere the REPL says so once at start. By default, macOS Terminal.app sends a plain Enter for Shift+Enter and Option+Enter, so both submit.
+    - **Ctrl+J** works without setup in most terminals. VS Code on Windows and Linux takes it to show or hide its panel, so use the `\` there.
+    - **Alt+Enter** on macOS needs Option to act as Meta: **Use Option as Meta key** in Terminal.app (Settings → Profiles → Keyboard), or Option set to Esc+ in iTerm2. Windows Terminal and WezTerm use Alt+Enter for fullscreen by default.
 
 ## Character ring
 
@@ -210,7 +217,7 @@ Enter on `+ new` starts afresh, as does Esc; Ctrl+C quits. A session open in ano
 
 `Edit` is selected first, because an unsent post can be one that was sending when the terminal closed, which may already have gone: check before choosing `Send`. `Send` starts its undo window again. `Edit` or Esc puts it back in the composer, or saves it as a draft if there's text there already or its media won't fit. If its thread couldn't be found, the question says so, and `Send` then asks whether to start a new thread, which is selected first, or paste a link to a post to continue from. The post has to still be there, and Esc or an empty link counts as `Edit`. Once you've answered, the rest of that thread's unsent posts that you send follow it, without asking again.
 
-A session opens under the profile it was started with, whatever `-p` you give, and is refused if that profile is logged in to another account. Text you were typing is saved after a second's pause. Sessions are kept in `repl/sessions/` in the [config folder](configuration.md), readable only by you, with no tokens in them. Empty sessions aren't kept. When a REPL exits, sessions beyond the newest `keep-sessions` (50 by default) are removed, unless they have unsent posts or can't be read. `-R` saves nothing and leaves the resume hint out of the exit summary. Unless you also use `-r`, it skips the list; a session you resume keeps saving, so your answers aren't asked again.
+A session opens under the profile it was started with, whatever `-p` you give, and is refused if that profile is logged in to another account. Text you were typing is saved after a second's pause, unless it's a login. Sessions are kept in `repl/sessions/` in the [config folder](configuration.md), readable only by you, with no tokens in them. Empty sessions aren't kept. When a REPL exits, sessions beyond the newest `keep-sessions` (50 by default) are removed, unless they have unsent posts or can't be read. `-R` saves nothing and leaves the resume hint out of the exit summary. Unless you also use `-r`, it skips the list; a session you resume keeps saving, so your answers aren't asked again.
 
 ## Options
 

@@ -105,9 +105,23 @@ describe("complete", () => {
     expect(tab("/reply A").text).toBe("/reply A1 ");
     expect(tab("/delete #").candidates).toEqual(["#7", "#6"]);
   });
-  it("offers eight at most", () => {
+  it("offers eight at most, and counts the rest", () => {
     const labels = () => Array.from({ length: 12 }, (_, i) => `#${i + 10}`);
-    expect(tab("/like #", { ...sources, labels }).candidates).toHaveLength(8);
+    expect(tab("/like #", { ...sources, labels })).toMatchObject({
+      candidates: ["#10", "#11", "#12", "#13", "#14", "#15", "#16", "#17"],
+      more: 4,
+    });
+    expect(tab("/like ").more).toBeUndefined();
+  });
+  it.each([
+    [8, undefined],
+    [9, 1],
+  ])("offers eight of %i labels, and counts any left out", (n, more) => {
+    // #1 to #9: no prefix beyond # for Tab to fill in.
+    const labels = () => Array.from({ length: n }, (_, i) => `#${i + 1}`);
+    const offered = tab("/like #", { ...sources, labels });
+    expect(offered.candidates).toHaveLength(8);
+    expect(offered.more).toBe(more);
   });
   it("leaves the words of a post alone", () => {
     for (const text of ["/reply 3 A", "/post A", "hello w", "/nope x"]) expect(tab(text).text).toBe(text);

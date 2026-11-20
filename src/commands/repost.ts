@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import { getClient, isJson } from "@/index";
 import { outputJson } from "@/lib/format";
+import { deleteRecords } from "@/commands/delete";
 
 type Client = Awaited<ReturnType<typeof getClient>>;
 
@@ -53,23 +54,7 @@ export function registerRemoveRepost(program: Command): void {
     .argument("<uri...>", "Repost URI(s) to remove")
     .action(async (uris: string[]) => {
       const agent = await getClient(program);
-
-      for (const uri of uris) {
-        const atUri = uri.startsWith("at://") ? uri : `at://did:plc:${uri}`;
-        const parts = atUri.split("/");
-        if (parts.length < 3) {
-          console.error(`Invalid URI: ${uri}`);
-          continue;
-        }
-        const rkey = parts[parts.length - 1];
-        const collection = parts[parts.length - 2];
-
-        await agent.com.atproto.repo.deleteRecord({
-          repo: agent.session!.did,
-          collection,
-          rkey,
-        });
-      }
+      await deleteRecords(agent, uris, "remove-repost", "app.bsky.feed.repost", "repost");
     });
 }
 

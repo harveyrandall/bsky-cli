@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseDate, parseTime, resolveAmPm, toUtcIso, formatLocalDateTime } from "./date-prompt";
+import type { Interface as ReadlineInterface } from "node:readline/promises";
+import { parseDate, parseTime, resolveAmPm, toUtcIso, formatLocalDateTime, promptDateTime } from "./date-prompt";
 
 describe("parseDate", () => {
   it("refuses a day the month doesn't have", () => {
@@ -115,5 +116,36 @@ describe("formatLocalDateTime", () => {
     // Should contain day, month abbreviation, year, and time
     expect(formatted).toMatch(/\d{1,2}\s\w{3}\s\d{4}/); // e.g. "26 Mar 2026"
     expect(formatted).toMatch(/\d{2}:\d{2}/); // e.g. "15:30"
+  });
+});
+
+describe("promptDateTime", () => {
+  const year = new Date().getFullYear() + 1;
+  const asking = (...answers: string[]) => {
+    const question = vi.fn();
+    for (const answer of answers) question.mockResolvedValueOnce(answer);
+    return { question, rl: { question } as unknown as ReadlineInterface };
+  };
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => errorSpy.mockRestore());
+
+  it.each(["", "y", "yes"])("takes the date on %j", async (answer) => {
+    const { rl } = asking(`15-06-${year}`, "15:30", answer);
+    await expect(promptDateTime(rl)).resolves.toBe(toUtcIso(15, 6, year, 15, 30));
+  });
+
+  it("asks whether to use the date, and says n asks for it again", async () => {
+    const { rl, question } = asking(`15-06-${year}`, "15:30", "");
+    await promptDateTime(rl);
+    expect(question).toHaveBeenLastCalledWith("Use this date and time? (Y/n, n to enter it again) ");
+  });
+
+  it.each(["n", "no", " No "])("asks for the date again on %j", async (answer) => {
+    const { rl, question } = asking(`15-06-${year}`, "15:30", answer, `16-06-${year}`, "16:45", "");
+    await expect(promptDateTime(rl)).resolves.toBe(toUtcIso(16, 6, year, 16, 45));
+    expect(question.mock.calls.filter(([q]) => String(q).startsWith("Date"))).toHaveLength(2);
   });
 });

@@ -174,7 +174,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // `/run post a`, it would change the command Enter runs next.
       const keep = action.text.trim() !== "" && s.history[s.history.length - 1] !== action.text;
       const history = keep ? [...s.history, action.text] : s.history;
-      if (text === action.text) return emptyEditor(history);
+      if (text === action.text) {
+        // A line run from ↑ history brings back the draft ↑ set aside.
+        const draft = s.historyIndex === null ? "" : (s.scratch[s.history.length] ?? "");
+        return { ...emptyEditor(history), text: draft, cursor: draft.length };
+      }
       const sent = text.startsWith(action.text) ? action.text.length : 0;
       return { ...s, text: text.slice(sent), cursor: Math.max(0, s.cursor - sent), history, historyIndex: null, scratch: [] };
     }

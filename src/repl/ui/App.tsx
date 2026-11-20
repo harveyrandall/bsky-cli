@@ -6,6 +6,7 @@ import type { ReplSessionFile } from "@/repl/core/persist";
 import { chips, parseDroppedPaths, type StagedMedia, pathMatches } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
+import { echoLine, isLogin } from "@/repl/core/echo";
 import { copyText, openUrl } from "@/lib/desktop";
 import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings, type SubmitOutcome } from "@/repl/core/repl";
@@ -17,7 +18,7 @@ import { Choice, Countdown, ExitPrompt, SplitPreview, TextPrompt, YesNo, type Ex
 
 export const HEADER = "bsky repl · /help for commands · Ctrl+D to exit";
 export const KITTY_HINT =
-  "This terminal can't tell Shift+Enter from Enter — use Alt+Enter or Ctrl+J for new lines.";
+  "This terminal can't tell Shift+Enter from Enter: for a new line, end the line with \\ and press Enter, or press Ctrl+J.";
 
 /** What waitUntilExit resolves with when the user leaves, rather than Ink stopping. */
 export const LEFT = Symbol("left");
@@ -171,13 +172,17 @@ export function App(props: AppProps) {
     );
   };
   changed.current = save;
-  // Typing is saved once it pauses. A submit, a paste or text coming back is saved at
-  // once, so a post is never in the file for long as both text and queued.
+  // Typing is saved once it pauses. A submit, a paste, a step through ↑ history or text
+  // coming back is saved at once, so a post is never in the file for long as both text and
+  // queued. A login is saved as an empty composer, as it may hold a password.
   const typing = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onEditor = (state: EditorState) => {
-    const jumped = state.text === "" || Math.abs(state.text.length - composer.current.text.length) > 1;
+    const jumped =
+      state.text === "" ||
+      Math.abs(state.text.length - composer.current.text.length) > 1 ||
+      state.historyIndex !== composer.current.historyIndex;
     composer.current = state;
-    props.keeper?.track(state);
+    props.keeper?.track(isLogin(state.text) ? { ...state, text: "", cursor: 0 } : state);
     clearTimeout(typing.current);
     if (jumped) save();
     else typing.current = setTimeout(save, 1000);
@@ -407,6 +412,8 @@ export function App(props: AppProps) {
         restore={restore}
         onEditor={onEditor}
         initial={startingDraft}
+        // Read before dispatch, which can change the prompt.
+        onEcho={(text) => print(echoLine(repl.prompt(), text))}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl, passthrough })}
         onEscape={(text) => {
           setExitWhenSent(false);

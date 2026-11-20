@@ -17,6 +17,11 @@ vi.mock("@/drafts", () => ({
   listDrafts: async () => [],
 }));
 
+const answer = vi.hoisted(() => ({ value: "" }));
+vi.mock("node:readline/promises", () => ({
+  createInterface: () => ({ question: async () => answer.value, close() {} }),
+}));
+
 // Mock node:fs/promises for file read operations
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
@@ -549,6 +554,36 @@ describe("post --draft", () => {
     expect(mockAgent.com.atproto.repo.getRecord).not.toHaveBeenCalled();
 
     consoleSpy.mockRestore();
+  });
+
+  it("saves nothing when Ctrl+C's \"Save as draft?\" is answered no", async () => {
+    const tty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const others = process.listeners("SIGINT");
+    answer.value = "no";
+    mockAgent.post.mockImplementationOnce(async () => {
+      const trap = process.listeners("SIGINT").find((l) => !others.includes(l));
+      (trap as () => void)();
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+      return { uri: "at://did:plc:test123/app.bsky.feed.post/abc", cid: "c" };
+    });
+    try {
+      const program = new Command().option("-p, --profile <name>");
+      registerPost(program);
+      await program.parseAsync(["node", "test", "post", "Hello"]);
+      expect(mockSaveDraft).not.toHaveBeenCalled();
+    } finally {
+      for (const l of process.listeners("SIGINT")) if (!others.includes(l)) process.removeListener("SIGINT", l);
+      answer.value = "";
+      if (tty) Object.defineProperty(process.stdin, "isTTY", tty);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+      exit.mockRestore();
+      err.mockRestore();
+      log.mockRestore();
+    }
   });
 });
 
