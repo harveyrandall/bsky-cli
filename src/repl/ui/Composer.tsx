@@ -82,6 +82,8 @@ export interface ComposerProps {
   initial?: EditorState;
   /** What Tab offers beyond the REPL's own command names. */
   completions: Completions;
+  /** What Enter submits, before it runs, to stay in the scrollback. */
+  onEcho(text: string): void;
   onSubmit(text: string): Promise<SubmitOutcome>;
   onEscape(text: string): EscapeResult;
   onInterrupt(text: string): ReturnType<Repl["interrupt"]>;
@@ -127,21 +129,25 @@ export function Composer(props: ComposerProps) {
 
   const submitting = useRef(false);
   const submit = async (text: string) => {
-    if (text.trim() === "") {
-      if (chips) props.onHint("Type some text to go with it: posts need text");
+    if (submitting.current) {
+      if (text.trim() !== "") props.onHint(STILL_WORKING);
       return;
     }
-    if (submitting.current) {
-      props.onHint(STILL_WORKING);
+    props.onEcho(text);
+    if (text.trim() === "") {
+      if (chips) props.onHint("Type some text to go with it: posts need text");
+      if (text !== "") apply({ type: "submitted", text });
       return;
     }
     submitting.current = true;
+    rerender();
     try {
       outcome(text, await props.onSubmit(text));
     } catch (err) {
       report(err);
     } finally {
       submitting.current = false;
+      rerender();
     }
   };
 
@@ -217,6 +223,8 @@ export function Composer(props: ComposerProps) {
       </Text>
     );
   }
+  // The text is in the scrollback while it runs. Keys typed meanwhile still count.
+  if (submitting.current) return <Text dimColor>{prompt}</Text>;
 
   const { text, cursor } = editor.current;
   // One cell stays free at the end of each row for the cursor.

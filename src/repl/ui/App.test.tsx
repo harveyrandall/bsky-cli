@@ -50,6 +50,7 @@ writeFileSync(notes, "plain text");
 const paste = (text: string) => `\x1b[200~${text}\x1b[201~`;
 const RIGHT = "\x1b[C";
 
+const PROMPT = /^(?:bsky|thread|post|reply|quote|scheduled|draft)\b[^›\n]*›/;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 // Many of these give Ink a fixed time to draw, which a busy machine can miss.
 const drawn = { retry: 2 };
@@ -106,16 +107,21 @@ function setup(o: { settings?: Partial<ReplSettings>; keeper?: AppProps["keeper"
   const lastFrame = () => stripVTControlCharacters(app.lastFrame() ?? "");
   // For a frame that follows a chain of promises, which a fixed tick can miss on a busy machine.
   const shows = (text: string) => vi.waitFor(() => expect(lastFrame()).toContain(text));
-  return { ...app, lastFrame, shows, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, saveScheduled, repl: () => session! };
+  // The live composer, from its prompt line down: the scrollback above echoes what was submitted.
+  const composer = () => {
+    const lines = lastFrame().split("\n");
+    return lines.slice(lines.reduce((last, line, i) => (PROMPT.test(line) ? i : last), 0)).join("\n");
+  };
+  return { ...app, lastFrame, composer, shows, rawFrame: () => app.lastFrame() ?? "", type, agent, drafts, saveConfig, saveScheduled, repl: () => session! };
 }
 
 describe("App", drawn, () => {
   it("keeps plain text with a hint on Enter", async () => {
-    const { type, lastFrame } = setup();
+    const { type, lastFrame, composer } = setup();
     await type("hello", "\r");
     // The hint wraps at the test terminal's 100 columns.
     expect(lastFrame().replace(/\n/g, " ")).toContain(IDLE_HINT);
-    expect(lastFrame()).toContain("bsky › hello");
+    expect(composer()).toContain("bsky › hello");
   });
   it("Ctrl+C in the same chunk as typed text still clears it", async () => {
     const { type, lastFrame } = setup();
@@ -145,13 +151,13 @@ describe("App", drawn, () => {
     expect(lastFrame()).toContain("bsky › abc");
   });
   it("keeps keys typed right after Enter and records what ran", async () => {
-    const { type, lastFrame } = setup();
+    const { type, lastFrame, composer } = setup();
     await type("/help");
     await type("\r\x1b[Dx");
     expect(lastFrame()).toContain("Leave the REPL");
-    expect(lastFrame()).toContain("bsky › /helxp");
+    expect(composer()).toContain("bsky › /helxp");
     await type("\x1b[A");
-    expect(lastFrame()).toMatch(/^bsky › \/help\s*$/m);
+    expect(composer()).toMatch(/^bsky › \/help\s*$/m);
   });
   it("ignores a second Enter while a submit is running", async () => {
     const { type, lastFrame } = setup();
@@ -200,16 +206,16 @@ describe("App", drawn, () => {
     expect(exit).toHaveBeenCalledOnce();
   });
   it("runs /help and clears the composer", async () => {
-    const { type, lastFrame } = setup();
+    const { type, lastFrame, composer } = setup();
     await type("/help", "\r");
     expect(lastFrame()).toContain("/exit");
-    expect(lastFrame()).not.toContain("bsky › /help");
+    expect(composer()).not.toContain("/help");
   });
   it("suggests a command and keeps the text", async () => {
-    const { type, lastFrame } = setup();
+    const { type, lastFrame, composer } = setup();
     await type("/hlp", "\r");
     expect(lastFrame()).toContain("Unknown /hlp. Did you mean /help?");
-    expect(lastFrame()).toContain("bsky › /hlp");
+    expect(composer()).toContain("bsky › /hlp");
   });
   it.each([
     ["Shift+Enter (kitty)", ["a", "\x1b[13;2u", "b"]],
@@ -253,6 +259,89 @@ describe("App", drawn, () => {
   });
 });
 
+describe("App scrollback", drawn, () => {
+  const cli = (name: string, run: NonNullable<AppProps["passthrough"]>["run"]) => ({
+    names: () => [name],
+    knows: (n: string) => n === name,
+    flags: () => [],
+    uriArguments: () => new Set<number>(),
+    run,
+  });
+  const bare = (frame: string) => frame.split("\n").filter((line) => /^bsky ›\s*$/.test(line)).length;
+  it("keeps what you submit above what it prints, and empties the composer", async () => {
+    const { type, lastFrame, composer } = setup();
+    await type("/help", "\r");
+    const frame = lastFrame();
+    expect(frame).toContain("bsky › /help");
+    expect(frame.indexOf("bsky › /help")).toBeLessThan(frame.indexOf("Leave the REPL"));
+    expect(composer()).not.toContain("/help");
+  });
+  it("echoes each line after the prompt it was typed at", async () => {
+    const { type, lastFrame } = setup();
+    await type("/thread", "\r", "first post", "\r");
+    await tick();
+    await type("next", "\r");
+    await tick();
+    await type("/reply 2", "\r", "thanks", "\r");
+    await tick();
+    const lines = lastFrame().split("\n");
+    const order = ["bsky › /thread", "thread › first post", "(1) 3lbx7kt5defba", "thread (1) › next", "thread (2) › /reply 2", "reply→2 › thanks"].map(
+      (start) => lines.findIndex((line) => line.startsWith(start)),
+    );
+    expect(order).not.toContain(-1);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+  it("echoes a lettered thread's prompt", async () => {
+    const { type, lastFrame } = setup({ settings: { prefixThread: true } });
+    await type("/thread", "\r", "one", "\r");
+    await tick();
+    await type("two", "\r");
+    await tick();
+    expect(lastFrame()).toContain("thread A (A1) › two");
+  });
+  it("leaves the bare prompt for Enter on nothing, and empties the composer", async () => {
+    const keeper = { track: vi.fn(), save: vi.fn(async () => {}) };
+    const { type, lastFrame } = setup({ keeper });
+    await type("\r");
+    expect(bare(lastFrame())).toBe(2);
+    await type("   ", "\r");
+    expect(bare(lastFrame())).toBe(3);
+    expect(keeper.track).toHaveBeenLastCalledWith(expect.objectContaining({ text: "" }));
+  });
+  it("leaves out what follows a login", async () => {
+    const { type, lastFrame } = setup({ passthrough: cli("login", vi.fn(async () => "clear" as const)) });
+    await type("/login me hunter2", "\r");
+    await tick();
+    await type("/run login me hunter2", "\r");
+    await tick();
+    expect(lastFrame()).toContain("bsky › /login …");
+    expect(lastFrame()).toContain("bsky › /run login …");
+    expect(lastFrame()).not.toContain("hunter2");
+  });
+  it("doesn't echo Enter in the undo window, which only sends the post now", async () => {
+    const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });
+    await type("/post hello", "\r");
+    await type("\r");
+    await tick();
+    expect(agent.post).toHaveBeenCalledOnce();
+    expect(lastFrame().split("bsky › /post hello")).toHaveLength(2);
+    expect(bare(lastFrame())).toBe(1);
+  });
+  it("shows a running command's text once, in the scrollback, and only the prompt below", async () => {
+    let finish = (_: "done") => {};
+    const run = vi.fn(() => new Promise<"done">((resolve) => (finish = resolve)));
+    const { type, lastFrame, composer } = setup({ passthrough: cli("timeline", run) });
+    await type("/timeline -n 3", "\r");
+    await tick();
+    expect(lastFrame().split("/timeline -n 3")).toHaveLength(2);
+    expect(composer()).toMatch(/^bsky ›\s*$/);
+    finish("done");
+    await tick();
+    expect(lastFrame().split("/timeline -n 3")).toHaveLength(2);
+    expect(composer()).toMatch(/^bsky ›\s*\n○ 0\/300/);
+  });
+});
+
 describe("App threads", drawn, () => {
   it("writes a thread end to end through the keyboard", async () => {
     const { type, lastFrame, agent } = setup();
@@ -275,24 +364,25 @@ describe("App threads", drawn, () => {
     expect(agent.post).toHaveBeenCalledTimes(2);
   });
   it("puts the text back when the preview is declined", async () => {
-    const { type, lastFrame, agent } = setup();
+    const { type, lastFrame, composer, agent } = setup();
     await type("/thread", "\r", "a /// b", "\r", "\r");
     expect(lastFrame()).not.toContain("[y/N]");
-    expect(lastFrame()).toContain("thread › a /// b");
+    expect(composer()).toContain("thread › a /// b");
     expect(agent.post).not.toHaveBeenCalled();
   });
   it("counts down the undo window and cancels on Esc, text back in the composer", async () => {
-    const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });
+    const { type, lastFrame, composer, agent } = setup({ settings: { undo: 5 } });
     await type("/post hello", "\r");
     expect(lastFrame()).toContain("Sending in 5s… [Esc] cancel  [Enter] send now");
     // The waiting post shows, read-only, in place of the composer.
-    expect(lastFrame()).toMatch(/^bsky › hello\s*$/m);
+    expect(composer()).toMatch(/^bsky › hello\s*$/m);
     await type("more");
     expect(lastFrame()).not.toContain("more");
     await type("\x1b");
     await tick();
     expect(lastFrame()).not.toContain("Sending in");
-    expect(lastFrame()).toContain("bsky › /post hello");
+    expect(lastFrame()).toContain("Not sent: back in the composer");
+    expect(composer()).toContain("bsky › /post hello");
     expect(agent.post).not.toHaveBeenCalled();
   });
   it("asks for undo and pace on the first thread, then saves them on Yes", async () => {
@@ -460,13 +550,13 @@ describe("App threads", drawn, () => {
     expect(limited.lastFrame()).toContain("Paused: rate limited — /retry");
   });
   it("stays if a post comes back while it's sending everything to leave", async () => {
-    const { type, lastFrame, agent } = setup({ settings: { undo: 5 } });
+    const { type, composer, agent } = setup({ settings: { undo: 5 } });
     agent.post.mockRejectedValueOnce(Object.assign(new Error("Invalid record"), { status: 400 }));
     await type("/post bad", "\r", "\x04", "s");
     await tick();
     await tick();
     expect(exit).not.toHaveBeenCalled();
-    expect(lastFrame()).toContain("bsky › /post bad");
+    expect(composer()).toContain("bsky › /post bad");
   });
 });
 
@@ -587,8 +677,8 @@ describe("App media", drawn, () => {
     expect(s.lastFrame()).toContain("📎 chart.png · photo.png");
     await s.type("/detach 1", "\r");
     await tick();
-    expect(s.lastFrame()).toContain("📎 photo.png");
-    expect(s.lastFrame()).not.toContain("chart.png");
+    expect(s.lastFrame()).toMatch(/^📎 photo\.png\s*$/m);
+    expect(s.lastFrame()).not.toContain("📎 chart.png");
   });
   it("treats a path that isn't media as text", async () => {
     const { type, lastFrame } = setup();
@@ -628,12 +718,12 @@ describe("App media", drawn, () => {
     expect(lastFrame()).toContain("bsky › draft edited");
   });
   it("does the same with /edit", async () => {
-    const { type, lastFrame } = setup();
+    const { type, composer } = setup();
     await type("/edit draft", "\r");
     await tick();
     expect(suspended.during).toEqual([true]);
-    expect(lastFrame()).toContain("bsky › draft edited");
-    expect(lastFrame()).not.toContain("/edit");
+    expect(composer()).toContain("bsky › draft edited");
+    expect(composer()).not.toContain("/edit");
   });
   it("holds back what happens while $EDITOR is open, and keeps a post that comes back", async () => {
     let closeEditor = (_: string) => {};
@@ -917,10 +1007,10 @@ describe("App running CLI commands", drawn, () => {
     expect(vi.mocked(run).mock.calls.map(([argv]) => argv)).toEqual([["thread", read.uri], ["timeline", "#1"]]);
   });
   it("keeps the text of one that fails", async () => {
-    const { type, lastFrame } = typing({ run: vi.fn(async () => "keep" as const) });
+    const { type, composer } = typing({ run: vi.fn(async () => "keep" as const) });
     await type("/timeline --nope", "\r");
     await tick();
-    expect(lastFrame()).toContain("/timeline --nope");
+    expect(composer()).toContain("/timeline --nope");
   });
   it("completes a CLI command and its flags with Tab", async () => {
     const { type, shows } = typing();

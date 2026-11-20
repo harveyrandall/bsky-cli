@@ -6,6 +6,7 @@ import type { ReplSessionFile } from "@/repl/core/persist";
 import { chips, parseDroppedPaths, type StagedMedia, pathMatches } from "@/repl/core/media";
 import type { LineStyle } from "@/repl/core/commands";
 import { dispatch } from "@/repl/core/dispatch";
+import { echoLine } from "@/repl/core/echo";
 import { copyText, openUrl } from "@/lib/desktop";
 import { editInEditor } from "@/lib/editor";
 import { Repl, type ReplAgent, type ReplDeps, type ReplSettings, type SubmitOutcome } from "@/repl/core/repl";
@@ -407,6 +408,8 @@ export function App(props: AppProps) {
         restore={restore}
         onEditor={onEditor}
         initial={startingDraft}
+        // Read before dispatch, which can change the prompt.
+        onEcho={(text) => print(echoLine(repl.prompt(), text))}
         onSubmit={(text) => dispatch(text, { print, exit: () => requestExit(""), edit, repl, passthrough })}
         onEscape={(text) => {
           setExitWhenSent(false);

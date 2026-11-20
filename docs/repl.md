@@ -94,7 +94,7 @@ One post within the limit (300, or 298 with the thread label), with no markers, 
 
 ## Undo window and pacing
 
-- **Undo window:** what you submit waits this long before its first post is sent. Meanwhile the composer shows it dimmed and read-only, with `Sending in 7s… [Esc] cancel  [Enter] send now`. Esc returns it, with any media, to the composer as you typed it, or saves it as a draft if the composer already had text.
+- **Undo window:** what you submit waits this long before its first post is sent. Meanwhile the composer shows it dimmed and read-only, with `Sending in 7s… [Esc] cancel  [Enter] send now`. Esc returns it, with any media, to the composer as you typed it and says `Not sent: back in the composer`, or saves it as a draft if the composer already had text.
 - **Pace:** the minimum time between posts, so a thread doesn't arrive all at once.
 
 Each is none, 5, 10 or 15 seconds. If you haven't set them (`--undo`, `--pace` or the config file), the first thread of a session asks for each, then offers to save your answers: `Yes`, `No`, or `No, don't ask again`.
@@ -105,7 +105,7 @@ With `--thread-label` (or `thread-label = true`), every post in the active threa
 
 ## Media
 
-`/attach` checks each file, asks for its alt text and stages it. `/new` → **Image post** or **Video post** does the same from a path, then opens a `post ›` prompt. Staged files show above the composer (`📎 chart.png · photo.jpg`) and go on the first post of the next batch, wherever it's going. The exception is a quote, which can't carry media: it goes without, and the files stay staged for the next post. Posts need text, so Enter with only a file staged does nothing but say so.
+`/attach` checks each file, asks for its alt text and stages it. `/new` → **Image post** or **Video post** does the same from a path, then opens a `post ›` prompt. Staged files show above the composer (`📎 chart.png · photo.jpg`) and go on the first post of the next batch, wherever it's going. The exception is a quote, which can't carry media: it goes without, and the files stay staged for the next post. Posts need text, so Enter with only a file staged sends nothing and says so.
 
 A post can have up to 4 JPEG, PNG, GIF or WebP images of 1 MB each, or one MP4 video of up to 100 MB, never both. These limits come from the `@atproto/api` lexicons, so they rise when it does. Paths are stored in full, but the file must still be there when a draft or scheduled post goes out.
 
@@ -137,7 +137,7 @@ The REPL never exits on an error.
 
 | Key | Action |
 |---|---|
-| Enter | Submit |
+| Enter | Submit. The line stays in the scrollback after its prompt; on an empty composer, just the prompt |
 | Shift+Enter, Alt+Enter, Ctrl+J | Newline |
 | `\` then Enter, at the end of a line | Newline (the `\` is removed) |
 | ←/→, ↑/↓ | Move; ↑ on the first line / ↓ on the last steps through what you've submitted this session, keeping your draft |
@@ -147,6 +147,8 @@ The REPL never exits on an error.
 | Backspace, Delete | Delete one character |
 | Tab | Complete command names, then long flags, `/attach` paths (`~/` works, and spaces are escaped for you) and recent labels after commands that take a `<ref>`. Inside an open quote it does nothing |
 | Ctrl+G | Open the draft in `$EDITOR` (or `vi`); what you save comes back to the composer. Use a waiting form for a GUI editor (`code --wait`). If the editor fails, your text stays as it was. Nothing is sent until it closes |
+
+Each line you submit stays in the scrollback, as in Node's REPL: `thread (2) › next`. A login shows as `/login …` or `/run login …`, so its password stays out of the scrollback. While a command runs, the composer shows only its prompt, dimmed. Keys you type meanwhile still count, and show once it's done.
 
 Esc, Ctrl+C and Ctrl+D act on the innermost thing they can:
 

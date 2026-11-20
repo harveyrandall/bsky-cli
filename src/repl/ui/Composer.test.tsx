@@ -15,6 +15,7 @@ function setup(overrides: Partial<ComposerProps> = {}) {
     prompt: "bsky ›",
     limit: 300,
     onSubmit: vi.fn(async () => "done" as const),
+    onEcho: vi.fn(),
     onEscape: vi.fn(() => "unhandled" as const),
     onInterrupt: vi.fn((text: string) => (text ? ("clear" as const) : ("hint" as const))),
     onEof: vi.fn(),
@@ -60,6 +61,7 @@ describe("Composer", () => {
     const { type, props } = setup({ chips: "📎 chart.png" });
     await type("\r");
     expect(props.onHint).toHaveBeenCalledWith("Type some text to go with it: posts need text");
+    expect(props.onEcho).toHaveBeenCalledWith("");
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
   it("offers a paste into an empty composer, and inserts it if it isn't taken", async () => {
@@ -100,6 +102,7 @@ describe("Composer", () => {
     await type("x", "\r");
     expect(lastFrame()).not.toContain("x");
     expect(props.onSendNow).toHaveBeenCalledOnce();
+    expect(props.onEcho).not.toHaveBeenCalled();
   });
   it("replaces the text when asked to restore it", async () => {
     const { rerender, props, lastFrame } = setup();
@@ -140,6 +143,53 @@ describe("Composer", () => {
     const { type, lastFrame } = setup();
     await type(`\x1b[200~${"a".repeat(270)}\x1b[201~`);
     expect(lastFrame()).toContain("\x1b[33m◕ 270/300");
+  });
+});
+
+describe("Enter", () => {
+  it("echoes the text before running it", async () => {
+    const order: string[] = [];
+    const { type } = setup({
+      onEcho: (text) => void order.push(`echo ${text}`),
+      onSubmit: async (text) => {
+        order.push(`run ${text}`);
+        return "done";
+      },
+    });
+    await type("/help", "\r");
+    expect(order).toEqual(["echo /help", "run /help"]);
+  });
+  it("echoes a blank line and empties the composer, without running it", async () => {
+    const { type, props } = setup();
+    await type("  ", "\r");
+    expect(props.onEcho).toHaveBeenCalledWith("  ");
+    expect(props.onEditor).toHaveBeenLastCalledWith(expect.objectContaining({ text: "" }));
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(props.onHint).not.toHaveBeenCalled();
+  });
+  it("shows only the prompt, dimmed, while the text runs, and doesn't echo Enter then", async () => {
+    let finish = (_: "done") => {};
+    const { type, props, lastFrame } = setup({ onSubmit: () => new Promise((resolve) => (finish = resolve)) });
+    await type("/timeline", "\r");
+    expect(lastFrame()).not.toContain("/timeline");
+    expect(lastFrame()).toContain("\x1b[2mbsky ›");
+    await type("\r");
+    expect(props.onHint).toHaveBeenLastCalledWith("Still working — wait for it to finish.");
+    vi.mocked(props.onHint).mockClear();
+    await type("\x03", "\r");
+    expect(props.onHint).not.toHaveBeenCalled();
+    expect(props.onEcho).toHaveBeenCalledOnce();
+    finish("done");
+    await tick();
+    expect(lastFrame()).toContain("bsky › \x1b[7m \x1b[27m");
+  });
+  it("shows the text again when it comes back", async () => {
+    let finish = (_: "keep") => {};
+    const { type, lastFrame } = setup({ onSubmit: () => new Promise((resolve) => (finish = resolve)) });
+    await type("/hlp", "\r");
+    finish("keep");
+    await tick();
+    expect(lastFrame()).toContain("bsky › /hlp");
   });
 });
 

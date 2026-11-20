@@ -283,9 +283,10 @@ describe("puts text back", () => {
     expect(repl.staged()).toEqual([]);
   });
   it("as what you typed when pending posts are cancelled with an empty composer", async () => {
-    const { repl } = setup({ undo: 5 });
+    const { repl, printed } = setup({ undo: 5 });
     await repl.post("waiting");
     expect(repl.escape("")).toEqual({ restore: "/post waiting" });
+    expect(printed()).toContain("Not sent: back in the composer");
   });
   it("saves cancelled posts as a draft when the composer has text", async () => {
     const { repl, deps, flush, printed } = setup({ undo: 5 });
