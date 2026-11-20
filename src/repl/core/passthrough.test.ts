@@ -61,6 +61,14 @@ describe("runPassthrough", () => {
     expect(process.stdout.write).toBe(write);
     expect(console.log).toBe(log);
   });
+  it("names an error that has no message, rather than showing a blank line", async () => {
+    const { lines, io, p } = setup();
+    p.command("blank").action(async () => {
+      throw new TypeError("");
+    });
+    await runPassthrough(p, ["blank"], io);
+    expect(lines).toEqual(["TypeError"]);
+  });
   it("reports a mistake in the command's own arguments", async () => {
     const { lines, io, p } = setup();
     await runPassthrough(p, ["hello", "--nope"], io);

@@ -189,7 +189,7 @@ export async function runPassthrough(
     await output.run(sink, () => program.parseAsync(args, { from: "user" }));
   } catch (err) {
     // Commander has already written its own errors, and a command that exits has said why.
-    if (!(err instanceof Exited || err instanceof CommanderError)) thrown = err instanceof Error ? err.message : String(err);
+    if (!(err instanceof Exited || err instanceof CommanderError)) thrown = err instanceof Error ? err.message || err.name : String(err);
   } finally {
     restore();
     process.exitCode = exitCode;
