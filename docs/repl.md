@@ -55,7 +55,7 @@ Each post is printed as it's sent: `(4) 3lbx7kt5def2v`, with ` ↳ 1` when it re
 
 **Refs** name a post: its number (`4`, or `A4` with `-l`, where a bare `4` means that post in the current or last thread), a `#n` label from something you've read, its record key (in your own repo), an `at://` URI or a `https://bsky.app/profile/…/post/…` link.
 
-A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command. A usage mistake, such as `/like` with no ref or a quote left open, shows its error and goes to ↑ history, as in Node's REPL.
+A name that isn't a command gets a suggestion and your text stays. Anything that starts with `/` and a letter counts, so a mistyped `/Exit` is caught rather than posted, while `/ x` is text. Start with `\/` to post text that begins like a command. A usage mistake, such as `/like` with no ref or a quote left open, shows its error and goes to ↑ history, as in Node's REPL, and so does a CLI command that fails. A ref that isn't found keeps your text so you can fix it, and so does `/edit` when the editor fails.
 
 ## Reading and CLI commands
 

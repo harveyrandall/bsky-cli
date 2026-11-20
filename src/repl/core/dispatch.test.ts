@@ -150,11 +150,11 @@ describe("/open, /copy and /view", () => {
     expect(await dispatch("/view #2", c)).toBe("done");
     expect(run).toHaveBeenCalledWith(["thread", "at://x"]);
   });
-  it("/view with a bad ref goes to ↑ history", async () => {
+  it("/view with a ref that isn't found keeps its text, as /like, /open and /reply do", async () => {
     const run = vi.fn(async (_: string[]) => "done" as const);
     const c = { ...ctx(), passthrough: { names: () => [], knows: () => false, run } };
     c.fake.uriOf.mockResolvedValueOnce(undefined);
-    expect(await dispatch("/view 9", c)).toBe("done");
+    expect(await dispatch("/view 9", c)).toBe("keep");
     expect(run).not.toHaveBeenCalled();
   });
 });
@@ -322,6 +322,12 @@ describe("media commands", () => {
     const c = ctx();
     expect(await dispatch("/edit some text", c)).toEqual({ restore: "some text!" });
     expect(await dispatch("/edit", c)).toEqual({ restore: "!" });
+  });
+  it("/edit keeps its text when the editor fails, as Ctrl+G does", async () => {
+    const c = ctx();
+    c.edit.mockRejectedValueOnce(new Error("vi exited with status 1"));
+    expect(await dispatch("/edit some text", c)).toBe("keep");
+    expect(c.print).toHaveBeenCalledWith("/edit: vi exited with status 1", "error");
   });
 });
 
