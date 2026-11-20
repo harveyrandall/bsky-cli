@@ -125,6 +125,30 @@ describe("unlike command", () => {
     expect(logSpy).not.toHaveBeenCalled();
     logSpy.mockRestore();
   });
+
+  it("refuses anything but a like, so a post's URI doesn't delete the post", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const program = new Command();
+    registerUnlike(program);
+
+    try {
+      await program.parseAsync([
+        "node", "test", "unlike",
+        "at://did:plc:test123/app.bsky.feed.post/456",
+        "at://did:plc:test123/app.bsky.feed.like/789",
+      ]);
+
+      expect(errSpy).toHaveBeenCalledWith("unlike takes a like's URI, not app.bsky.feed.post: at://did:plc:test123/app.bsky.feed.post/456");
+      expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledTimes(1);
+      expect(mockAgent.com.atproto.repo.deleteRecord).toHaveBeenCalledWith(expect.objectContaining({ collection: "app.bsky.feed.like", rkey: "789" }));
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = undefined;
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
 });
 
 describe("likes command", () => {

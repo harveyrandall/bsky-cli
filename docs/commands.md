@@ -136,7 +136,7 @@ bsky create-thread "Text..." --reply-to at://...     # first post replies to URI
 
 ### `bsky delete`
 
-Delete one or more of your posts. It prints the URI of each post it deletes, one per line. `bsky unlike` and `bsky remove-repost` print the like or repost they remove in the same way.
+Delete one or more of your posts. It prints the URI of each post it deletes, one per line. `bsky unlike` and `bsky remove-repost` print the like or repost they remove in the same way. They take the like's or repost's URI, not the post's, and refuse anything else, exiting 1.
 
 ```bash
 bsky delete at://did:plc:abc123/app.bsky.feed.post/xyz
